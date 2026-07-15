@@ -1,0 +1,32 @@
+# Rust build output
+/target/
+
+# Local smoke-test and temporary output
+/tmp/
+/temp/
+*.tmp
+*.temp
+
+# Logs and diagnostics
+*.log
+*.trace
+
+# Local runtime config and private relay material
+/relay.toml
+/default.crt
+/default.key
+*.pem
+*.key
+
+# Editor and OS files
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Local environment files
+.env
+.env.*

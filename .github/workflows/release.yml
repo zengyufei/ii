@@ -1,0 +1,89 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x86_64
+            os: windows-latest
+            artifact: ii-windows-x86_64.zip
+            binary: target/release/ii.exe
+          - name: linux-x86_64
+            os: ubuntu-latest
+            artifact: ii-linux-x86_64.tar.gz
+            binary: target/release/ii
+          - name: macos-aarch64
+            os: macos-latest
+            artifact: ii-macos-aarch64.tar.gz
+            binary: target/release/ii
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Test
+        run: cargo test --locked
+
+      - name: Build release
+        run: cargo build --release --locked
+
+      - name: Package Windows
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force dist | Out-Null
+          Copy-Item "${{ matrix.binary }}" dist/ii.exe
+          Copy-Item ii.md dist/ii.md
+          Copy-Item CHANGELOG.md dist/CHANGELOG.md
+          Compress-Archive -Path dist/* -DestinationPath "${{ matrix.artifact }}"
+
+      - name: Package Unix
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          mkdir -p dist
+          cp "${{ matrix.binary }}" dist/ii
+          cp ii.md dist/ii.md
+          cp CHANGELOG.md dist/CHANGELOG.md
+          tar -czf "${{ matrix.artifact }}" -C dist .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.name }}
+          path: ${{ matrix.artifact }}
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+
+      - name: Publish release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: artifacts/*
+          generate_release_notes: true

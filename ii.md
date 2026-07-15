@@ -1,0 +1,397 @@
+# ii 用户手册
+
+`ii` 是唯一对外品牌和唯一用户入口。用户只需要记 `ii`，不用记 `sendme`、`provide/get`、`iroh-relay`，也不用接触 `hash`、`peer id`、`token` 这些底层词。
+
+## 一句话
+
+`ii send` 发，`ii recv` 收，`ii relay` 管中继，`ii doctor` 查问题，`ii version` 看版本。
+
+## 命令总览
+
+```text
+ii send [<path>] [--name <name>] [-t] [--local] [--relay <url>] [--no-relay]
+ii recv <ticket> [-o <dir>] [--stdout] [--overwrite] [--resume] [--local] [--trace]
+ii relay [--dev] [--config <path>] [--http <port>] [--https <port>] [--quic <port>] [--metrics <port>]
+ii doctor
+ii version
+```
+
+## 核心规则
+
+- 命令要直：`send` 就是发送，`recv` 就是接收。
+- 用户只复制 `ticket`，不手工拼内部地址。
+- 默认先走直连和局域网，必要时再走公网 relay。
+- 需要显式限制路径时，用 `--local`、`--relay`、`--no-relay`。
+- `ii relay` 是运维命令，不是用户日常发文件要记的东西。
+
+## `ii send`
+
+### 用法
+
+```powershell
+ii send .\video.mp4
+```
+
+```powershell
+ii send .\my-folder
+```
+
+```powershell
+tar czf - .\project | ii send --name project.tar.gz
+```
+
+### 行为
+
+- 发送文件或文件夹时，`ii send` 会生成一个 ticket。
+- ticket 打出来后，发送端默认只成功发送一次，完成后自动退出。
+- 如果需要保持运行、允许多个接收端继续取同一个 ticket，用 `-t`。
+- 默认发送路径是自动选择的：先直连，再局域网发现，再公网 relay。
+- 如果直连/局域网能成，就不必碰公网 relay。
+- ticket 是唯一需要传给另一台电脑的值。
+
+### 参数
+
+`<path>`
+: 要发送的文件或文件夹。  
+  如果不提供 `<path>`，且 stdin 不是交互终端，就进入 stdin 模式。
+
+`--name <name>`
+: 指定接收端看到的名字。stdin 模式必须配这个。  
+  例子：
+
+```powershell
+tar czf - .\project | ii send --name project.tar.gz
+```
+
+`-t`
+: 发送完成后不退出，继续保持 ticket 可用，直到用户 `Ctrl+C`。
+
+`--local`
+: 只走局域网优先路径，不走公网发现，不走公网 relay。
+
+`--relay <url>`
+: 强制指定 relay。  
+  如果这里填的是域名，那这个域名必须先解析到 relay 服务器的公网地址，通常由 relay 运维方配置 `A/AAAA` 或 `CNAME`。  
+  客户端只负责使用这个 URL，不负责替你配 DNS。
+
+`--no-relay`
+: 禁用 relay，只允许直连和局域网路径。
+
+### 路径规则
+
+- `--local`、`--relay`、`--no-relay` 互斥。
+- 默认不需要用户选 relay。
+- 如果没有局域网或直连可用，默认会自动退到公网 relay。
+
+## `ii recv`
+
+### 用法
+
+```powershell
+ii recv ii1k7v...x9a
+```
+
+```powershell
+ii recv ii1k7v...x9a -o D:\Downloads
+```
+
+```powershell
+ii recv ii1k7v...x9a --stdout > project.tar.gz
+```
+
+```powershell
+ii recv ii1k7v...x9a --trace
+```
+
+```powershell
+ii recv ii1k7v...x9a --local --trace
+```
+
+### 行为
+
+- `ii recv` 只需要 ticket。
+- 默认把内容写到当前目录。
+- 默认智能处理同名文件：完整重复就跳过，未完成就续传，内容不同就覆盖。
+- 如果 ticket 对应的是文件夹，按目录结构还原。
+- `--stdout` 只适合单文件或流式内容，不适合目录。
+- 文件和 stdin 字节流默认自带断点续传，不需要手工加 `--resume`。
+
+### 参数
+
+`<ticket>`
+: 从发送端复制来的 ticket。
+
+`-o <dir>`
+: 指定保存目录。
+
+`--stdout`
+: 把内容写到标准输出，适合管道和重定向。
+
+`--overwrite`
+: 强制从头覆盖目标路径里已有的同名文件。通常不需要手工使用。
+
+`--resume`
+: 强制按已有文件大小续传。通常不需要手工使用，因为默认会自动判断。
+
+`--local`
+: 只走局域网优先路径，不碰公网 relay。
+
+`--trace`
+: 输出接收过程的分段耗时、地址统计、写入字节数和平均速度，便于排查为什么慢。
+
+### 接收规则
+
+- `--stdout` 和 `--resume` 不同时用。
+- `--local` 只影响路径选择，不影响 ticket 本身。
+- recv 不需要用户知道发送端用了哪条路；它只按 ticket 和可用网络路径工作。
+- 对文件和 stdin 字节流，默认顺序是：目标不存在就下载；目标更短就续传；目标同名同尺寸且 MD5 一致就跳过；同名但内容不同就覆盖。
+- 文件夹继续可传输，重复运行时会重新解包到目标目录；目录不做 MD5 去重。
+- 默认模式下，如果 ticket 同时带 relay 和很多直连地址，`ii recv` 会先给完整地址集一个短直连窗口；短时间内连不上就切到 relay-only，避免不可达的私网/VPN 地址把建连拖到十几秒。
+- 排查慢的时候，先跑一次默认模式，再跑一次 `--local` 对比；如果 `--local` 明显快，问题通常在公网发现或 relay 路径，不在本地写盘。
+
+## ticket
+
+ticket 是用户层唯一交换物，格式以 `ii` 开头。
+
+```text
+ii1k7v...x9a
+```
+
+ticket 里可以带足够完成连接、恢复传输和重复文件判定的最小信息，但用户不直接操作这些底层字段。
+
+用户层只认：
+
+- 复制 ticket
+- 贴到另一台电脑上执行 `ii recv`
+
+不要求用户接触：
+
+- blob hash
+- peer id
+- token
+- endpoint
+- 文件内容指纹
+
+## 中继规则
+
+### 默认规则
+
+默认路径选择顺序是：
+
+1. 直连
+2. 局域网发现
+3. 公网 relay
+
+也就是说，`ii send` 和 `ii recv` 默认都不需要用户先想“我该连哪个中继”。
+
+### `--local`
+
+`--local` 的意思是：
+
+- 只用局域网发现
+- 不用公网发现
+- 不用公网 relay
+
+适合同一局域网内的机器互传。
+
+### `--relay <url>`
+
+`--relay` 的意思是：
+
+- 强制指定某个 relay
+- 不按默认 relay 列表自动挑
+
+### `--no-relay`
+
+`--no-relay` 的意思是：
+
+- 不走公网 relay
+- 只靠直连和局域网路径
+
+## `ii relay`
+
+`ii relay` 是 relay 服务入口，对外只保留这一层。
+
+不用：
+
+```powershell
+ii relay serve
+iroh-relay
+```
+
+### 用法
+
+```powershell
+ii relay
+ii relay --dev
+ii relay --config .\relay.toml
+ii relay --http 8080 --https 8443 --quic 7843
+ii relay -H 8080 -S 8443 -Q 7843 -M 9091
+```
+
+### 配置文件
+
+`ii relay` 启动时必须有一个 `relay.toml` 配置文件。
+
+- 不传 `--config` 时，按平台找默认配置：
+  - Windows: `ii.exe` 同目录下的 `relay.toml`
+  - Linux/macOS/其他 Unix-like: `/etc/ii/relay.toml`
+- 如果默认文件不存在，`ii relay` 会先生成它，再继续启动
+- 传了 `--config` 时，就用你指定的路径
+- 命令行端口参数优先级高于 `relay.toml`
+- 如果配置文件已存在，端口参数只影响本次启动，不自动改写文件
+
+### 自定义端口
+
+如果 `80/443` 已经被 Nginx 或别的服务占着，不要硬抢端口。把 relay 放到别的端口，然后让前置代理转发过去。
+
+可以直接用命令行参数：
+
+```powershell
+ii relay --http 8080 --https 8443 --quic 7843
+```
+
+短参数：
+
+```powershell
+ii relay -H 8080 -S 8443 -Q 7843 -M 9091
+```
+
+端口参数：
+
+- `--http <port>` / `-H <port>`：HTTP 端口，对应 `http_bind_addr`
+- `--https <port>` / `-S <port>`：HTTPS 端口，对应 `tls.https_bind_addr`
+- `--quic <port>` / `-Q <port>`：QUIC 地址发现端口，对应 `tls.quic_bind_addr`
+- `--metrics <port>` / `-M <port>`：开启 metrics 并设置 metrics 端口，对应 `metrics_bind_addr`
+
+也可以写到配置文件里，再用：
+
+```powershell
+ii relay --config .\relay.toml
+```
+
+示例配置思路：
+
+- `http_bind_addr = "0.0.0.0:8080"`
+- `tls.https_bind_addr = "0.0.0.0:8443"`
+- `tls.quic_bind_addr = "0.0.0.0:7843"`
+- `metrics_bind_addr = "127.0.0.1:9091"`
+
+这样做的意思是：
+
+- Nginx 继续占 `80/443`
+- `ii relay` 在后端端口跑
+- 用户侧 `--relay <url>` 里写带端口的地址，例如 `https://relay.example.com:8443`
+- `7842/udp` 这类 QUIC 端口如果也要改，必须一起在配置里改掉，不能只改 HTTPS
+
+### 生产模式
+
+- HTTP 默认端口：`80`
+- HTTPS 默认端口：`443`
+- QUIC 地址发现端口：`7842`
+- metrics 默认关闭；开启时默认端口：`9090`
+
+端口职责：
+
+- `80/tcp`：HTTP 入口。TLS 关掉时，HTTP 服务都走这里；TLS 开启时主要保留明文探测面。
+- `443/tcp`：主 relay HTTPS 入口。
+- `7842/udp`：QUIC 地址发现。
+- `9090/tcp`：metrics 监控口。
+
+### 端口冲突
+
+如果服务器同一个公网 IP 上已经有别的服务占用了 `80/tcp` 或 `443/tcp`，`ii relay` 直接绑定默认端口会冲突。
+
+可选处理方式：
+
+- 给 `ii relay` 使用另一台机器或另一个公网 IP。
+- 让现有 Nginx/反向代理继续占用 `80/443`，把 relay 放到后端端口，再由 Nginx 按域名反向代理过去。
+- 给 relay 配单独域名，并让现有反向代理按域名转发到 relay 后端。
+- 给 relay 配非标准端口，并在 `--relay <url>` 里显式写端口，例如 `https://relay.example.com:8443`。
+
+需要注意：
+
+- 如果用反向代理，必须支持 WebSocket / HTTP upgrade，不能只转普通 HTTP。
+- 如果 `ii relay` 自己不直接监听 `80/443`，ACME 自动签发可能拿不到证书；这时应由前置代理负责 TLS，或给 relay 配手工证书。
+- `7842/udp` 是 QUIC 地址发现端口，不能靠普通 HTTP 反向代理转发；要么单独开放 UDP，要么关闭/不用这项能力。
+- 如果你完全不想碰 `7842/udp`，就关掉 QUIC 地址发现，只保留 relay 的 HTTP/HTTPS 转发能力。
+
+### `--dev`
+
+```powershell
+ii relay --dev
+```
+
+`--dev` 的行为：
+
+- 走 plain HTTP
+- 默认 HTTP 端口是 `3340`
+- 忽略 TLS 相关配置
+- 适合本机开发，不是生产部署模式
+
+### TLS 来源
+
+生产 relay 的 TLS 主要走 ACME 自动签发。
+
+这条路需要：
+
+- 公网 IP
+- DNS 名
+
+如果 `--relay <url>` 用的是域名，那这个域名也必须已经能对外解析并指向 relay 机器，否则客户端连不上。
+
+可调项：
+
+- `IROH_RELAY_ACME_URL`：覆盖 ACME directory URL
+- `IROH_RELAY_ACME_CA`：给本地 ACME 测试服务器额外信任根证书
+
+手工证书模式读取：
+
+- `default.crt`
+- `default.key`
+
+也可以显式覆盖：
+
+- `manual_cert_path`
+- `manual_key_path`
+
+还有 `Reloading` 模式，用于按证书文件重载。
+
+## `ii doctor`
+
+```powershell
+ii doctor
+```
+
+`doctor` 用来查：
+
+- 网络连通性
+- 直连是否可用
+- 局域网发现是否可用
+- relay 是否可用
+- 端口和权限问题
+- 版本和运行环境
+
+## `ii version`
+
+```powershell
+ii version
+```
+
+输出当前 `ii` 版本。
+
+## 底层对应关系
+
+这部分只做对照，不进用户主路径。
+
+- `ii send` / `ii recv`：`iroh-blobs`
+- ticket：`iroh-tickets`
+- 局域网发现：`iroh-mdns-address-lookup`
+- 公网发现、NAT 穿透、relay：`iroh`
+- relay 服务：`iroh-relay`
+
+## 源码对照
+
+- [iroh-relay/src/main.rs](https://github.com/n0-computer/iroh/blob/main/iroh-relay/src/main.rs)
+- [iroh-relay/src/server.rs](https://github.com/n0-computer/iroh/blob/main/iroh-relay/src/server.rs)
+- [Iroh Docs: Add a relay](https://docs.iroh.computer/add-a-relay)
