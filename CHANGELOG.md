@@ -2,6 +2,14 @@
 
 All notable changes to `ii` are documented here.
 
+## 0.1.2 - 2026-07-15
+
+### Changed
+
+- Added the official `ii` logo assets.
+- Added the logo to the README header.
+- Embedded `logo.ico` into the Windows executable during release builds.
+
 ## 0.1.1 - 2026-07-15
 
 ### Changed
