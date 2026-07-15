@@ -8,43 +8,31 @@
 
 ---
 
-它只有一个对外品牌：`ii`。用户只需要记 `send`、`recv`、`relay`、`doctor`、`version`。
+`ii` 面向临时传文件：发送端默认一次性发送，成功后退出；复杂网络下会短时间尝试寻找可用通路；接收端默认断点续传，已存在且 MD5 相同的文件会直接跳过；文件夹也可以直接发送。
 
 ## 快速开始
 
-发送文件：
+在发送端执行：
 
 ```powershell
 ii send .\video.mp4
 ```
 
-接收文件：
+`ii` 会输出一段 ticket：
+
+```text
+ii ticket:
+ii1k7v...x9a
+
+on the other computer:
+ii recv ii1k7v...x9a
+```
+
+在接收端执行：
 
 ```powershell
 ii recv ii1k7v...x9a
 ```
-
-发送目录：
-
-```powershell
-ii send .\my-folder
-```
-
-保持发送端不退出：
-
-```powershell
-ii send .\my-folder -t
-```
-
-## 核心用法
-
-`ii send` 支持文件、目录和 stdin。默认只成功发送一次；`-t` 会让发送端继续保持可用，直到你手动退出。
-
-`ii recv` 只需要 ticket。它默认会自动处理三种情况：同名同内容直接跳过，文件未传完就续传，内容不同就覆盖。目录会按原目录结构还原到目标位置。
-
-`ii relay` 用来启动 relay 服务。默认配置路径按平台决定：Windows 读取 `ii.exe` 同目录下的 `relay.toml`，Linux/macOS/其他 Unix-like 使用 `/etc/ii/relay.toml`。没有配置时会先生成默认文件再启动。
-
-`ii doctor` 用来排查本机网络、relay、端口和权限问题。`ii version` 输出当前版本。
 
 ## 常见场景
 
@@ -61,26 +49,58 @@ ii recv ii1k7v...x9a
 
 ![接收端截图](screenshot/接收.png)
 
-传一个大目录给另一台机器：
+指定保存目录：
 
 ```powershell
-ii send .\project
 ii recv ii1k7v...x9a -o D:\Downloads
 ```
 
-把 stdin 直接传过去：
+断网或传到一半失败后，重新执行同一条 `ii recv` 就会继续接收；如果目标文件已经完整且内容相同，会直接跳过；如果同名但内容不同，会覆盖。
+
+## 发送目录
+
+目录可以直接发送：
+
+```powershell
+ii send .\my-folder
+```
+
+接收端：
+
+```powershell
+ii recv ii1k7v...x9a -o D:\Downloads
+```
+
+接收结果是 `D:\Downloads\my-folder`，不会变成 `my-folder\my-folder` 两层。
+
+## 进阶用法
+
+默认发送端只服务一次接收。需要保持发送端不退出时，用 `-t`：
+
+```powershell
+ii send .\my-folder -t
+```
+
+从 stdin 发送：
 
 ```powershell
 tar czf - .\project | ii send --name project.tar.gz
+```
+
+接收到 stdout：
+
+```powershell
 ii recv ii1k7v...x9a --stdout > project.tar.gz
 ```
 
-局域网优先，不走公网 relay：
+局域网优先，不走公网中继：
 
 ```powershell
 ii send .\file.zip --local
 ii recv ii1k7v...x9a --local
 ```
+
+## 诊断
 
 排查为什么慢：
 
@@ -89,7 +109,22 @@ ii recv ii1k7v...x9a --trace
 ii recv ii1k7v...x9a --local --trace
 ```
 
-## Relay
+检查本机网络、端口、权限和版本信息：
+
+```powershell
+ii doctor
+ii version
+```
+
+## 自托管 Relay
+
+普通发文件不需要先理解 relay。只有你要自建中继服务，或者公司网络环境需要固定中继入口时，才需要看这一段。
+
+启动 relay：
+
+```powershell
+ii relay
+```
 
 默认端口：
 
@@ -98,7 +133,7 @@ ii recv ii1k7v...x9a --local --trace
 - QUIC: `7842`
 - metrics: `9090`，默认关闭
 
-如果 `80/443` 已经被 Nginx 占用，可以把 `ii relay` 放到非标准端口，再让前置代理转发。
+如果 `80/443` 已经被 Nginx 占用，可以把 `ii relay` 放到非标准端口，再让前置代理转发。`7842/udp` 是独立 QUIC 端口，不能靠普通 HTTP 反代替代。
 
 TLS 生产模式主要走 ACME 自动签发；开发模式可以用 `--dev` 走 plain HTTP。
 
