@@ -22,3 +22,6 @@ toml = "0.9"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 url = { version = "2.5", features = ["serde"] }
+
+[build-dependencies]
+winresource = "0.1"

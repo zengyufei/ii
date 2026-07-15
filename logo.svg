@@ -1,0 +1,7 @@
+<svg viewBox="0 0 128 128" role="img" aria-label="Solid ii" xmlns="http://www.w3.org/2000/svg">
+          <rect x="18" y="18" width="92" height="92" rx="24" fill="#101312"/>
+          <circle cx="48" cy="42" r="7" fill="#1f76d2"/>
+          <circle cx="80" cy="42" r="7" fill="#1f76d2"/>
+          <path d="M48 58v35" stroke="#f7f7f2" stroke-width="13" stroke-linecap="round"/>
+          <path d="M80 58v35" stroke="#f7f7f2" stroke-width="13" stroke-linecap="round"/>
+        </svg>

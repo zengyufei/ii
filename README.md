@@ -1,6 +1,12 @@
-# ii
+<p align="center">
+  <img src="logo.svg" alt="ii logo" width="96" height="96">
+</p>
 
-`ii` 是一个跨平台文件传输 CLI。
+<h1 align="center">ii</h1>
+
+<p align="center">一个跨平台文件传输 CLI。</p>
+
+---
 
 它只有一个对外品牌：`ii`。用户只需要记 `send`、`recv`、`relay`、`doctor`、`version`。
 
