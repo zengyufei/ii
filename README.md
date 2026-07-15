@@ -49,6 +49,12 @@ ii send .\report.pdf
 ii recv ii1k7v...x9a
 ```
 
+发送端和接收端的实际样子：
+
+![发送端截图](screenshot/发送.png)
+
+![接收端截图](screenshot/接收.png)
+
 传一个大目录给另一台机器：
 
 ```powershell
