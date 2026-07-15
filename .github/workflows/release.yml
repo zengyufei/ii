@@ -45,6 +45,25 @@ jobs:
       - name: Build release
         run: cargo build --release --locked
 
+      - name: Install UPX
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $upxVersion = "5.2.0"
+          $zipPath = "upx-win64.zip"
+          $extractDir = "upx"
+          Invoke-WebRequest -Uri "https://github.com/upx/upx/releases/download/v$upxVersion/upx-$upxVersion-win64.zip" -OutFile $zipPath
+          Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
+          $upxExe = Get-ChildItem -Path $extractDir -Recurse -Filter upx.exe | Select-Object -First 1
+          if (-not $upxExe) { throw "upx.exe not found after extraction" }
+          Add-Content -Path $env:GITHUB_PATH -Value $upxExe.Directory.FullName
+
+      - name: Compress Windows binary with UPX
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          upx --best --lzma "${{ matrix.binary }}"
+
       - name: Package Windows
         if: runner.os == 'Windows'
         shell: pwsh
