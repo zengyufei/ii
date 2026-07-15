@@ -2,6 +2,14 @@
 
 All notable changes to `ii` are documented here.
 
+## 0.1.1 - 2026-07-15
+
+### Changed
+
+- Changed GitHub Actions release assets to publish raw binaries instead of zip or tar.gz archives.
+- Kept UPX compression for the Windows release executable.
+- Added README screenshots for the temporary coworker file transfer flow.
+
 ## 0.1.0 - 2026-07-15
 
 ### Added
