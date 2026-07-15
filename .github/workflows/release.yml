@@ -18,15 +18,15 @@ jobs:
         include:
           - name: windows-x86_64
             os: windows-latest
-            artifact: ii-windows-x86_64.zip
+            artifact: ii-windows-x86_64.exe
             binary: target/release/ii.exe
           - name: linux-x86_64
             os: ubuntu-latest
-            artifact: ii-linux-x86_64.tar.gz
+            artifact: ii-linux-x86_64
             binary: target/release/ii
           - name: macos-aarch64
             os: macos-latest
-            artifact: ii-macos-aarch64.tar.gz
+            artifact: ii-macos-aarch64
             binary: target/release/ii
 
     steps:
@@ -64,25 +64,17 @@ jobs:
         run: |
           upx --best --lzma "${{ matrix.binary }}"
 
-      - name: Package Windows
+      - name: Prepare Windows artifact
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          New-Item -ItemType Directory -Force dist | Out-Null
-          Copy-Item "${{ matrix.binary }}" dist/ii.exe
-          Copy-Item ii.md dist/ii.md
-          Copy-Item CHANGELOG.md dist/CHANGELOG.md
-          Compress-Archive -Path dist/* -DestinationPath "${{ matrix.artifact }}"
+          Copy-Item "${{ matrix.binary }}" "${{ matrix.artifact }}"
 
-      - name: Package Unix
+      - name: Prepare Unix artifact
         if: runner.os != 'Windows'
         shell: bash
         run: |
-          mkdir -p dist
-          cp "${{ matrix.binary }}" dist/ii
-          cp ii.md dist/ii.md
-          cp CHANGELOG.md dist/CHANGELOG.md
-          tar -czf "${{ matrix.artifact }}" -C dist .
+          cp "${{ matrix.binary }}" "${{ matrix.artifact }}"
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
