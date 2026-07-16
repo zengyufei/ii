@@ -172,6 +172,10 @@ TLS 生产模式主要走 ACME 自动签发；开发模式可以用 `--dev` 走 
 
 完整命令、端口职责、TLS 来源、配置路径、故障排查和底层对应关系都写在 [ii.md](ii.md)。
 
+## 变更记录
+
+版本变更见 [CHANGELOG.md](CHANGELOG.md)。英文版本见 [CHANGELOG.en.md](CHANGELOG.en.md)。
+
 ## 版本
 
 当前版本由 Git tag 管理。仓库内已使用 `v0.1.4`。

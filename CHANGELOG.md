@@ -1,59 +1,60 @@
-# Changelog
+# 变更记录
 
-All notable changes to `ii` are documented here.
+本文件记录 `ii` 的重要变更。默认中文版本在这里，英文版本见 [CHANGELOG.en.md](CHANGELOG.en.md)。
 
 ## 0.1.4 - 2026-07-16
 
-### Changed
+### 变更
 
-- Changed Windows release compression to use the bundled UPX 5.1.0 binary from the repository.
+- Windows Release 压缩改为使用仓库内置的 UPX 5.1.0，不再在 GitHub Actions 中临时下载 UPX。
 
 ## 0.1.3 - 2026-07-16
 
-### Added
+### 新增
 
-- Added live `ii recv` transfer progress and speed display for interactive terminals.
-- Added explicit `ii send -c` clipboard copy and `ii send -o <path>` receive-command output.
-- Added elapsed time and average speed to the final `ii recv` completion line.
+- `ii recv` 在交互式终端中实时显示传输进度和传输速率。
+- 新增 `ii send -c`，显式把 `ii recv ...` 接收命令复制到剪贴板。
+- 新增 `ii send -o <path>`，把 `ii recv ...` 接收命令写入指定文件。
+- `ii recv` 传输完成时显示总耗时和平均速度。
 
 ## 0.1.2 - 2026-07-15
 
-### Changed
+### 变更
 
-- Added the official `ii` logo assets.
-- Added the logo to the README header.
-- Embedded `logo.ico` into the Windows executable during release builds.
+- 加入正式 `ii` logo 资源。
+- README 顶部加入 logo 展示。
+- Windows 构建时把 `logo.ico` 嵌入 `ii.exe`。
 
 ## 0.1.1 - 2026-07-15
 
-### Changed
+### 变更
 
-- Changed GitHub Actions release assets to publish raw binaries instead of zip or tar.gz archives.
-- Kept UPX compression for the Windows release executable.
-- Added README screenshots for the temporary coworker file transfer flow.
+- GitHub Actions Release 产物改为直接发布原始二进制文件，不再打包成 zip 或 tar.gz。
+- Windows Release 可执行文件保留 UPX 压缩。
+- README 加入同事临时传文件场景截图。
 
 ## 0.1.0 - 2026-07-15
 
-### Added
+### 新增
 
-- Added the `ii` CLI with `send`, `recv`, `relay`, `doctor`, and `version`.
-- Added file, folder, and stdin transfer support.
-- Added default one-shot `ii send`; use `-t` to keep the sender alive for multiple receivers.
-- Added automatic resume, overwrite, and identical-file skip for file/stdin receives.
-- Added relay management through `ii relay` with config generation and port overrides.
-- Added `ii recv --trace` for connection and transfer timing diagnostics.
+- 新增 `ii` CLI，包含 `send`、`recv`、`relay`、`doctor`、`version`。
+- 支持文件、文件夹和 stdin 传输。
+- `ii send` 默认一次性发送；使用 `-t` 可以保持发送端继续运行，允许多个接收端接收。
+- `ii recv` 默认支持断点续传、覆盖同名不同内容文件、跳过同名同内容文件。
+- 新增 `ii relay`，支持 relay 配置生成和端口覆盖。
+- 新增 `ii recv --trace`，用于输出连接和传输耗时诊断。
 
-### Changed
+### 变更
 
-- Changed directory receive behavior so a sent folder extracts as one top-level folder, not a duplicated nested folder.
-- Changed receive connection strategy to fall back to relay-only after a short direct-address window.
+- 目录接收结果改为只生成一层顶级目录，避免出现重复嵌套目录。
+- 接收端连接策略改为先短时间尝试完整地址集，失败后回退到 relay-only，避免不可达地址拖慢建连。
 
-### Fixed
+### 修复
 
-- Fixed incomplete transfer handling by waiting for connection close after payload finish.
-- Fixed sender timeout noise after successful receives.
+- 修复传输完成后连接关闭等待不完整导致的不完整传输问题。
+- 修复发送端在成功接收后仍可能输出超时错误的问题。
 
-### Breaking
+### 破坏性变更
 
-- Removed `ii send --once`; one-shot send is now the default.
-- Added `ii send -t` for the old keep-alive behavior.
+- 移除 `ii send --once`；一次性发送现在是默认行为。
+- 新增 `ii send -t` 用于原来的保持运行行为。

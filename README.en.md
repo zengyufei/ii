@@ -172,6 +172,10 @@ Production TLS primarily uses automatic ACME issuance. Development mode can use 
 
 The full command reference, port roles, TLS sources, config paths, diagnostics, and implementation mapping are documented in [ii.md](ii.md).
 
+## Changelog
+
+Release changes are documented in [CHANGELOG.en.md](CHANGELOG.en.md). The default Chinese version is [CHANGELOG.md](CHANGELOG.md).
+
 ## Version
 
 The current version is managed by Git tags. This repository currently uses `v0.1.4`.
