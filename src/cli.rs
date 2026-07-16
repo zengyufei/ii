@@ -27,6 +27,12 @@ pub struct SendArgs {
     #[arg(short = 't')]
     pub keep_alive: bool,
 
+    #[arg(short = 'c', long)]
+    pub copy: bool,
+
+    #[arg(short = 'o', long, value_name = "path")]
+    pub output: Option<PathBuf>,
+
     #[arg(long, conflicts_with_all = ["relay", "no_relay"])]
     pub local: bool,
 
@@ -79,6 +85,18 @@ mod tests {
         let cli = Cli::parse_from(["ii", "send", "file.txt", "-t"]);
         match cli.command {
             Command::Send(args) => assert!(args.keep_alive),
+            _ => panic!("expected send command"),
+        }
+    }
+
+    #[test]
+    fn send_accepts_copy_and_output() {
+        let cli = Cli::parse_from(["ii", "send", "file.txt", "-c", "-o", "recv.txt"]);
+        match cli.command {
+            Command::Send(args) => {
+                assert!(args.copy);
+                assert_eq!(args.output, Some(PathBuf::from("recv.txt")));
+            }
             _ => panic!("expected send command"),
         }
     }

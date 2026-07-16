@@ -8,6 +8,7 @@ use std::{
     ffi::OsStr,
     io::{IsTerminal, Read, Write},
     path::{Path, PathBuf},
+    process::{Command, Stdio},
     time::{Duration, Instant},
 };
 use tempfile::NamedTempFile;
@@ -262,7 +263,7 @@ pub async fn send(args: SendArgs) -> Result<()> {
         content_md5: source.content_md5(),
     };
     let ticket_str = ticket.encode()?;
-    print_ticket(&ticket_str);
+    print_ticket(&ticket_str, args.copy, args.output.clone())?;
 
     let mut accepted = 0usize;
     loop {
@@ -595,38 +596,47 @@ async fn serve_one(conn: iroh::endpoint::Connection, source: &Source) -> Result<
     Ok(ServeOutcome::Sent)
 }
 
-fn print_ticket(ticket: &str) {
+fn print_ticket(ticket: &str, copy: bool, output: Option<PathBuf>) -> Result<()> {
     let recv_command = format!("ii recv {ticket}");
     println!("ii ticket:");
     println!("{ticket}");
     println!();
     println!("on the other computer:");
     println!("{recv_command}");
-    if maybe_copy_recv_command(&recv_command) {
+    if let Some(path) = output {
+        if let Some(parent) = path
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+        {
+            std::fs::create_dir_all(parent)
+                .with_context(|| format!("create output dir {}", parent.display()))?;
+        }
+        std::fs::write(&path, format!("{recv_command}\n"))
+            .with_context(|| format!("write recv command {}", path.display()))?;
+    }
+    if copy && maybe_copy_recv_command(&recv_command)? {
         println!();
         println!("recv command copied to clipboard");
     }
+    Ok(())
 }
 
 #[cfg(target_os = "windows")]
-fn maybe_copy_recv_command(command: &str) -> bool {
-    if !std::io::stdout().is_terminal() {
-        return false;
-    }
-    copy_text_to_windows_clipboard(command).is_ok()
+fn maybe_copy_recv_command(command: &str) -> Result<bool> {
+    copy_text_to_clipboard(command).map(|_| true)
 }
 
 #[cfg(not(target_os = "windows"))]
-fn maybe_copy_recv_command(_command: &str) -> bool {
-    false
+fn maybe_copy_recv_command(command: &str) -> Result<bool> {
+    copy_text_to_clipboard(command).map(|_| true)
 }
 
 #[cfg(target_os = "windows")]
-fn copy_text_to_windows_clipboard(text: &str) -> Result<()> {
-    let mut child = std::process::Command::new("clip")
-        .stdin(std::process::Stdio::piped())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
+fn copy_text_to_clipboard(text: &str) -> Result<()> {
+    let mut child = Command::new("clip")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
         .spawn()
         .context("start clip.exe")?;
     {
@@ -636,6 +646,67 @@ fn copy_text_to_windows_clipboard(text: &str) -> Result<()> {
     let status = child.wait().context("wait clip.exe")?;
     if !status.success() {
         bail!("clip.exe exited with {status}");
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn copy_text_to_clipboard(text: &str) -> Result<()> {
+    let mut child = Command::new("pbcopy")
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .context("start pbcopy")?;
+    {
+        let stdin = child.stdin.as_mut().context("open pbcopy stdin")?;
+        stdin.write_all(text.as_bytes()).context("write pbcopy")?;
+    }
+    let status = child.wait().context("wait pbcopy")?;
+    if !status.success() {
+        bail!("pbcopy exited with {status}");
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn copy_text_to_clipboard(text: &str) -> Result<()> {
+    for command in ["wl-copy", "xclip", "xsel"] {
+        if let Ok(()) = try_copy_with_command(command, text) {
+            return Ok(());
+        }
+    }
+    bail!("no clipboard tool found; install wl-copy, xclip, or xsel");
+}
+
+#[cfg(not(any(target_os = "windows", target_os = "macos", target_os = "linux")))]
+fn copy_text_to_clipboard(_text: &str) -> Result<()> {
+    bail!("clipboard copy is not supported on this platform")
+}
+
+#[cfg(target_os = "linux")]
+fn try_copy_with_command(command: &str, text: &str) -> Result<()> {
+    let mut cmd = Command::new(command);
+    if command == "xclip" {
+        cmd.args(["-selection", "clipboard"]);
+    } else if command == "xsel" {
+        cmd.args(["--clipboard", "--input"]);
+    }
+    let mut child = cmd
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .with_context(|| format!("start {command}"))?;
+    {
+        let stdin = child.stdin.as_mut().context("open clipboard stdin")?;
+        stdin
+            .write_all(text.as_bytes())
+            .with_context(|| format!("write {command}"))?;
+    }
+    let status = child.wait().with_context(|| format!("wait {command}"))?;
+    if !status.success() {
+        bail!("{command} exited with {status}");
     }
     Ok(())
 }

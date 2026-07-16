@@ -45,8 +45,6 @@ on the other computer:
 ii recv ii1k7v...x9a
 ```
 
-在 Windows 交互式终端里，这条 `ii recv ...` 命令会自动复制到剪贴板，cmd 里不用手动选长字符串。
-
 在接收端执行：
 
 ```powershell
@@ -100,6 +98,18 @@ ii recv ii1k7v...x9a -o D:\Downloads
 
 ```powershell
 ii send .\my-folder -t
+```
+
+复制接收命令到剪贴板：
+
+```powershell
+ii send .\video.mp4 -c
+```
+
+把接收命令写到文件：
+
+```powershell
+ii send .\video.mp4 -o recv.txt
 ```
 
 从 stdin 发送：

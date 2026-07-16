@@ -9,7 +9,7 @@
 ## 命令总览
 
 ```text
-ii send [<path>] [--name <name>] [-t] [--local] [--relay <url>] [--no-relay]
+ii send [<path>] [--name <name>] [-t] [-c] [-o <path>] [--local] [--relay <url>] [--no-relay]
 ii recv <ticket> [-o <dir>] [--stdout] [--overwrite] [--resume] [--local] [--trace]
 ii relay [--dev] [--config <path>] [--http <port>] [--https <port>] [--quic <port>] [--metrics <port>]
 ii doctor
@@ -45,7 +45,8 @@ tar czf - .\project | ii send --name project.tar.gz
 - 发送文件或文件夹时，`ii send` 会生成一个 ticket。
 - ticket 打出来后，发送端默认只成功发送一次，完成后自动退出。
 - 如果需要保持运行、允许多个接收端继续取同一个 ticket，用 `-t`。
-- 在 Windows 交互式终端里，`ii send` 还会把 `ii recv ...` 命令复制到剪贴板，方便直接粘贴。
+- 默认不会改剪贴板；需要复制接收命令时，用 `-c`。
+- 需要把接收命令写到文件时，用 `-o <path>`。
 - 默认发送路径是自动选择的：先直连，再局域网发现，再公网 relay。
 - 如果直连/局域网能成，就不必碰公网 relay。
 - ticket 是唯一需要传给另一台电脑的值。
@@ -66,6 +67,14 @@ tar czf - .\project | ii send --name project.tar.gz
 
 `-t`
 : 发送完成后不退出，继续保持 ticket 可用，直到用户 `Ctrl+C`。
+
+`-c`
+: 把完整的 `ii recv ...` 命令复制到系统剪贴板。  
+  Windows 使用 `clip.exe`，macOS 使用 `pbcopy`，Linux 会依次尝试 `wl-copy`、`xclip`、`xsel`。
+
+`-o <path>`
+: 把完整的 `ii recv ...` 命令写到指定文件路径。  
+  如果文件已存在，会覆盖。这个 `-o` 属于 `ii send`，不影响 `ii recv -o <dir>` 的保存目录语义。
 
 `--local`
 : 只走局域网优先路径，不走公网发现，不走公网 relay。

@@ -45,8 +45,6 @@ on the other computer:
 ii recv ii1k7v...x9a
 ```
 
-On Windows interactive terminals, the `ii recv ...` command is copied to the clipboard automatically, so you do not need to select the long string in cmd.
-
 Run this on the receiver:
 
 ```powershell
@@ -100,6 +98,18 @@ The sender serves one receiver by default. Use `-t` to keep it running:
 
 ```powershell
 ii send .\my-folder -t
+```
+
+Copy the receive command to the clipboard:
+
+```powershell
+ii send .\video.mp4 -c
+```
+
+Write the receive command to a file:
+
+```powershell
+ii send .\video.mp4 -o recv.txt
 ```
 
 Send from stdin:
