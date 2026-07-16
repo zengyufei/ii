@@ -4,8 +4,6 @@
 
 <h1 align="center">ii</h1>
 
----
-
 <p align="center">
   A cross-platform file transfer CLI for quickly sending files, folders, and piped data.
 </p>

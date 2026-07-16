@@ -4,8 +4,6 @@
 
 <h1 align="center">ii</h1>
 
----
-
 <p align="center">
   一个跨平台文件传输 CLI，用来快速发送文件、目录和管道数据。
 </p>
