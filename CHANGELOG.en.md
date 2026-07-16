@@ -6,6 +6,12 @@ All notable changes to `ii` are documented here. The default Chinese version is 
 
 Nothing yet.
 
+## 0.1.6 - 2026-07-16
+
+### Documentation
+
+- Added an `ii send --s3` S3/R2 transfer example to the advanced README usage section.
+
 ## 0.1.5 - 2026-07-16
 
 ### Added

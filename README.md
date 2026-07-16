@@ -133,6 +133,15 @@ ii send .\file.zip --local
 ii recv ii1k7v...x9a --local
 ```
 
+通过 S3/R2 中转：
+
+```powershell
+ii send .\video.mp4 --s3
+ii recv ii1k7v...x9a
+```
+
+首次使用会在命令行里提示填写 Cloudflare R2 配置，成功后写入本机 `ii.toml`，以后直接复用。
+
 通过 WebDAV 中转：
 
 ```powershell
@@ -208,7 +217,7 @@ TLS 生产模式主要走 ACME 自动签发；开发模式可以用 `--dev` 走 
 
 ## 版本
 
-当前版本由 Git tag 管理。仓库内已使用 `v0.1.5`。
+当前版本由 Git tag 管理。仓库内已使用 `v0.1.6`。
 
 ## 许可证
 
