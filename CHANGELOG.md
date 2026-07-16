@@ -7,6 +7,7 @@ All notable changes to `ii` are documented here.
 ### Added
 
 - Added live `ii recv` transfer progress and speed display for interactive terminals.
+- Added automatic Windows clipboard copy for the printed `ii recv` command in interactive terminals.
 
 ## 0.1.2 - 2026-07-15
 

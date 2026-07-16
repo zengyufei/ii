@@ -45,6 +45,8 @@ on the other computer:
 ii recv ii1k7v...x9a
 ```
 
+On Windows interactive terminals, the `ii recv ...` command is copied to the clipboard automatically, so you do not need to select the long string in cmd.
+
 Run this on the receiver:
 
 ```powershell

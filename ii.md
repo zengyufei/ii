@@ -45,6 +45,7 @@ tar czf - .\project | ii send --name project.tar.gz
 - 发送文件或文件夹时，`ii send` 会生成一个 ticket。
 - ticket 打出来后，发送端默认只成功发送一次，完成后自动退出。
 - 如果需要保持运行、允许多个接收端继续取同一个 ticket，用 `-t`。
+- 在 Windows 交互式终端里，`ii send` 还会把 `ii recv ...` 命令复制到剪贴板，方便直接粘贴。
 - 默认发送路径是自动选择的：先直连，再局域网发现，再公网 relay。
 - 如果直连/局域网能成，就不必碰公网 relay。
 - ticket 是唯一需要传给另一台电脑的值。

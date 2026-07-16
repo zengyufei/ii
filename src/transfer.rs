@@ -596,11 +596,48 @@ async fn serve_one(conn: iroh::endpoint::Connection, source: &Source) -> Result<
 }
 
 fn print_ticket(ticket: &str) {
+    let recv_command = format!("ii recv {ticket}");
     println!("ii ticket:");
     println!("{ticket}");
     println!();
     println!("on the other computer:");
-    println!("ii recv {ticket}");
+    println!("{recv_command}");
+    if maybe_copy_recv_command(&recv_command) {
+        println!();
+        println!("recv command copied to clipboard");
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn maybe_copy_recv_command(command: &str) -> bool {
+    if !std::io::stdout().is_terminal() {
+        return false;
+    }
+    copy_text_to_windows_clipboard(command).is_ok()
+}
+
+#[cfg(not(target_os = "windows"))]
+fn maybe_copy_recv_command(_command: &str) -> bool {
+    false
+}
+
+#[cfg(target_os = "windows")]
+fn copy_text_to_windows_clipboard(text: &str) -> Result<()> {
+    let mut child = std::process::Command::new("clip")
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn()
+        .context("start clip.exe")?;
+    {
+        let stdin = child.stdin.as_mut().context("open clip.exe stdin")?;
+        stdin.write_all(text.as_bytes()).context("write clip.exe")?;
+    }
+    let status = child.wait().context("wait clip.exe")?;
+    if !status.success() {
+        bail!("clip.exe exited with {status}");
+    }
+    Ok(())
 }
 
 enum Backing {
