@@ -138,22 +138,31 @@ impl RecvProgress {
             0.0
         };
 
-        let message = match self.total {
-            Some(total) if total > 0 => {
-                let pct = (self.completed.min(total) as f64 / total as f64) * 100.0;
-                format!(
-                    "ii recv: {} / {} ({:.1}%) | {}/s",
-                    fmt_bytes(self.completed),
-                    fmt_bytes(total),
-                    pct,
-                    fmt_bytes(bytes_per_second as u64)
-                )
-            }
-            _ => format!(
-                "ii recv: {} received | {}/s",
+        let message = if final_draw {
+            format!(
+                "ii recv: done: {} in {} | avg {}/s",
                 fmt_bytes(self.completed),
+                fmt_duration(now.duration_since(self.started)),
                 fmt_bytes(bytes_per_second as u64)
-            ),
+            )
+        } else {
+            match self.total {
+                Some(total) if total > 0 => {
+                    let pct = (self.completed.min(total) as f64 / total as f64) * 100.0;
+                    format!(
+                        "ii recv: {} / {} ({:.1}%) | {}/s",
+                        fmt_bytes(self.completed),
+                        fmt_bytes(total),
+                        pct,
+                        fmt_bytes(bytes_per_second as u64)
+                    )
+                }
+                _ => format!(
+                    "ii recv: {} received | {}/s",
+                    fmt_bytes(self.completed),
+                    fmt_bytes(bytes_per_second as u64)
+                ),
+            }
         };
 
         eprint!("\r{message:<96}");

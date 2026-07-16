@@ -8,6 +8,7 @@ All notable changes to `ii` are documented here.
 
 - Added live `ii recv` transfer progress and speed display for interactive terminals.
 - Added explicit `ii send -c` clipboard copy and `ii send -o <path>` receive-command output.
+- Added elapsed time and average speed to the final `ii recv` completion line.
 
 ## 0.1.2 - 2026-07-15
 
