@@ -2,6 +2,12 @@
 
 All notable changes to `ii` are documented here.
 
+## Unreleased
+
+### Changed
+
+- Changed Windows release compression to use the bundled UPX 5.1.0 binary from the repository.
+
 ## 0.1.3 - 2026-07-16
 
 ### Added
