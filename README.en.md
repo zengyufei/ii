@@ -74,6 +74,8 @@ ii recv ii1k7v...x9a -o D:\Downloads
 
 If the network drops halfway, run the same `ii recv` command again and it continues receiving. If the target file already exists with the same content, it is skipped. If the name matches but the content differs, it is overwritten.
 
+`ii recv` shows live transfer progress and speed in the terminal; if you enable `--trace`, it switches to diagnostic output so you can see where the delay comes from.
+
 ## Send Folders
 
 Folders can be sent directly:

@@ -6,15 +6,14 @@ use anyhow::{Context, Result, bail};
 use iroh::{Endpoint, RelayMap, RelayMode, SecretKey, endpoint::presets};
 use std::{
     ffi::OsStr,
-    io::IsTerminal,
-    io::Read,
+    io::{IsTerminal, Read, Write},
     path::{Path, PathBuf},
     time::{Duration, Instant},
 };
 use tempfile::NamedTempFile;
 use tokio::{
     fs,
-    io::{self, AsyncSeekExt, AsyncWrite, AsyncWriteExt},
+    io::{self, AsyncRead, AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt},
 };
 
 const ALPN: &[u8] = b"ii/file/1";
@@ -79,6 +78,92 @@ impl RecvTrace {
             mib_per_second
         );
     }
+}
+
+struct RecvProgress {
+    enabled: bool,
+    total: Option<u64>,
+    completed: u64,
+    transferred: u64,
+    started: Instant,
+    last_draw: Instant,
+    last_rate_completed: u64,
+}
+
+impl RecvProgress {
+    fn new(enabled: bool, total: Option<u64>, completed: u64) -> Self {
+        let now = Instant::now();
+        Self {
+            enabled,
+            total,
+            completed,
+            transferred: 0,
+            started: now,
+            last_draw: now,
+            last_rate_completed: completed,
+        }
+    }
+
+    fn advance(&mut self, bytes: u64) {
+        self.completed = self.completed.saturating_add(bytes);
+        self.transferred = self.transferred.saturating_add(bytes);
+        if self.enabled && self.last_draw.elapsed() >= Duration::from_millis(250) {
+            self.draw(false);
+        }
+    }
+
+    fn finish(&mut self) {
+        if self.enabled {
+            self.draw(true);
+            eprintln!();
+        }
+    }
+
+    fn draw(&mut self, final_draw: bool) {
+        let now = Instant::now();
+        let elapsed = if final_draw {
+            now.duration_since(self.started)
+        } else {
+            now.duration_since(self.last_draw)
+        };
+        let rate_bytes = if final_draw {
+            self.transferred
+        } else {
+            self.completed.saturating_sub(self.last_rate_completed)
+        };
+        let bytes_per_second = if elapsed.as_secs_f64() > 0.0 {
+            rate_bytes as f64 / elapsed.as_secs_f64()
+        } else {
+            0.0
+        };
+
+        let message = match self.total {
+            Some(total) if total > 0 => {
+                let pct = (self.completed.min(total) as f64 / total as f64) * 100.0;
+                format!(
+                    "ii recv: {} / {} ({:.1}%) | {}/s",
+                    fmt_bytes(self.completed),
+                    fmt_bytes(total),
+                    pct,
+                    fmt_bytes(bytes_per_second as u64)
+                )
+            }
+            _ => format!(
+                "ii recv: {} received | {}/s",
+                fmt_bytes(self.completed),
+                fmt_bytes(bytes_per_second as u64)
+            ),
+        };
+
+        eprint!("\r{message:<96}");
+        let _ = std::io::stderr().flush();
+        self.last_draw = now;
+        self.last_rate_completed = self.completed;
+    }
+}
+
+fn should_show_progress(trace_enabled: bool) -> bool {
+    std::io::stderr().is_terminal() && !trace_enabled
 }
 
 fn trace_endpoint_addr(label: &str, addr: &iroh::EndpointAddr, trace: &RecvTrace) {
@@ -224,6 +309,7 @@ pub async fn send(args: SendArgs) -> Result<()> {
 
 pub async fn recv(args: RecvArgs) -> Result<()> {
     let mut trace = RecvTrace::new(args.trace);
+    let show_progress = should_show_progress(args.trace);
     trace.info(format_args!(
         "mode: {}",
         if args.local {
@@ -313,21 +399,21 @@ pub async fn recv(args: RecvArgs) -> Result<()> {
     let bytes_written = match ticket.kind {
         PayloadKind::File | PayloadKind::Stdin => {
             if args.stdout {
-                copy_to_stdout(recv).await?
+                copy_to_stdout(recv, ticket.size, show_progress).await?
             } else {
                 let (path, plan) = file_target.expect("file target exists");
                 let resume_from = match plan {
                     FilePlan::Download { resume_from } => resume_from,
                     FilePlan::Skip => 0,
                 };
-                write_to_file(recv, path, resume_from).await?
+                write_to_file(recv, path, resume_from, ticket.size, show_progress).await?
             }
         }
         PayloadKind::Dir => {
             if args.stdout {
                 bail!("--stdout is not supported for directory tickets");
             }
-            extract_tar_stream(recv, out_dir).await?
+            extract_tar_stream(recv, out_dir, ticket.size, show_progress).await?
         }
     };
     trace.step("receive payload");
@@ -672,6 +758,8 @@ async fn write_to_file(
     mut recv: iroh::endpoint::RecvStream,
     path: PathBuf,
     resume_from: u64,
+    total_size: Option<u64>,
+    show_progress: bool,
 ) -> Result<u64> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent).await.ok();
@@ -692,32 +780,49 @@ async fn write_to_file(
             .await
             .with_context(|| format!("open destination {}", path.display()))?
     };
-    let bytes = io::copy(&mut recv, &mut file)
+    let mut progress = RecvProgress::new(show_progress, total_size, resume_from);
+    let bytes = copy_with_progress(&mut recv, &mut file, &mut progress)
         .await
         .with_context(|| format!("write destination {}", path.display()))?;
+    progress.finish();
     file.flush()
         .await
         .with_context(|| format!("flush destination {}", path.display()))?;
     Ok(bytes)
 }
 
-async fn copy_to_stdout(mut recv: iroh::endpoint::RecvStream) -> Result<u64> {
+async fn copy_to_stdout(
+    mut recv: iroh::endpoint::RecvStream,
+    total_size: Option<u64>,
+    show_progress: bool,
+) -> Result<u64> {
     let mut stdout = io::stdout();
-    let bytes = io::copy(&mut recv, &mut stdout)
+    let mut progress = RecvProgress::new(show_progress, total_size, 0);
+    let bytes = copy_with_progress(&mut recv, &mut stdout, &mut progress)
         .await
         .context("write stdout")?;
+    progress.finish();
     stdout.flush().await.ok();
     Ok(bytes)
 }
 
-async fn extract_tar_stream(mut recv: iroh::endpoint::RecvStream, path: PathBuf) -> Result<u64> {
+async fn extract_tar_stream(
+    mut recv: iroh::endpoint::RecvStream,
+    path: PathBuf,
+    total_size: Option<u64>,
+    show_progress: bool,
+) -> Result<u64> {
     fs::create_dir_all(&path)
         .await
         .with_context(|| format!("create output dir {}", path.display()))?;
     let temp = NamedTempFile::new().context("create temp tar")?;
     let temp_path = temp.path().to_path_buf();
     let mut file = fs::File::from_std(temp.reopen().context("reopen temp tar")?);
-    let bytes = io::copy(&mut recv, &mut file).await.context("buffer tar")?;
+    let mut progress = RecvProgress::new(show_progress, total_size, 0);
+    let bytes = copy_with_progress(&mut recv, &mut file, &mut progress)
+        .await
+        .context("buffer tar")?;
+    progress.finish();
     file.flush().await.context("flush tar")?;
     let extract_path = path.clone();
     tokio::task::spawn_blocking(move || -> Result<()> {
@@ -729,6 +834,30 @@ async fn extract_tar_stream(mut recv: iroh::endpoint::RecvStream, path: PathBuf)
     .await
     .context("extract task")??;
     Ok(bytes)
+}
+
+async fn copy_with_progress<R, W>(
+    reader: &mut R,
+    writer: &mut W,
+    progress: &mut RecvProgress,
+) -> Result<u64>
+where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
+    let mut buf = [0u8; 64 * 1024];
+    let mut written = 0u64;
+    loop {
+        let n = reader.read(&mut buf).await.context("read payload")?;
+        if n == 0 {
+            break;
+        }
+        writer.write_all(&buf[..n]).await.context("write payload")?;
+        let n = n as u64;
+        written = written.saturating_add(n);
+        progress.advance(n);
+    }
+    Ok(written)
 }
 
 #[cfg(test)]

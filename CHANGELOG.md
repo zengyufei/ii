@@ -2,6 +2,12 @@
 
 All notable changes to `ii` are documented here.
 
+## Unreleased
+
+### Added
+
+- Added live `ii recv` transfer progress and speed display for interactive terminals.
+
 ## 0.1.2 - 2026-07-15
 
 ### Changed
