@@ -89,14 +89,14 @@ tar czf - .\project | ii send --name project.tar.gz
 : 禁用 relay，只允许直连和局域网路径。
 
 `--s3`
-: 走对象存储后端，不走 peer/relay 路径。默认 profile 是 Cloudflare R2。  
+: 走对象存储后端，不走 peer/relay 路径。默认 profile 是 `default`，默认 provider 是 Cloudflare R2。  
   如果本机还没有配置，`ii` 会在终端里依次提示 `Account ID`、`Bucket`、`Access Key ID`、`Secret Access Key`，成功后把配置写到平台默认路径：Windows 是 `ii.exe` 同目录下的 `ii.toml`，Linux/macOS/其他 Unix-like 是 `/etc/ii/ii.toml`。  
   之后再执行 `ii send ... --s3` 时，会直接复用这份配置。
 
 `--profile <name>`
 : 只在 `--s3` 或 `--webdav` 模式下生效，用来选择 `ii.toml` 里的后端 profile。  
   例子：`ii send .\file.zip --s3 --profile work`、`ii send .\file.zip --webdav --profile nas`。  
-  S3 不指定时默认使用 `storage.profile`，没有则使用 `cloudflare`；WebDAV 不指定时默认使用 `default`。
+  S3 和 WebDAV 不指定时都默认使用 `default`。旧的 `[storage.s3.cloudflare]` 会自动兼容迁移为 S3 的 `default` profile。
 
 `-d`
 : 只在 `--s3` 或 `--webdav` 模式下生效。接收端拿到文件后，会尝试删除中转端里的对应对象；删除失败会忽略，不影响下载结果。

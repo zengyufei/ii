@@ -8,7 +8,8 @@ use std::{
 
 const CONFIG_DIR_NAME: &str = "ii";
 const CONFIG_FILE_NAME: &str = "ii.toml";
-const DEFAULT_S3_PROFILE: &str = "cloudflare";
+const DEFAULT_S3_PROFILE: &str = "default";
+const LEGACY_CLOUDFLARE_S3_PROFILE: &str = "cloudflare";
 const DEFAULT_WEBDAV_PROFILE: &str = "default";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -152,27 +153,40 @@ pub fn save_config(path: &Path, config: &IiConfig) -> Result<()> {
 
 pub fn load_or_prompt_s3_profile() -> Result<S3ProfileSelection> {
     let path = default_config_path()?;
-    let config = load_config(&path)?;
-    let profile_name = config
-        .storage
-        .profile
-        .clone()
-        .unwrap_or_else(|| DEFAULT_S3_PROFILE.to_string());
-    load_or_prompt_s3_profile_named(&profile_name)
+    load_or_prompt_s3_profile_from_path(path, DEFAULT_S3_PROFILE)
 }
 
 pub fn load_or_prompt_s3_profile_named(profile_name: &str) -> Result<S3ProfileSelection> {
     let path = default_config_path()?;
-    let mut config = load_config(&path)?;
-    let mut profile = config
-        .storage
-        .s3
-        .get(profile_name)
-        .cloned()
-        .unwrap_or_else(S3Profile::empty_cloudflare);
-    let existed = config.storage.s3.contains_key(profile_name);
+    load_or_prompt_s3_profile_from_path(path, profile_name)
+}
 
-    let mut changed = false;
+fn load_or_prompt_s3_profile_from_path(
+    path: PathBuf,
+    profile_name: &str,
+) -> Result<S3ProfileSelection> {
+    let mut config = load_config(&path)?;
+    let existed = config.storage.s3.contains_key(profile_name);
+    let legacy_default = profile_name == DEFAULT_S3_PROFILE
+        && !existed
+        && config.storage.s3.contains_key(LEGACY_CLOUDFLARE_S3_PROFILE);
+    let mut profile = if legacy_default {
+        config
+            .storage
+            .s3
+            .get(LEGACY_CLOUDFLARE_S3_PROFILE)
+            .cloned()
+            .unwrap_or_else(S3Profile::empty_cloudflare)
+    } else {
+        config
+            .storage
+            .s3
+            .get(profile_name)
+            .cloned()
+            .unwrap_or_else(S3Profile::empty_cloudflare)
+    };
+
+    let mut changed = legacy_default;
     if profile.provider.trim().is_empty() {
         profile.provider = "cloudflare-r2".to_string();
         changed = true;
@@ -217,8 +231,6 @@ pub fn load_or_prompt_s3_profile_named(profile_name: &str) -> Result<S3ProfileSe
     }
 
     validate_required_profile_fields(&profile, &path)?;
-    config.storage.backend = Some("s3".to_string());
-    config.storage.profile = Some(profile_name.to_string());
     config
         .storage
         .s3
@@ -233,11 +245,19 @@ pub fn load_or_prompt_s3_profile_named(profile_name: &str) -> Result<S3ProfileSe
 }
 
 pub fn load_or_prompt_webdav_profile() -> Result<WebDavProfileSelection> {
-    load_or_prompt_webdav_profile_named(DEFAULT_WEBDAV_PROFILE)
+    let path = default_config_path()?;
+    load_or_prompt_webdav_profile_from_path(path, DEFAULT_WEBDAV_PROFILE)
 }
 
 pub fn load_or_prompt_webdav_profile_named(profile_name: &str) -> Result<WebDavProfileSelection> {
     let path = default_config_path()?;
+    load_or_prompt_webdav_profile_from_path(path, profile_name)
+}
+
+fn load_or_prompt_webdav_profile_from_path(
+    path: PathBuf,
+    profile_name: &str,
+) -> Result<WebDavProfileSelection> {
     let mut config = load_config(&path)?;
     let mut profile = config
         .storage
@@ -269,8 +289,6 @@ pub fn load_or_prompt_webdav_profile_named(profile_name: &str) -> Result<WebDavP
     }
 
     validate_webdav_profile(&profile, &path)?;
-    config.storage.backend = Some("webdav".to_string());
-    config.storage.profile = Some(profile_name.to_string());
     config
         .storage
         .webdav
@@ -574,5 +592,146 @@ mod tests {
         let profile = WebDavProfile::empty();
         assert_eq!(profile.remote_dir, "ii/");
         assert_eq!(profile.auth, WebDavAuth::Basic);
+    }
+
+    #[test]
+    fn s3_default_does_not_use_legacy_storage_profile() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ii.toml");
+        let mut config = IiConfig::default();
+        config.storage.backend = Some("webdav".to_string());
+        config.storage.profile = Some("default".to_string());
+        config.storage.s3.insert(
+            DEFAULT_S3_PROFILE.to_string(),
+            complete_s3_profile("s3-default"),
+        );
+        config.storage.webdav.insert(
+            DEFAULT_WEBDAV_PROFILE.to_string(),
+            complete_webdav_profile("https://dav.example.com"),
+        );
+        save_config(&path, &config).unwrap();
+
+        let selection = load_or_prompt_s3_profile_from_path(path, DEFAULT_S3_PROFILE).unwrap();
+
+        assert_eq!(selection.profile.bucket, "s3-default");
+        assert!(!selection.save_after_success);
+    }
+
+    #[test]
+    fn s3_default_migrates_legacy_cloudflare_profile() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ii.toml");
+        let mut config = IiConfig::default();
+        config.storage.backend = Some("webdav".to_string());
+        config.storage.profile = Some("default".to_string());
+        config.storage.s3.insert(
+            LEGACY_CLOUDFLARE_S3_PROFILE.to_string(),
+            complete_s3_profile("legacy-cloudflare"),
+        );
+        save_config(&path, &config).unwrap();
+
+        let selection = load_or_prompt_s3_profile_from_path(path, DEFAULT_S3_PROFILE).unwrap();
+
+        assert_eq!(selection.profile.bucket, "legacy-cloudflare");
+        assert!(selection.config.storage.s3.contains_key(DEFAULT_S3_PROFILE));
+        assert!(
+            selection
+                .config
+                .storage
+                .s3
+                .contains_key(LEGACY_CLOUDFLARE_S3_PROFILE)
+        );
+        assert!(selection.save_after_success);
+    }
+
+    #[test]
+    fn s3_named_profile_uses_s3_namespace_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ii.toml");
+        let mut config = IiConfig::default();
+        config
+            .storage
+            .s3
+            .insert("work".to_string(), complete_s3_profile("s3-work"));
+        config.storage.webdav.insert(
+            "work".to_string(),
+            complete_webdav_profile("https://dav-work.example.com"),
+        );
+        save_config(&path, &config).unwrap();
+
+        let selection = load_or_prompt_s3_profile_from_path(path, "work").unwrap();
+
+        assert_eq!(selection.profile.bucket, "s3-work");
+        assert!(!selection.save_after_success);
+    }
+
+    #[test]
+    fn webdav_default_does_not_use_legacy_storage_profile() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ii.toml");
+        let mut config = IiConfig::default();
+        config.storage.backend = Some("s3".to_string());
+        config.storage.profile = Some("default".to_string());
+        config.storage.s3.insert(
+            DEFAULT_S3_PROFILE.to_string(),
+            complete_s3_profile("s3-default"),
+        );
+        config.storage.webdav.insert(
+            DEFAULT_WEBDAV_PROFILE.to_string(),
+            complete_webdav_profile("https://dav-default.example.com"),
+        );
+        save_config(&path, &config).unwrap();
+
+        let selection =
+            load_or_prompt_webdav_profile_from_path(path, DEFAULT_WEBDAV_PROFILE).unwrap();
+
+        assert_eq!(selection.profile.url, "https://dav-default.example.com");
+        assert!(!selection.save_after_success);
+    }
+
+    #[test]
+    fn webdav_named_profile_uses_webdav_namespace_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ii.toml");
+        let mut config = IiConfig::default();
+        config
+            .storage
+            .s3
+            .insert("work".to_string(), complete_s3_profile("s3-work"));
+        config.storage.webdav.insert(
+            "work".to_string(),
+            complete_webdav_profile("https://dav-work.example.com"),
+        );
+        save_config(&path, &config).unwrap();
+
+        let selection = load_or_prompt_webdav_profile_from_path(path, "work").unwrap();
+
+        assert_eq!(selection.profile.url, "https://dav-work.example.com");
+        assert!(!selection.save_after_success);
+    }
+
+    fn complete_s3_profile(bucket: &str) -> S3Profile {
+        S3Profile {
+            provider: "cloudflare-r2".to_string(),
+            account_id: Some("account".to_string()),
+            bucket: bucket.to_string(),
+            endpoint: "https://account.r2.cloudflarestorage.com".to_string(),
+            region: "auto".to_string(),
+            access_key_id: "key-id".to_string(),
+            secret_access_key: "secret".to_string(),
+            prefix: default_prefix(),
+            presign_ttl_seconds: default_presign_ttl_seconds(),
+            path_style: default_path_style(),
+        }
+    }
+
+    fn complete_webdav_profile(url: &str) -> WebDavProfile {
+        WebDavProfile {
+            url: url.to_string(),
+            username: "user".to_string(),
+            password: "pass".to_string(),
+            remote_dir: default_prefix(),
+            auth: WebDavAuth::Basic,
+        }
     }
 }

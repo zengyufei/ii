@@ -6,6 +6,18 @@ All notable changes to `ii` are documented here. The default Chinese version is 
 
 Nothing yet.
 
+## 0.1.7 - 2026-07-16
+
+### Changed
+
+- Enabled release LTO, strip, `opt-level = "z"`, and `panic = "abort"` to further reduce binary size.
+- Made `ii doctor` report metrics as disabled when the `relay-metrics` feature is not enabled.
+
+### Fixed
+
+- Fixed S3/WebDAV default profile selection so the old shared `[storage].profile` field no longer crosses backend boundaries.
+- Kept compatibility migration from the old `[storage.s3.cloudflare]` profile while standardizing the default S3 profile on `default`.
+
 ## 0.1.6 - 2026-07-16
 
 ### Documentation

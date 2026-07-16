@@ -910,8 +910,6 @@ fn portable_webdav_config(
 ) -> Result<(PathBuf, storage::IiConfig)> {
     let path = storage::default_config_path()?;
     let mut config = storage::load_config(&path)?;
-    config.storage.backend = Some("webdav".to_string());
-    config.storage.profile = Some(profile_name.to_string());
     config
         .storage
         .webdav

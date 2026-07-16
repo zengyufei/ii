@@ -206,7 +206,7 @@ Release changes are documented in [CHANGELOG.en.md](CHANGELOG.en.md). The defaul
 
 ## Version
 
-The current version is managed by Git tags. This repository currently uses `v0.1.6`.
+The current version is managed by Git tags. This repository currently uses `v0.1.7`.
 
 ## License
 

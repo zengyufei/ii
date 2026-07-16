@@ -1,6 +1,6 @@
 [package]
 name = "ii"
-version = "0.1.6"
+version = "0.1.7"
 edition = "2024"
 rust-version = "1.91"
 license = "MIT"
@@ -37,6 +37,13 @@ winresource = "0.1"
 [features]
 default = []
 relay-metrics = ["iroh-relay/metrics"]
+
+[profile.release]
+codegen-units = 1
+lto = "fat"
+opt-level = "z"
+panic = "abort"
+strip = true
 
 [patch.crates-io]
 iroh-base = { path = "vendor/iroh/iroh-base" }

@@ -23,7 +23,10 @@ pub async fn run() -> Result<()> {
 
     check_tcp("http", 80);
     check_tcp("https", 443);
+    #[cfg(feature = "relay-metrics")]
     check_tcp("metrics", 9090);
+    #[cfg(not(feature = "relay-metrics"))]
+    println!("metrics: disabled in this build");
     check_udp("quic", 7842);
     Ok(())
 }
@@ -34,11 +37,13 @@ fn report_s3_config(path: &std::path::Path) {
     }
     match storage::load_config(path) {
         Ok(config) => {
-            let profile = config
-                .storage
-                .profile
-                .filter(|profile| config.storage.s3.contains_key(profile))
-                .unwrap_or_else(|| "cloudflare".to_string());
+            let profile = if config.storage.s3.contains_key("default") {
+                "default".to_string()
+            } else if config.storage.s3.contains_key("cloudflare") {
+                "cloudflare".to_string()
+            } else {
+                "default".to_string()
+            };
             println!("s3 profile: {profile}");
             match config.storage.s3.get(&profile) {
                 Some(s3) => {
@@ -67,11 +72,7 @@ fn report_webdav_config(path: &std::path::Path) {
     }
     match storage::load_config(path) {
         Ok(config) => {
-            let profile = config
-                .storage
-                .profile
-                .filter(|profile| config.storage.webdav.contains_key(profile))
-                .unwrap_or_else(|| "default".to_string());
+            let profile = "default".to_string();
             println!("webdav profile: {profile}");
             match config.storage.webdav.get(&profile) {
                 Some(webdav) => {

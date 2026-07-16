@@ -6,6 +6,18 @@
 
 暂无。
 
+## 0.1.7 - 2026-07-16
+
+### 变更
+
+- Release 构建启用 LTO、strip、`opt-level = "z"` 和 `panic = "abort"`，进一步压缩二进制体积。
+- `ii doctor` 在未启用 `relay-metrics` feature 时明确显示 metrics 未启用。
+
+### 修复
+
+- 修正 S3/WebDAV 默认 profile 选择逻辑，避免被 `[storage].profile` 的旧共享字段互相干扰。
+- 保留旧 `[storage.s3.cloudflare]` 配置的兼容迁移，默认 S3 profile 统一为 `default`。
+
 ## 0.1.6 - 2026-07-16
 
 ### 文档
