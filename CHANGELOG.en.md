@@ -2,6 +2,20 @@
 
 All notable changes to `ii` are documented here. The default Chinese version is [CHANGELOG.md](CHANGELOG.md).
 
+## Unreleased
+
+Nothing yet.
+
+## 0.1.5 - 2026-07-16
+
+### Added
+
+- Added `ii send --webdav` for sending files, stdin, and folders through a WebDAV transfer backend.
+- Added `ii send --webdav -p` to create portable tickets containing the WebDAV URL, username, and password for receivers without local config.
+- Added `ii send --webdav -d` so the receiver can try deleting the remote WebDAV object after a successful receive.
+- Added `ii send --profile <name>` for selecting an S3 or WebDAV backend profile.
+- Added WebDAV config checks to `ii doctor`.
+
 ## 0.1.4 - 2026-07-16
 
 ### Changed

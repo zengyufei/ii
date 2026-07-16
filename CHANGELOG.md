@@ -2,6 +2,20 @@
 
 本文件记录 `ii` 的重要变更。默认中文版本在这里，英文版本见 [CHANGELOG.en.md](CHANGELOG.en.md)。
 
+## Unreleased
+
+暂无。
+
+## 0.1.5 - 2026-07-16
+
+### 新增
+
+- 新增 `ii send --webdav`，支持通过 WebDAV 中转发送文件、stdin 和目录。
+- 新增 `ii send --webdav -p`，生成包含 WebDAV URL、用户名和密码的便携 ticket，方便接收端无配置接收。
+- `ii send --webdav -d` 支持接收成功后由接收端尝试删除 WebDAV 远端对象。
+- 新增 `ii send --profile <name>`，用于选择 S3 或 WebDAV 后端 profile。
+- `ii doctor` 增加 WebDAV 配置检查。
+
 ## 0.1.4 - 2026-07-16
 
 ### 变更

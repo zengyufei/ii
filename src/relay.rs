@@ -1,9 +1,9 @@
 use crate::cli::RelayArgs;
 use anyhow::{Context, Result, bail};
+#[cfg(feature = "relay-metrics")]
+use iroh_relay::defaults::DEFAULT_METRICS_PORT;
 use iroh_relay::{
-    defaults::{
-        DEFAULT_HTTP_PORT, DEFAULT_HTTPS_PORT, DEFAULT_METRICS_PORT, DEFAULT_RELAY_QUIC_PORT,
-    },
+    defaults::{DEFAULT_HTTP_PORT, DEFAULT_HTTPS_PORT, DEFAULT_RELAY_QUIC_PORT},
     server::{
         self, AcmeConfig, CertConfig, DEFAULT_CERT_RELOAD_INTERVAL, QuicConfig, reloading_resolver,
     },
@@ -198,11 +198,16 @@ async fn build_server_config(cfg: RelayFile, dev: bool) -> Result<server::Server
     let mut server_cfg = server::ServerConfig::default();
     server_cfg.relay = Some(relay_cfg);
     server_cfg.quic = quic_cfg;
+    #[cfg(feature = "relay-metrics")]
     if cfg.enable_metrics {
         server_cfg.metrics_addr = Some(
             cfg.metrics_bind_addr
                 .unwrap_or_else(|| socket_addr(DEFAULT_METRICS_PORT)),
         );
+    }
+    #[cfg(not(feature = "relay-metrics"))]
+    if cfg.enable_metrics {
+        bail!("relay metrics are not enabled in this build");
     }
     Ok(server_cfg)
 }

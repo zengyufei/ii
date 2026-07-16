@@ -1,6 +1,7 @@
 mod cli;
 mod doctor;
 mod relay;
+mod storage;
 mod ticket;
 mod transfer;
 

@@ -13,13 +13,23 @@
 # Logs and diagnostics
 *.log
 *.trace
+*.pdb
+*.profraw
+*.profdata
 
 # Local runtime config and private relay material
+/ii.toml
 /relay.toml
 /default.crt
 /default.key
 *.pem
 *.key
+
+# Local binaries copied out of target/
+/ii
+/ii.exe
+/ii-relay
+/ii-relay.exe
 
 # Editor and OS files
 .vscode/

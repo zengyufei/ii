@@ -19,13 +19,15 @@
   <strong>简体中文</strong> · <a href="README.en.md">English</a>
 </p>
 
-`ii` 面向临时传文件：
+`ii` 面向临时传文件/夹：
 
-- 发送端默认一次性发送，成功后退出
-- 复杂网络下会短时间尝试寻找可用通路
-- 接收端默认断点续传
-- 已存在且 MD5 相同的文件会直接跳过
-- 文件夹可以直接发送
+直发目录 / 一次即走 / 持续发送 / 自动复制到粘贴板或落盘
+
+自动找路 / 局域网优先 / 可公网中继或 `--s3` / `--webdav` 中继
+
+断点续收 / 秒传跳过 / 冲突覆盖 / 支持传完清理中转
+
+进度速率 / 完成耗时 / 支持诊断本机 / 支持自建中继
 
 ## 快速开始
 
@@ -74,7 +76,7 @@ ii recv ii1k7v...x9a -o D:\Downloads
 
 断网或传到一半失败后，重新执行同一条 `ii recv` 就会继续接收；如果目标文件已经完整且内容相同，会直接跳过；如果同名但内容不同，会覆盖。
 
-`ii recv` 会在终端里实时显示传输进度和速率；如果你开了 `--trace`，它会切到诊断输出，方便排查连接慢在哪里。
+`ii send` 和 `ii recv` 都会在终端里实时显示传输进度和速率；完成后会打印最终耗时。`--trace` 主要用于诊断，方便排查连接慢在哪里。
 
 ## 发送目录
 
@@ -131,6 +133,34 @@ ii send .\file.zip --local
 ii recv ii1k7v...x9a --local
 ```
 
+通过 WebDAV 中转：
+
+```powershell
+ii send .\video.mp4 --webdav
+ii recv ii1k7v...x9a
+```
+
+选择指定后端 profile：
+
+```powershell
+ii send .\video.mp4 --s3 --profile work
+ii send .\video.mp4 --webdav --profile nas
+```
+
+如果接收方没有 WebDAV 配置，可以用便携 ticket：
+
+```powershell
+ii send .\video.mp4 --webdav -p
+```
+
+`-p` 会把 WebDAV URL、用户名和密码写进 ticket，方便但不安全，只适合你信任 ticket 接收方的场景。
+
+接收成功后，`-p` ticket 内的 WebDAV 配置会写入接收端本机 `ii.toml`。如果希望接收后清理 WebDAV 上的对象，可以加 `-d`：
+
+```powershell
+ii send .\video.mp4 --webdav -p -d
+```
+
 ## 诊断
 
 排查为什么慢：
@@ -178,7 +208,7 @@ TLS 生产模式主要走 ACME 自动签发；开发模式可以用 `--dev` 走 
 
 ## 版本
 
-当前版本由 Git tag 管理。仓库内已使用 `v0.1.4`。
+当前版本由 Git tag 管理。仓库内已使用 `v0.1.5`。
 
 ## 许可证
 

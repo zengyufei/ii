@@ -1,14 +1,18 @@
 use crate::{
     cli::{RecvArgs, SendArgs},
-    ticket::{PayloadKind, ResumeRequest, Ticket},
+    storage,
+    ticket::{PayloadKind, ResumeRequest, Ticket, WebDavPortableCredentials},
 };
 use anyhow::{Context, Result, bail};
+use futures_util::TryStreamExt;
 use iroh::{Endpoint, RelayMap, RelayMode, SecretKey, endpoint::presets};
+use reqwest_dav::Depth;
 use std::{
     ffi::OsStr,
     io::{IsTerminal, Read, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
+    sync::{Arc, Mutex},
     time::{Duration, Instant},
 };
 use tempfile::NamedTempFile;
@@ -16,6 +20,7 @@ use tokio::{
     fs,
     io::{self, AsyncRead, AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt},
 };
+use tokio_util::io::ReaderStream;
 
 const ALPN: &[u8] = b"ii/file/1";
 const DEFAULT_CONNECT_FAST_PATH_TIMEOUT: Duration = Duration::from_secs(3);
@@ -81,7 +86,8 @@ impl RecvTrace {
     }
 }
 
-struct RecvProgress {
+struct TransferProgress {
+    label: &'static str,
     enabled: bool,
     total: Option<u64>,
     completed: u64,
@@ -91,10 +97,11 @@ struct RecvProgress {
     last_rate_completed: u64,
 }
 
-impl RecvProgress {
-    fn new(enabled: bool, total: Option<u64>, completed: u64) -> Self {
+impl TransferProgress {
+    fn new(label: &'static str, enabled: bool, total: Option<u64>, completed: u64) -> Self {
         let now = Instant::now();
         Self {
+            label,
             enabled,
             total,
             completed,
@@ -140,7 +147,8 @@ impl RecvProgress {
 
         let message = if final_draw {
             format!(
-                "ii recv: done: {} in {} | avg {}/s",
+                "{}: done: {} in {} | avg {}/s",
+                self.label,
                 fmt_bytes(self.completed),
                 fmt_duration(now.duration_since(self.started)),
                 fmt_bytes(bytes_per_second as u64)
@@ -150,7 +158,8 @@ impl RecvProgress {
                 Some(total) if total > 0 => {
                     let pct = (self.completed.min(total) as f64 / total as f64) * 100.0;
                     format!(
-                        "ii recv: {} / {} ({:.1}%) | {}/s",
+                        "{}: {} / {} ({:.1}%) | {}/s",
+                        self.label,
                         fmt_bytes(self.completed),
                         fmt_bytes(total),
                         pct,
@@ -158,7 +167,8 @@ impl RecvProgress {
                     )
                 }
                 _ => format!(
-                    "ii recv: {} received | {}/s",
+                    "{}: {} received | {}/s",
+                    self.label,
                     fmt_bytes(self.completed),
                     fmt_bytes(bytes_per_second as u64)
                 ),
@@ -256,6 +266,20 @@ fn md5_path_blocking(path: &Path) -> Result<[u8; 16]> {
 }
 
 pub async fn send(args: SendArgs) -> Result<()> {
+    let show_progress = should_show_progress(false);
+    if args.delete_after_recv && !args.s3 && !args.webdav {
+        bail!("-d requires --s3 or --webdav");
+    }
+    if args.profile.is_some() && !args.s3 && !args.webdav {
+        bail!("--profile requires --s3 or --webdav");
+    }
+    if args.s3 {
+        return send_s3(args, show_progress).await;
+    }
+    if args.webdav {
+        return send_webdav(args, show_progress).await;
+    }
+
     let source = Source::open(args.path.clone(), args.name.clone()).await?;
     let endpoint = bind_endpoint(relay_mode_for_send(&args)?).await?;
 
@@ -263,14 +287,13 @@ pub async fn send(args: SendArgs) -> Result<()> {
         endpoint.online().await;
     }
 
-    let ticket = Ticket {
-        version: 2,
-        endpoint: endpoint.addr(),
-        name: source.name().to_string(),
-        kind: source.kind(),
-        size: source.size(),
-        content_md5: source.content_md5(),
-    };
+    let ticket = Ticket::peer(
+        endpoint.addr(),
+        source.name().to_string(),
+        source.kind(),
+        source.size(),
+        source.content_md5(),
+    );
     let ticket_str = ticket.encode()?;
     print_ticket(&ticket_str, args.copy, args.output.clone())?;
 
@@ -296,7 +319,7 @@ pub async fn send(args: SendArgs) -> Result<()> {
                         continue;
                     }
                 };
-                match serve_one(conn, &source).await {
+                match serve_one(conn, &source, show_progress).await {
                     Ok(ServeOutcome::Sent) => {
                         accepted += 1;
                         if !args.keep_alive {
@@ -317,6 +340,249 @@ pub async fn send(args: SendArgs) -> Result<()> {
     Ok(())
 }
 
+async fn send_s3(args: SendArgs, show_progress: bool) -> Result<()> {
+    let selection = match args.profile.as_deref() {
+        Some(profile) => storage::load_or_prompt_s3_profile_named(profile)?,
+        None => storage::load_or_prompt_s3_profile()?,
+    };
+    let source = Source::open(args.path.clone(), args.name.clone()).await?;
+    let upload = upload_to_s3(
+        &source,
+        &selection.profile,
+        args.delete_after_recv,
+        show_progress,
+    )
+    .await?;
+    if selection.save_after_success {
+        storage::save_config(&selection.path, &selection.config)?;
+    }
+    let ticket = Ticket::s3(
+        upload.download_url,
+        upload.delete_url,
+        upload.object_key,
+        source.name().to_string(),
+        source.kind(),
+        source.size(),
+        source.content_md5(),
+    );
+    let ticket_str = ticket.encode()?;
+    print_ticket(&ticket_str, args.copy, args.output.clone())?;
+    Ok(())
+}
+
+struct S3UploadResult {
+    download_url: String,
+    delete_url: Option<String>,
+    object_key: String,
+}
+
+async fn upload_to_s3(
+    source: &Source,
+    profile: &storage::S3Profile,
+    delete_after_recv: bool,
+    show_progress: bool,
+) -> Result<S3UploadResult> {
+    let source_path = source.local_path();
+    let source_size = source.size();
+    let profile = profile.clone();
+    let object_key = match source.content_md5() {
+        Some(content_md5) => storage::content_addressed_object_key(&profile.prefix, content_md5),
+        None => storage::normalized_object_key(
+            &profile.prefix,
+            &uuid::Uuid::new_v4().simple().to_string(),
+            source.name(),
+        ),
+    };
+    let object_path = profile.s3_path(&object_key);
+    tokio::task::spawn_blocking(move || -> Result<S3UploadResult> {
+        let bucket = storage::build_bucket(&profile)?;
+        if !s3_object_exists(&bucket, &object_path)? {
+            let file = std::fs::File::open(&source_path)
+                .with_context(|| format!("open source file {}", source_path.display()))?;
+            let progress = TransferProgress::new("ii send", show_progress, source_size, 0);
+            let mut file = ProgressReader::new(file, progress);
+            let status = bucket
+                .put_object_stream(&mut file, &object_path)
+                .context("upload to S3")?;
+            if !(200..300).contains(&status) {
+                bail!("S3 upload failed with status {status}");
+            }
+            file.finish();
+        }
+        let download_url = bucket
+            .presign_get(&object_path, profile.presign_ttl_seconds, None)
+            .context("create presigned download url")?;
+        let delete_url = if delete_after_recv {
+            Some(
+                bucket
+                    .presign_delete(&object_path, profile.presign_ttl_seconds)
+                    .context("create presigned delete url")?,
+            )
+        } else {
+            None
+        };
+        Ok(S3UploadResult {
+            download_url,
+            delete_url,
+            object_key,
+        })
+    })
+    .await
+    .context("upload task")?
+}
+
+fn s3_object_exists(bucket: &s3::Bucket, object_path: &str) -> Result<bool> {
+    match bucket.head_object(object_path) {
+        Ok((_, code)) if (200..300).contains(&code) => Ok(true),
+        Ok((_, 404)) => Ok(false),
+        Ok((_, code)) => bail!("S3 object check failed with status {code}"),
+        Err(_) => Ok(false),
+    }
+}
+
+async fn send_webdav(args: SendArgs, show_progress: bool) -> Result<()> {
+    let selection = match args.profile.as_deref() {
+        Some(profile) => storage::load_or_prompt_webdav_profile_named(profile)?,
+        None => storage::load_or_prompt_webdav_profile()?,
+    };
+    let source = Source::open(args.path.clone(), args.name.clone()).await?;
+    let upload = upload_to_webdav(&source, &selection.profile, show_progress).await?;
+    if selection.save_after_success {
+        storage::save_config(&selection.path, &selection.config)?;
+    }
+    let portable = if args.portable_webdav {
+        eprintln!("ii send: warning: portable WebDAV ticket includes URL, username, and password");
+        Some(WebDavPortableCredentials {
+            url: selection.profile.url.clone(),
+            username: selection.profile.username.clone(),
+            password: selection.profile.password.clone(),
+            auth: webdav_auth_name(&selection.profile.auth).to_string(),
+        })
+    } else {
+        None
+    };
+    let ticket = Ticket::webdav(
+        selection.profile_name,
+        upload.object_key,
+        args.delete_after_recv,
+        portable,
+        source.name().to_string(),
+        source.kind(),
+        source.size(),
+        source.content_md5(),
+    );
+    let ticket_str = ticket.encode()?;
+    print_ticket(&ticket_str, args.copy, args.output.clone())?;
+    Ok(())
+}
+
+struct WebDavUploadResult {
+    object_key: String,
+}
+
+async fn upload_to_webdav(
+    source: &Source,
+    profile: &storage::WebDavProfile,
+    show_progress: bool,
+) -> Result<WebDavUploadResult> {
+    let client = storage::build_webdav_client(profile)?;
+    let object_key = match source.content_md5() {
+        Some(content_md5) => {
+            storage::content_addressed_object_key(&profile.remote_dir, content_md5)
+        }
+        None => storage::normalized_object_key(
+            &profile.remote_dir,
+            &uuid::Uuid::new_v4().simple().to_string(),
+            source.name(),
+        ),
+    };
+    ensure_webdav_parent_dirs(&client, &object_key).await?;
+    if webdav_object_exists(&client, &object_key).await? {
+        return Ok(WebDavUploadResult { object_key });
+    }
+
+    let file = source.open_file().await?;
+    let progress = Arc::new(Mutex::new(TransferProgress::new(
+        "ii send",
+        show_progress,
+        source.size(),
+        0,
+    )));
+    let progress_for_stream = Arc::clone(&progress);
+    let stream = ReaderStream::new(file).inspect_ok(move |bytes| {
+        if let Ok(mut progress) = progress_for_stream.lock() {
+            progress.advance(bytes.len() as u64);
+        }
+    });
+    let body = reqwest_dav::re_exports::reqwest::Body::wrap_stream(stream);
+    let response = client
+        .start_request(reqwest_dav::re_exports::reqwest::Method::PUT, &object_key)
+        .await
+        .with_context(|| format!("prepare WebDAV upload {object_key}"))?
+        .header("content-type", "application/octet-stream")
+        .header("content-length", source.size().unwrap_or(0).to_string())
+        .body(body)
+        .send()
+        .await
+        .with_context(|| format!("upload WebDAV object {object_key}"))?;
+    let status = response.status().as_u16();
+    if !(200..300).contains(&status) {
+        bail!("WebDAV upload failed with status {status}");
+    }
+    if let Ok(mut progress) = progress.lock() {
+        progress.finish();
+    }
+    Ok(WebDavUploadResult { object_key })
+}
+
+async fn ensure_webdav_parent_dirs(client: &reqwest_dav::Client, object_key: &str) -> Result<()> {
+    let mut current = String::new();
+    let parts = object_key.trim_matches('/').split('/').collect::<Vec<_>>();
+    for part in parts.iter().take(parts.len().saturating_sub(1)) {
+        if part.is_empty() {
+            continue;
+        }
+        if !current.is_empty() {
+            current.push('/');
+        }
+        current.push_str(part);
+        match client.mkcol(&current).await {
+            Ok(()) => {}
+            Err(err) if matches!(webdav_error_status(&err), Some(405 | 409)) => {}
+            Err(err) => return Err(err).with_context(|| format!("create WebDAV dir {current}")),
+        }
+    }
+    Ok(())
+}
+
+async fn webdav_object_exists(client: &reqwest_dav::Client, object_key: &str) -> Result<bool> {
+    match client.list(object_key, Depth::Number(0)).await {
+        Ok(_) => Ok(true),
+        Err(err) if webdav_error_status(&err) == Some(404) => Ok(false),
+        Err(err) => Err(err).with_context(|| format!("check WebDAV object {object_key}")),
+    }
+}
+
+fn webdav_error_status(err: &reqwest_dav::Error) -> Option<u16> {
+    match err {
+        reqwest_dav::Error::Reqwest(err) => err.status().map(|status| status.as_u16()),
+        reqwest_dav::Error::Decode(reqwest_dav::DecodeError::StatusMismatched(status)) => {
+            Some(status.response_code)
+        }
+        reqwest_dav::Error::Decode(reqwest_dav::DecodeError::Server(server)) => {
+            Some(server.response_code)
+        }
+        _ => None,
+    }
+}
+
+fn webdav_auth_name(auth: &storage::WebDavAuth) -> &'static str {
+    match auth {
+        storage::WebDavAuth::Basic => "basic",
+        storage::WebDavAuth::Digest => "digest",
+    }
+}
+
 pub async fn recv(args: RecvArgs) -> Result<()> {
     let mut trace = RecvTrace::new(args.trace);
     let show_progress = should_show_progress(args.trace);
@@ -333,32 +599,50 @@ pub async fn recv(args: RecvArgs) -> Result<()> {
     trace.step("decode ticket");
     trace.info(format_args!(
         "ticket: kind={}, name={}, size={}",
-        payload_kind_name(ticket.kind),
-        ticket.name.as_str(),
+        payload_kind_name(ticket.kind()),
+        ticket.name(),
         ticket
-            .size
+            .size()
             .map(|size| size.to_string())
             .unwrap_or_else(|| "unknown".to_string())
     ));
-    trace_endpoint_addr("ticket endpoints", &ticket.endpoint, &trace);
+    if let Some(endpoint) = ticket.endpoint() {
+        trace_endpoint_addr("ticket endpoints", endpoint, &trace);
+    }
+    if let Some(s3) = ticket.s3_route() {
+        trace.info(format_args!("ticket s3 object: {}", s3.object_key));
+    }
 
     let out_dir = args
         .out_dir
         .clone()
         .unwrap_or(std::env::current_dir().context("current dir")?);
     let file_target =
-        if matches!(ticket.kind, PayloadKind::File | PayloadKind::Stdin) && !args.stdout {
-            let path = out_dir.join(&ticket.name);
+        if matches!(ticket.kind(), PayloadKind::File | PayloadKind::Stdin) && !args.stdout {
+            let path = out_dir.join(ticket.name());
             let plan = plan_file_receive(&args, &ticket, &path, &trace).await?;
             if plan == FilePlan::Skip {
                 trace.info(format_args!("skipped identical file {}", path.display()));
                 eprintln!("ii recv: skipped identical file {}", path.display());
+                if let Some(s3) = ticket.s3_route() {
+                    try_delete_s3(s3.delete_url.clone(), &mut trace).await;
+                }
+                if let Some(webdav) = ticket.webdav_route() {
+                    try_delete_webdav_for_ticket(webdav.clone(), &mut trace).await;
+                }
                 return Ok(());
             }
             Some((path, plan))
         } else {
             None
         };
+
+    if ticket.s3_route().is_some() {
+        return recv_s3(args, ticket, out_dir, file_target, trace, show_progress).await;
+    }
+    if ticket.webdav_route().is_some() {
+        return recv_webdav(args, ticket, out_dir, file_target, trace, show_progress).await;
+    }
 
     let endpoint = bind_endpoint(if args.local {
         RelayMode::Disabled
@@ -373,7 +657,10 @@ pub async fn recv(args: RecvArgs) -> Result<()> {
         trace.step("wait online");
     }
 
-    let mut endpoint_addr = ticket.endpoint.clone();
+    let mut endpoint_addr = ticket
+        .endpoint()
+        .cloned()
+        .context("peer ticket missing endpoint")?;
     if args.local {
         endpoint_addr = filter_local_addrs(endpoint_addr);
         trace_endpoint_addr("local-filtered endpoints", &endpoint_addr, &trace);
@@ -406,24 +693,24 @@ pub async fn recv(args: RecvArgs) -> Result<()> {
     send.finish().context("finish request")?;
     trace.step("send transfer request");
 
-    let bytes_written = match ticket.kind {
+    let bytes_written = match ticket.kind() {
         PayloadKind::File | PayloadKind::Stdin => {
             if args.stdout {
-                copy_to_stdout(recv, ticket.size, show_progress).await?
+                copy_to_stdout(recv, ticket.size(), show_progress).await?
             } else {
                 let (path, plan) = file_target.expect("file target exists");
                 let resume_from = match plan {
                     FilePlan::Download { resume_from } => resume_from,
                     FilePlan::Skip => 0,
                 };
-                write_to_file(recv, path, resume_from, ticket.size, show_progress).await?
+                write_to_file(recv, path, resume_from, ticket.size(), show_progress).await?
             }
         }
         PayloadKind::Dir => {
             if args.stdout {
                 bail!("--stdout is not supported for directory tickets");
             }
-            extract_tar_stream(recv, out_dir, ticket.size, show_progress).await?
+            extract_tar_stream(recv, out_dir, ticket.size(), show_progress).await?
         }
     };
     trace.step("receive payload");
@@ -433,6 +720,586 @@ pub async fn recv(args: RecvArgs) -> Result<()> {
     endpoint.close().await;
     trace.finish(bytes_written);
     Ok(())
+}
+
+async fn recv_s3(
+    args: RecvArgs,
+    ticket: Ticket,
+    out_dir: PathBuf,
+    file_target: Option<(PathBuf, FilePlan)>,
+    mut trace: RecvTrace,
+    show_progress: bool,
+) -> Result<()> {
+    let s3 = ticket
+        .s3_route()
+        .context("s3 ticket missing route")?
+        .clone();
+    trace.info("using s3 storage route");
+    let bytes_written = match ticket.kind() {
+        PayloadKind::File | PayloadKind::Stdin => {
+            if args.stdout {
+                download_s3_to_stdout(
+                    s3.download_url.clone(),
+                    ticket.size(),
+                    show_progress,
+                    &mut trace,
+                )
+                .await?
+            } else {
+                let (path, plan) = file_target.expect("file target exists");
+                let resume_from = match plan {
+                    FilePlan::Download { resume_from } => resume_from,
+                    FilePlan::Skip => 0,
+                };
+                download_s3_to_file(
+                    s3.download_url.clone(),
+                    path,
+                    resume_from,
+                    ticket.size(),
+                    show_progress,
+                    &mut trace,
+                )
+                .await?
+            }
+        }
+        PayloadKind::Dir => {
+            if args.stdout {
+                bail!("--stdout is not supported for directory tickets");
+            }
+            download_s3_tar(
+                s3.download_url.clone(),
+                out_dir,
+                ticket.size(),
+                show_progress,
+                &mut trace,
+            )
+            .await?
+        }
+    };
+    trace.step("receive payload");
+    trace.info(format_args!("received {} bytes", bytes_written));
+    try_delete_s3(s3.delete_url.clone(), &mut trace).await;
+    trace.finish(bytes_written);
+    Ok(())
+}
+
+async fn recv_webdav(
+    args: RecvArgs,
+    ticket: Ticket,
+    out_dir: PathBuf,
+    file_target: Option<(PathBuf, FilePlan)>,
+    mut trace: RecvTrace,
+    show_progress: bool,
+) -> Result<()> {
+    let webdav = ticket
+        .webdav_route()
+        .context("webdav ticket missing route")?
+        .clone();
+    trace.info(format_args!("using webdav object {}", webdav.object_key));
+    let (profile, save_after_success) = match &webdav.portable {
+        Some(portable) => {
+            let profile = webdav_profile_from_portable(portable)?;
+            let save = portable_webdav_config(&webdav.profile, &profile)?;
+            (profile, Some(save))
+        }
+        None => {
+            let selection = storage::load_or_prompt_webdav_profile_named(&webdav.profile)?;
+            let save = selection
+                .save_after_success
+                .then_some((selection.path.clone(), selection.config.clone()));
+            (selection.profile, save)
+        }
+    };
+    let client = storage::build_webdav_client(&profile)?;
+
+    let bytes_written = match ticket.kind() {
+        PayloadKind::File | PayloadKind::Stdin => {
+            if args.stdout {
+                download_webdav_to_stdout(
+                    &client,
+                    &webdav.object_key,
+                    ticket.size(),
+                    show_progress,
+                    &mut trace,
+                )
+                .await?
+            } else {
+                let (path, plan) = file_target.expect("file target exists");
+                let resume_from = match plan {
+                    FilePlan::Download { resume_from } => resume_from,
+                    FilePlan::Skip => 0,
+                };
+                download_webdav_to_file(
+                    &client,
+                    &webdav.object_key,
+                    path,
+                    resume_from,
+                    ticket.size(),
+                    show_progress,
+                    &mut trace,
+                )
+                .await?
+            }
+        }
+        PayloadKind::Dir => {
+            if args.stdout {
+                bail!("--stdout is not supported for directory tickets");
+            }
+            download_webdav_tar(
+                &client,
+                &webdav.object_key,
+                out_dir,
+                ticket.size(),
+                show_progress,
+                &mut trace,
+            )
+            .await?
+        }
+    };
+    if let Some((path, config)) = save_after_success {
+        storage::save_config(&path, &config)?;
+    }
+    trace.step("receive payload");
+    trace.info(format_args!("received {} bytes", bytes_written));
+    try_delete_webdav(
+        &client,
+        &webdav.object_key,
+        webdav.delete_after_recv,
+        &mut trace,
+    )
+    .await;
+    trace.finish(bytes_written);
+    Ok(())
+}
+
+async fn try_delete_webdav_for_ticket(webdav: crate::ticket::WebDavTicket, trace: &mut RecvTrace) {
+    if !webdav.delete_after_recv {
+        return;
+    }
+    let result = async {
+        let (profile, save_after_success) = match &webdav.portable {
+            Some(portable) => {
+                let profile = webdav_profile_from_portable(portable)?;
+                let save = portable_webdav_config(&webdav.profile, &profile)?;
+                (profile, Some(save))
+            }
+            None => {
+                let selection = storage::load_or_prompt_webdav_profile_named(&webdav.profile)?;
+                let save = selection
+                    .save_after_success
+                    .then_some((selection.path.clone(), selection.config.clone()));
+                (selection.profile, save)
+            }
+        };
+        let client = storage::build_webdav_client(&profile)?;
+        try_delete_webdav(&client, &webdav.object_key, true, trace).await;
+        if let Some((path, config)) = save_after_success {
+            storage::save_config(&path, &config)?;
+        }
+        Ok::<(), anyhow::Error>(())
+    }
+    .await;
+    if let Err(err) = result {
+        trace.info(format_args!("webdav delete skipped: {err:#}"));
+    }
+}
+
+fn portable_webdav_config(
+    profile_name: &str,
+    profile: &storage::WebDavProfile,
+) -> Result<(PathBuf, storage::IiConfig)> {
+    let path = storage::default_config_path()?;
+    let mut config = storage::load_config(&path)?;
+    config.storage.backend = Some("webdav".to_string());
+    config.storage.profile = Some(profile_name.to_string());
+    config
+        .storage
+        .webdav
+        .insert(profile_name.to_string(), profile.clone());
+    Ok((path, config))
+}
+
+fn webdav_profile_from_portable(
+    portable: &WebDavPortableCredentials,
+) -> Result<storage::WebDavProfile> {
+    let auth = match portable.auth.as_str() {
+        "basic" => storage::WebDavAuth::Basic,
+        "digest" => storage::WebDavAuth::Digest,
+        other => bail!("unsupported WebDAV auth {other}"),
+    };
+    Ok(storage::WebDavProfile {
+        url: portable.url.clone(),
+        username: portable.username.clone(),
+        password: portable.password.clone(),
+        remote_dir: "ii/".to_string(),
+        auth,
+    })
+}
+
+async fn download_webdav_to_file(
+    client: &reqwest_dav::Client,
+    object_key: &str,
+    path: PathBuf,
+    resume_from: u64,
+    total_size: Option<u64>,
+    show_progress: bool,
+    trace: &mut RecvTrace,
+) -> Result<u64> {
+    trace.info(format_args!("download webdav file to {}", path.display()));
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).await.ok();
+    }
+    let mut append = resume_from > 0;
+    let mut response = webdav_get(client, object_key, resume_from).await?;
+    if resume_from > 0 && response.status().as_u16() == 200 {
+        append = false;
+        response = webdav_get(client, object_key, 0).await?;
+    }
+    ensure_webdav_success(response.status().as_u16())?;
+    let mut file = if append {
+        fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .await
+            .with_context(|| format!("open destination {}", path.display()))?
+    } else {
+        fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&path)
+            .await
+            .with_context(|| format!("open destination {}", path.display()))?
+    };
+    let completed = if append { resume_from } else { 0 };
+    let mut progress = TransferProgress::new("ii recv", show_progress, total_size, completed);
+    let bytes = copy_webdav_response_with_progress(response, &mut file, &mut progress)
+        .await
+        .with_context(|| format!("write destination {}", path.display()))?;
+    progress.finish();
+    file.flush()
+        .await
+        .with_context(|| format!("flush destination {}", path.display()))?;
+    Ok(bytes)
+}
+
+async fn download_webdav_to_stdout(
+    client: &reqwest_dav::Client,
+    object_key: &str,
+    total_size: Option<u64>,
+    show_progress: bool,
+    trace: &mut RecvTrace,
+) -> Result<u64> {
+    trace.info("download webdav file to stdout");
+    let response = webdav_get(client, object_key, 0).await?;
+    ensure_webdav_success(response.status().as_u16())?;
+    let mut stdout = io::stdout();
+    let mut progress = TransferProgress::new("ii recv", show_progress, total_size, 0);
+    let bytes = copy_webdav_response_with_progress(response, &mut stdout, &mut progress)
+        .await
+        .context("write stdout")?;
+    progress.finish();
+    stdout.flush().await.ok();
+    Ok(bytes)
+}
+
+async fn download_webdav_tar(
+    client: &reqwest_dav::Client,
+    object_key: &str,
+    out_dir: PathBuf,
+    total_size: Option<u64>,
+    show_progress: bool,
+    trace: &mut RecvTrace,
+) -> Result<u64> {
+    trace.info(format_args!("download webdav tar to {}", out_dir.display()));
+    fs::create_dir_all(&out_dir)
+        .await
+        .with_context(|| format!("create output dir {}", out_dir.display()))?;
+    let response = webdav_get(client, object_key, 0).await?;
+    ensure_webdav_success(response.status().as_u16())?;
+    let temp = NamedTempFile::new().context("create temp tar")?;
+    let temp_path = temp.path().to_path_buf();
+    let mut file = fs::File::from_std(temp.reopen().context("reopen temp tar")?);
+    let mut progress = TransferProgress::new("ii recv", show_progress, total_size, 0);
+    let bytes = copy_webdav_response_with_progress(response, &mut file, &mut progress)
+        .await
+        .context("buffer webdav tar")?;
+    progress.finish();
+    file.flush().await.context("flush temp tar")?;
+    let extract_path = out_dir.clone();
+    tokio::task::spawn_blocking(move || -> Result<()> {
+        let file = std::fs::File::open(&temp_path).context("open tar")?;
+        let mut archive = tar::Archive::new(file);
+        archive.unpack(&extract_path).context("unpack tar")?;
+        Ok(())
+    })
+    .await
+    .context("extract webdav tar task")??;
+    Ok(bytes)
+}
+
+async fn webdav_get(
+    client: &reqwest_dav::Client,
+    object_key: &str,
+    resume_from: u64,
+) -> Result<reqwest_dav::re_exports::reqwest::Response> {
+    let mut request = client
+        .start_request(reqwest_dav::re_exports::reqwest::Method::GET, object_key)
+        .await
+        .with_context(|| format!("prepare WebDAV download {object_key}"))?;
+    if resume_from > 0 {
+        request = request.header("range", format!("bytes={resume_from}-"));
+    }
+    request
+        .send()
+        .await
+        .with_context(|| format!("download WebDAV object {object_key}"))
+}
+
+fn ensure_webdav_success(status: u16) -> Result<()> {
+    if (200..300).contains(&status) {
+        Ok(())
+    } else {
+        bail!("WebDAV download failed with status {status}")
+    }
+}
+
+async fn copy_webdav_response_with_progress<W>(
+    mut response: reqwest_dav::re_exports::reqwest::Response,
+    writer: &mut W,
+    progress: &mut TransferProgress,
+) -> Result<u64>
+where
+    W: AsyncWrite + Unpin,
+{
+    let mut written = 0u64;
+    while let Some(chunk) = response.chunk().await.context("read WebDAV payload")? {
+        writer
+            .write_all(&chunk)
+            .await
+            .context("write WebDAV payload")?;
+        let n = chunk.len() as u64;
+        written = written.saturating_add(n);
+        progress.advance(n);
+    }
+    Ok(written)
+}
+
+async fn try_delete_webdav(
+    client: &reqwest_dav::Client,
+    object_key: &str,
+    delete_after_recv: bool,
+    trace: &mut RecvTrace,
+) {
+    if !delete_after_recv {
+        return;
+    }
+    match client.delete(object_key).await {
+        Ok(()) => trace.info("webdav delete requested after receive"),
+        Err(err) if webdav_error_status(&err) == Some(404) => {
+            trace.info("webdav delete ignored: object already missing")
+        }
+        Err(err) => trace.info(format_args!("webdav delete ignored: {err:#}")),
+    }
+}
+
+async fn try_delete_s3(delete_url: Option<String>, trace: &mut RecvTrace) {
+    let Some(delete_url) = delete_url else {
+        return;
+    };
+    let result = tokio::task::spawn_blocking(move || -> Result<()> {
+        let response = attohttpc::delete(&delete_url)
+            .send()
+            .context("delete from S3")?;
+        let status = response.status().as_u16();
+        if (200..300).contains(&status) || status == 403 || status == 404 {
+            Ok(())
+        } else {
+            bail!("delete returned status {status}");
+        }
+    })
+    .await;
+    match result {
+        Ok(Ok(())) => trace.info("s3 delete requested after receive"),
+        Ok(Err(err)) => trace.info(format_args!("s3 delete ignored: {err:#}")),
+        Err(err) => trace.info(format_args!("s3 delete task failed: {err:#}")),
+    }
+}
+
+async fn download_s3_to_file(
+    url: String,
+    path: PathBuf,
+    resume_from: u64,
+    total_size: Option<u64>,
+    show_progress: bool,
+    trace: &mut RecvTrace,
+) -> Result<u64> {
+    trace.info(format_args!("download s3 file to {}", path.display()));
+    tokio::task::spawn_blocking(move || -> Result<u64> {
+        if let Some(parent) = path.parent() {
+            std::fs::create_dir_all(parent).ok();
+        }
+        let mut append = resume_from > 0;
+        let mut response = s3_get(&url, resume_from)?;
+        if resume_from > 0 && response.status().as_u16() == 200 {
+            append = false;
+            response = s3_get(&url, 0)?;
+        }
+        ensure_s3_success(response.status().as_u16())?;
+        let mut file = if append {
+            std::fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&path)
+                .with_context(|| format!("open destination {}", path.display()))?
+        } else {
+            std::fs::OpenOptions::new()
+                .create(true)
+                .write(true)
+                .truncate(true)
+                .open(&path)
+                .with_context(|| format!("open destination {}", path.display()))?
+        };
+        let completed = if append { resume_from } else { 0 };
+        let mut progress = TransferProgress::new("ii recv", show_progress, total_size, completed);
+        let bytes = copy_blocking_with_progress(&mut response, &mut file, &mut progress)
+            .with_context(|| format!("write destination {}", path.display()))?;
+        progress.finish();
+        file.flush()
+            .with_context(|| format!("flush destination {}", path.display()))?;
+        Ok(bytes)
+    })
+    .await
+    .context("s3 download task")?
+}
+
+async fn download_s3_to_stdout(
+    url: String,
+    total_size: Option<u64>,
+    show_progress: bool,
+    trace: &mut RecvTrace,
+) -> Result<u64> {
+    trace.info("download s3 file to stdout");
+    tokio::task::spawn_blocking(move || -> Result<u64> {
+        let mut response = s3_get(&url, 0)?;
+        ensure_s3_success(response.status().as_u16())?;
+        let mut stdout = std::io::stdout();
+        let mut progress = TransferProgress::new("ii recv", show_progress, total_size, 0);
+        let bytes = copy_blocking_with_progress(&mut response, &mut stdout, &mut progress)
+            .context("write stdout")?;
+        progress.finish();
+        stdout.flush().ok();
+        Ok(bytes)
+    })
+    .await
+    .context("s3 stdout task")?
+}
+
+async fn download_s3_tar(
+    url: String,
+    out_dir: PathBuf,
+    total_size: Option<u64>,
+    show_progress: bool,
+    trace: &mut RecvTrace,
+) -> Result<u64> {
+    trace.info(format_args!("download s3 tar to {}", out_dir.display()));
+    fs::create_dir_all(&out_dir)
+        .await
+        .with_context(|| format!("create output dir {}", out_dir.display()))?;
+    let temp = NamedTempFile::new().context("create temp tar")?;
+    let temp_path = temp.path().to_path_buf();
+    let url_for_task = url.clone();
+    let bytes = tokio::task::spawn_blocking(move || -> Result<u64> {
+        let mut response = s3_get(&url_for_task, 0)?;
+        ensure_s3_success(response.status().as_u16())?;
+        let mut file = std::fs::File::create(&temp_path).context("create temp tar destination")?;
+        let mut progress = TransferProgress::new("ii recv", show_progress, total_size, 0);
+        let bytes = copy_blocking_with_progress(&mut response, &mut file, &mut progress)
+            .context("buffer s3 tar")?;
+        progress.finish();
+        file.flush().context("flush temp tar")?;
+        Ok(bytes)
+    })
+    .await
+    .context("s3 tar download task")??;
+
+    let extract_path = out_dir.clone();
+    let temp_path = temp.path().to_path_buf();
+    tokio::task::spawn_blocking(move || -> Result<()> {
+        let file = std::fs::File::open(&temp_path).context("open tar")?;
+        let mut archive = tar::Archive::new(file);
+        archive.unpack(&extract_path).context("unpack tar")?;
+        Ok(())
+    })
+    .await
+    .context("extract s3 tar task")??;
+    Ok(bytes)
+}
+
+fn s3_get(url: &str, resume_from: u64) -> Result<attohttpc::Response> {
+    let mut request = attohttpc::get(url);
+    if resume_from > 0 {
+        request = request.header("range", format!("bytes={resume_from}-"));
+    }
+    request.send().context("download from S3")
+}
+
+fn ensure_s3_success(status: u16) -> Result<()> {
+    if (200..300).contains(&status) {
+        Ok(())
+    } else {
+        bail!("S3 download failed with status {status}")
+    }
+}
+
+struct ProgressReader<R> {
+    inner: R,
+    progress: TransferProgress,
+}
+
+impl<R> ProgressReader<R> {
+    fn new(inner: R, progress: TransferProgress) -> Self {
+        Self { inner, progress }
+    }
+
+    fn finish(&mut self) {
+        self.progress.finish();
+    }
+}
+
+impl<R: Read> Read for ProgressReader<R> {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        let n = self.inner.read(buf)?;
+        if n > 0 {
+            self.progress.advance(n as u64);
+        }
+        Ok(n)
+    }
+}
+
+fn copy_blocking_with_progress<R, W>(
+    reader: &mut R,
+    writer: &mut W,
+    progress: &mut TransferProgress,
+) -> Result<u64>
+where
+    R: Read,
+    W: Write,
+{
+    let mut buf = [0u8; 64 * 1024];
+    let mut written = 0u64;
+    loop {
+        let n = reader.read(&mut buf).context("read payload")?;
+        if n == 0 {
+            break;
+        }
+        writer.write_all(&buf[..n]).context("write payload")?;
+        let n = n as u64;
+        written = written.saturating_add(n);
+        progress.advance(n);
+    }
+    Ok(written)
 }
 
 async fn bind_endpoint(relay_mode: RelayMode) -> Result<Endpoint> {
@@ -514,7 +1381,7 @@ async fn plan_file_receive(
         return Ok(FilePlan::Download { resume_from: 0 });
     }
     if args.resume {
-        if !matches!(ticket.kind, PayloadKind::File | PayloadKind::Stdin) {
+        if !matches!(ticket.kind(), PayloadKind::File | PayloadKind::Stdin) {
             bail!("--resume is only supported for regular files");
         }
         let resume_from = existing_size(path)?;
@@ -530,8 +1397,8 @@ async fn plan_file_receive(
     }
 
     let existing_size = existing_size(path)?;
-    let ticket_size = ticket.size;
-    if let Some(expected_hash) = ticket.content_md5 {
+    let ticket_size = ticket.size();
+    if let Some(expected_hash) = ticket.content_md5() {
         if ticket_size == Some(existing_size) {
             let actual_hash = md5_path(path.to_path_buf()).await?;
             if actual_hash == expected_hash {
@@ -585,7 +1452,11 @@ enum ServeOutcome {
     Ignored,
 }
 
-async fn serve_one(conn: iroh::endpoint::Connection, source: &Source) -> Result<ServeOutcome> {
+async fn serve_one(
+    conn: iroh::endpoint::Connection,
+    source: &Source,
+    show_progress: bool,
+) -> Result<ServeOutcome> {
     let (mut send, mut recv) = match conn.accept_bi().await {
         Ok(streams) => streams,
         Err(err) if err.to_string().contains("timed out") => return Ok(ServeOutcome::Ignored),
@@ -599,7 +1470,9 @@ async fn serve_one(conn: iroh::endpoint::Connection, source: &Source) -> Result<
             .context("parse resume request")?
             .resume_from
     };
-    source.stream_to(&mut send, resume_from).await?;
+    source
+        .stream_to(&mut send, resume_from, show_progress)
+        .await?;
     send.finish().context("finish payload")?;
     conn.closed().await;
     Ok(ServeOutcome::Sent)
@@ -838,7 +1711,19 @@ impl Source {
         self.content_md5
     }
 
-    async fn stream_to<W: AsyncWrite + Unpin>(&self, out: &mut W, resume_from: u64) -> Result<()> {
+    fn local_path(&self) -> PathBuf {
+        match &self.backing {
+            Backing::Path(path) => path.clone(),
+            Backing::Temp(temp) => temp.path().to_path_buf(),
+        }
+    }
+
+    async fn stream_to<W: AsyncWrite + Unpin>(
+        &self,
+        out: &mut W,
+        resume_from: u64,
+        show_progress: bool,
+    ) -> Result<()> {
         if resume_from > 0 && self.kind == PayloadKind::Dir {
             bail!("resume is only supported for regular files");
         }
@@ -848,7 +1733,12 @@ impl Source {
                 .await
                 .context("seek resume offset")?;
         }
-        io::copy(&mut file, out).await.context("stream payload")?;
+        let mut progress =
+            TransferProgress::new("ii send", show_progress, self.size(), resume_from);
+        copy_with_progress(&mut file, out, &mut progress)
+            .await
+            .context("stream payload")?;
+        progress.finish();
         Ok(())
     }
 
@@ -897,7 +1787,7 @@ async fn write_to_file(
             .await
             .with_context(|| format!("open destination {}", path.display()))?
     };
-    let mut progress = RecvProgress::new(show_progress, total_size, resume_from);
+    let mut progress = TransferProgress::new("ii recv", show_progress, total_size, resume_from);
     let bytes = copy_with_progress(&mut recv, &mut file, &mut progress)
         .await
         .with_context(|| format!("write destination {}", path.display()))?;
@@ -914,7 +1804,7 @@ async fn copy_to_stdout(
     show_progress: bool,
 ) -> Result<u64> {
     let mut stdout = io::stdout();
-    let mut progress = RecvProgress::new(show_progress, total_size, 0);
+    let mut progress = TransferProgress::new("ii recv", show_progress, total_size, 0);
     let bytes = copy_with_progress(&mut recv, &mut stdout, &mut progress)
         .await
         .context("write stdout")?;
@@ -935,7 +1825,7 @@ async fn extract_tar_stream(
     let temp = NamedTempFile::new().context("create temp tar")?;
     let temp_path = temp.path().to_path_buf();
     let mut file = fs::File::from_std(temp.reopen().context("reopen temp tar")?);
-    let mut progress = RecvProgress::new(show_progress, total_size, 0);
+    let mut progress = TransferProgress::new("ii recv", show_progress, total_size, 0);
     let bytes = copy_with_progress(&mut recv, &mut file, &mut progress)
         .await
         .context("buffer tar")?;
@@ -956,7 +1846,7 @@ async fn extract_tar_stream(
 async fn copy_with_progress<R, W>(
     reader: &mut R,
     writer: &mut W,
-    progress: &mut RecvProgress,
+    progress: &mut TransferProgress,
 ) -> Result<u64>
 where
     R: AsyncRead + Unpin,
@@ -985,20 +1875,19 @@ mod tests {
 
     #[test]
     fn ticket_round_trip() {
-        let ticket = Ticket {
-            version: 2,
-            endpoint: EndpointAddr::from_parts(
+        let ticket = Ticket::peer(
+            EndpointAddr::from_parts(
                 SecretKey::generate().public(),
                 [TransportAddr::Ip(SocketAddr::from((
                     Ipv4Addr::LOCALHOST,
                     1234,
                 )))],
             ),
-            name: "hello.txt".into(),
-            kind: PayloadKind::File,
-            size: Some(12),
-            content_md5: Some([1; 16]),
-        };
+            "hello.txt".into(),
+            PayloadKind::File,
+            Some(12),
+            Some([1; 16]),
+        );
         let raw = ticket.encode().unwrap();
         let decoded = Ticket::decode(&raw).unwrap();
         assert_eq!(ticket, decoded);
@@ -1065,20 +1954,19 @@ mod tests {
     }
 
     fn test_ticket(name: &str, size: Option<u64>, content_md5: Option<[u8; 16]>) -> Ticket {
-        Ticket {
-            version: 2,
-            endpoint: EndpointAddr::from_parts(
+        Ticket::peer(
+            EndpointAddr::from_parts(
                 SecretKey::generate().public(),
                 [TransportAddr::Ip(SocketAddr::from((
                     Ipv4Addr::LOCALHOST,
                     1234,
                 )))],
             ),
-            name: name.to_string(),
-            kind: PayloadKind::File,
+            name.to_string(),
+            PayloadKind::File,
             size,
             content_md5,
-        }
+        )
     }
 
     fn test_recv_args() -> RecvArgs {

@@ -74,7 +74,7 @@ ii recv ii1k7v...x9a -o D:\Downloads
 
 If the network drops halfway, run the same `ii recv` command again and it continues receiving. If the target file already exists with the same content, it is skipped. If the name matches but the content differs, it is overwritten.
 
-`ii recv` shows live transfer progress and speed in the terminal; if you enable `--trace`, it switches to diagnostic output so you can see where the delay comes from.
+`ii send` and `ii recv` both show live transfer progress and speed in the terminal, then print the final elapsed time when done. `--trace` switches to diagnostic output so you can see where the delay comes from.
 
 ## Send Folders
 
@@ -131,6 +131,34 @@ ii send .\file.zip --local
 ii recv ii1k7v...x9a --local
 ```
 
+Use WebDAV as a transfer backend:
+
+```powershell
+ii send .\video.mp4 --webdav
+ii recv ii1k7v...x9a
+```
+
+Select a backend profile:
+
+```powershell
+ii send .\video.mp4 --s3 --profile work
+ii send .\video.mp4 --webdav --profile nas
+```
+
+If the receiver has no WebDAV config, create a portable ticket:
+
+```powershell
+ii send .\video.mp4 --webdav -p
+```
+
+`-p` writes the WebDAV URL, username, and password into the ticket. It is convenient but unsafe, so use it only when you trust the ticket recipient.
+
+After a successful receive, the WebDAV config from a `-p` ticket is written to the receiver's local `ii.toml`. To remove the WebDAV object after receive, add `-d`:
+
+```powershell
+ii send .\video.mp4 --webdav -p -d
+```
+
 ## Diagnostics
 
 Trace why a receive is slow:
@@ -178,7 +206,7 @@ Release changes are documented in [CHANGELOG.en.md](CHANGELOG.en.md). The defaul
 
 ## Version
 
-The current version is managed by Git tags. This repository currently uses `v0.1.4`.
+The current version is managed by Git tags. This repository currently uses `v0.1.5`.
 
 ## License
 

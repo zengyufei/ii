@@ -33,13 +33,28 @@ pub struct SendArgs {
     #[arg(short = 'o', long, value_name = "path")]
     pub output: Option<PathBuf>,
 
-    #[arg(long, conflicts_with_all = ["relay", "no_relay"])]
+    #[arg(long, conflicts_with_all = ["webdav", "local", "relay", "no_relay"])]
+    pub s3: bool,
+
+    #[arg(short = 'd')]
+    pub delete_after_recv: bool,
+
+    #[arg(long, value_name = "name")]
+    pub profile: Option<String>,
+
+    #[arg(long, conflicts_with_all = ["s3", "local", "relay", "no_relay"])]
+    pub webdav: bool,
+
+    #[arg(short = 'p', requires = "webdav")]
+    pub portable_webdav: bool,
+
+    #[arg(long, conflicts_with_all = ["s3", "webdav", "relay", "no_relay"])]
     pub local: bool,
 
-    #[arg(long, value_name = "url", conflicts_with_all = ["local", "no_relay"])]
+    #[arg(long, value_name = "url", conflicts_with_all = ["s3", "webdav", "local", "no_relay"])]
     pub relay: Option<iroh::RelayUrl>,
 
-    #[arg(long, conflicts_with_all = ["local", "relay"])]
+    #[arg(long, conflicts_with_all = ["s3", "webdav", "local", "relay"])]
     pub no_relay: bool,
 }
 
@@ -96,6 +111,54 @@ mod tests {
             Command::Send(args) => {
                 assert!(args.copy);
                 assert_eq!(args.output, Some(PathBuf::from("recv.txt")));
+            }
+            _ => panic!("expected send command"),
+        }
+    }
+
+    #[test]
+    fn send_accepts_s3_delete_after_recv() {
+        let cli = Cli::parse_from(["ii", "send", "--s3", "-d", "file.txt"]);
+        match cli.command {
+            Command::Send(args) => {
+                assert!(args.s3);
+                assert!(args.delete_after_recv);
+            }
+            _ => panic!("expected send command"),
+        }
+    }
+
+    #[test]
+    fn send_accepts_webdav_delete_after_recv() {
+        let cli = Cli::parse_from(["ii", "send", "--webdav", "-d", "file.txt"]);
+        match cli.command {
+            Command::Send(args) => {
+                assert!(args.webdav);
+                assert!(args.delete_after_recv);
+            }
+            _ => panic!("expected send command"),
+        }
+    }
+
+    #[test]
+    fn send_accepts_webdav_portable() {
+        let cli = Cli::parse_from(["ii", "send", "--webdav", "-p", "file.txt"]);
+        match cli.command {
+            Command::Send(args) => {
+                assert!(args.webdav);
+                assert!(args.portable_webdav);
+            }
+            _ => panic!("expected send command"),
+        }
+    }
+
+    #[test]
+    fn send_accepts_backend_profile() {
+        let cli = Cli::parse_from(["ii", "send", "--s3", "--profile", "work", "file.txt"]);
+        match cli.command {
+            Command::Send(args) => {
+                assert!(args.s3);
+                assert_eq!(args.profile, Some("work".to_string()));
             }
             _ => panic!("expected send command"),
         }
