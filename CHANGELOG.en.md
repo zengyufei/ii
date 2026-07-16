@@ -6,6 +6,12 @@ All notable changes to `ii` are documented here. The default Chinese version is 
 
 Nothing yet.
 
+## 0.1.8 - 2026-07-16
+
+### Fixed
+
+- Fixed the Windows config path unit test so it passes on Linux/macOS runners without relying on backslash path parsing.
+
 ## 0.1.7 - 2026-07-16
 
 ### Changed

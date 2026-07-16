@@ -557,8 +557,8 @@ mod tests {
     #[test]
     fn windows_config_path_uses_exe_dir() {
         let path =
-            default_config_path_for("windows", Some(PathBuf::from(r"C:\tools\ii.exe"))).unwrap();
-        assert_eq!(path, PathBuf::from(r"C:\tools\ii.toml"));
+            default_config_path_for("windows", Some(PathBuf::from("C:/tools/ii.exe"))).unwrap();
+        assert_eq!(path, PathBuf::from("C:/tools").join(CONFIG_FILE_NAME));
     }
 
     #[test]
