@@ -174,7 +174,7 @@ The full command reference, port roles, TLS sources, config paths, diagnostics, 
 
 ## Version
 
-The current version is managed by Git tags. This repository currently uses `v0.1.2`.
+The current version is managed by Git tags. This repository currently uses `v0.1.3`.
 
 ## License
 
