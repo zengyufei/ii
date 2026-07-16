@@ -51,6 +51,19 @@ jobs:
         run: |
           .\upx-5.1.0-win64\upx.exe --best --lzma "${{ matrix.binary }}"
 
+      - name: Install UPX on Linux
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y upx-ucl || sudo apt-get install -y upx
+
+      - name: Compress Linux ELF with UPX
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          upx --best --lzma "${{ matrix.binary }}"
+
       - name: Prepare Windows artifact
         if: runner.os == 'Windows'
         shell: pwsh
