@@ -4,9 +4,22 @@
 
 <h1 align="center">ii</h1>
 
-<p align="center">一个跨平台文件传输 CLI。</p>
-
 ---
+
+<p align="center">
+  一个跨平台文件传输 CLI，用来快速发送文件、目录和管道数据。
+</p>
+
+<p align="center">
+  <a href="https://github.com/zengyufei/ii/releases"><img alt="Release" src="https://img.shields.io/github/v/release/zengyufei/ii?style=for-the-badge&label=release"></a>
+  <a href="LICENSE"><img alt="License" src="https://img.shields.io/badge/license-MIT-111111?style=for-the-badge"></a>
+  <img alt="Platforms" src="https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-16784b?style=for-the-badge">
+  <img alt="Rust" src="https://img.shields.io/badge/Rust-CLI-be3f36?style=for-the-badge">
+</p>
+
+<p align="center">
+  <strong>简体中文</strong> · <a href="README.en.md">English</a>
+</p>
 
 `ii` 面向临时传文件：
 
