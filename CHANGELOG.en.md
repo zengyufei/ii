@@ -6,6 +6,12 @@ All notable changes to `ii` are documented here. The default Chinese version is 
 
 Nothing yet.
 
+## 0.1.12 - 2026-07-17
+
+### Changed
+
+- Updated release version metadata.
+
 ## 0.1.11 - 2026-07-17
 
 ### Added

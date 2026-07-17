@@ -235,7 +235,7 @@ ii send .\video.mp4 --relay https://relay.example.com:8443
 
 ## 版本
 
-当前版本由 Git tag 管理。仓库内已使用 `v0.1.11`。
+当前版本由 Git tag 管理。仓库内已使用 `v0.1.12`。
 
 ## 许可证
 
