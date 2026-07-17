@@ -1,5 +1,4 @@
 use anyhow::Result;
-use std::net::{Ipv4Addr, SocketAddr, TcpListener};
 
 use crate::{relay, storage};
 
@@ -8,7 +7,7 @@ pub async fn run() -> Result<()> {
     let s3_config_path = storage::default_config_path()?;
     println!("ii version: {}", env!("CARGO_PKG_VERSION"));
     println!("platform: {}", std::env::consts::OS);
-    println!("config: {}", config_path.display());
+    println!("relay state: {}", config_path.display());
     println!(
         "relay config exists: {}",
         if config_path.exists() { "yes" } else { "no" }
@@ -21,11 +20,8 @@ pub async fn run() -> Result<()> {
     report_s3_config(&s3_config_path);
     report_webdav_config(&s3_config_path);
 
-    check_tcp("default relay http", 3340);
-    #[cfg(feature = "relay-metrics")]
-    check_tcp("metrics", 9090);
-    #[cfg(not(feature = "relay-metrics"))]
-    println!("metrics: disabled in this build");
+    println!("relay modes: self-signed or manual TLS, always relay-only");
+    println!("relay start: ii relay --public https://PUBLIC_HOST[:PORT]");
     Ok(())
 }
 
@@ -93,18 +89,5 @@ fn report_webdav_config(path: &std::path::Path) {
             }
         }
         Err(err) => println!("webdav config parse failed: {err:#}"),
-    }
-}
-
-fn check_tcp(label: &str, port: u16) {
-    let addr = SocketAddr::from((Ipv4Addr::UNSPECIFIED, port));
-    match TcpListener::bind(addr) {
-        Ok(listener) => {
-            drop(listener);
-            println!("{label}: bind ok on {addr}");
-        }
-        Err(err) => {
-            println!("{label}: bind failed on {addr}: {err}");
-        }
     }
 }

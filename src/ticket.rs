@@ -21,6 +21,13 @@ pub struct PeerTicket {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct RelayOnlyTicket {
+    pub version: u8,
+    pub endpoint: EndpointAddr,
+    pub common: TicketCommon,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct S3Ticket {
     pub version: u8,
     pub download_url: String,
@@ -53,6 +60,8 @@ pub enum Ticket {
     Peer(PeerTicket),
     S3(S3Ticket),
     WebDav(WebDavTicket),
+    RelayOnly(RelayOnlyTicket),
+    TrustedRelayOnly(RelayOnlyTicket),
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -111,6 +120,44 @@ impl Ticket {
         })
     }
 
+    pub fn relay_only(
+        endpoint: EndpointAddr,
+        name: String,
+        kind: PayloadKind,
+        size: Option<u64>,
+        content_md5: Option<[u8; 16]>,
+    ) -> Self {
+        Ticket::RelayOnly(RelayOnlyTicket {
+            version: 5,
+            endpoint,
+            common: TicketCommon {
+                name,
+                kind,
+                size,
+                content_md5,
+            },
+        })
+    }
+
+    pub fn trusted_relay_only(
+        endpoint: EndpointAddr,
+        name: String,
+        kind: PayloadKind,
+        size: Option<u64>,
+        content_md5: Option<[u8; 16]>,
+    ) -> Self {
+        Ticket::TrustedRelayOnly(RelayOnlyTicket {
+            version: 6,
+            endpoint,
+            common: TicketCommon {
+                name,
+                kind,
+                size,
+                content_md5,
+            },
+        })
+    }
+
     pub fn webdav(
         profile: String,
         object_key: String,
@@ -153,6 +200,8 @@ impl Ticket {
                 Ticket::Peer(peer) if peer.version == 2 => return Ok(ticket),
                 Ticket::S3(s3) if s3.version == 3 => return Ok(ticket),
                 Ticket::WebDav(webdav) if webdav.version == 4 => return Ok(ticket),
+                Ticket::RelayOnly(relay) if relay.version == 5 => return Ok(ticket),
+                Ticket::TrustedRelayOnly(relay) if relay.version == 6 => return Ok(ticket),
                 Ticket::Peer(peer) if peer.version != 2 => {
                     bail!("unsupported peer ticket version {}", peer.version)
                 }
@@ -161,6 +210,15 @@ impl Ticket {
                 }
                 Ticket::WebDav(webdav) if webdav.version != 4 => {
                     bail!("unsupported webdav ticket version {}", webdav.version)
+                }
+                Ticket::RelayOnly(relay) if relay.version != 5 => {
+                    bail!("unsupported relay-only ticket version {}", relay.version)
+                }
+                Ticket::TrustedRelayOnly(relay) if relay.version != 6 => {
+                    bail!(
+                        "unsupported trusted relay-only ticket version {}",
+                        relay.version
+                    )
                 }
                 _ => {}
             }
@@ -194,28 +252,46 @@ impl Ticket {
             Ticket::Peer(ticket) => &ticket.common,
             Ticket::S3(ticket) => &ticket.common,
             Ticket::WebDav(ticket) => &ticket.common,
+            Ticket::RelayOnly(ticket) => &ticket.common,
+            Ticket::TrustedRelayOnly(ticket) => &ticket.common,
         }
     }
 
     pub fn endpoint(&self) -> Option<&EndpointAddr> {
         match self {
             Ticket::Peer(ticket) => Some(&ticket.endpoint),
+            Ticket::RelayOnly(ticket) => Some(&ticket.endpoint),
+            Ticket::TrustedRelayOnly(ticket) => Some(&ticket.endpoint),
             Ticket::S3(_) | Ticket::WebDav(_) => None,
         }
     }
 
     pub fn s3_route(&self) -> Option<&S3Ticket> {
         match self {
-            Ticket::Peer(_) | Ticket::WebDav(_) => None,
+            Ticket::Peer(_)
+            | Ticket::WebDav(_)
+            | Ticket::RelayOnly(_)
+            | Ticket::TrustedRelayOnly(_) => None,
             Ticket::S3(ticket) => Some(ticket),
         }
     }
 
     pub fn webdav_route(&self) -> Option<&WebDavTicket> {
         match self {
-            Ticket::Peer(_) | Ticket::S3(_) => None,
+            Ticket::Peer(_)
+            | Ticket::S3(_)
+            | Ticket::RelayOnly(_)
+            | Ticket::TrustedRelayOnly(_) => None,
             Ticket::WebDav(ticket) => Some(ticket),
         }
+    }
+
+    pub fn is_relay_only(&self) -> bool {
+        matches!(self, Ticket::RelayOnly(_) | Ticket::TrustedRelayOnly(_))
+    }
+
+    pub fn is_self_signed_relay_only(&self) -> bool {
+        matches!(self, Ticket::RelayOnly(_))
     }
 
     pub fn name(&self) -> &str {
@@ -278,6 +354,46 @@ mod tests {
         let raw = ticket.encode().unwrap();
         let decoded = Ticket::decode(&raw).unwrap();
         assert_eq!(ticket, decoded);
+    }
+
+    #[test]
+    fn relay_only_ticket_round_trip_contains_no_ip_transport() {
+        let relay: iroh::RelayUrl = "https://127.0.0.1:8443".parse().unwrap();
+        let ticket = Ticket::relay_only(
+            EndpointAddr::from_parts(
+                SecretKey::generate().public(),
+                [TransportAddr::Relay(relay)],
+            ),
+            "hello.txt".into(),
+            PayloadKind::File,
+            Some(12),
+            Some([7; 16]),
+        );
+        let raw = ticket.encode().unwrap();
+        let decoded = Ticket::decode(&raw).unwrap();
+        assert!(decoded.is_self_signed_relay_only());
+        let endpoint = decoded.endpoint().unwrap();
+        assert_eq!(endpoint.ip_addrs().count(), 0);
+        assert_eq!(endpoint.relay_urls().count(), 1);
+    }
+
+    #[test]
+    fn trusted_relay_only_ticket_round_trip_keeps_tls_mode() {
+        let relay: iroh::RelayUrl = "https://relay.example.com".parse().unwrap();
+        let ticket = Ticket::trusted_relay_only(
+            EndpointAddr::from_parts(
+                SecretKey::generate().public(),
+                [TransportAddr::Relay(relay)],
+            ),
+            "hello.txt".into(),
+            PayloadKind::File,
+            Some(12),
+            Some([7; 16]),
+        );
+        let raw = ticket.encode().unwrap();
+        let decoded = Ticket::decode(&raw).unwrap();
+        assert!(decoded.is_relay_only());
+        assert!(!decoded.is_self_signed_relay_only());
     }
 
     #[test]

@@ -1,7 +1,6 @@
 use std::fmt;
 use std::path::PathBuf;
 use std::process;
-use std::str::FromStr;
 
 #[derive(Debug)]
 pub struct Cli {
@@ -31,6 +30,7 @@ pub struct SendArgs {
     pub portable_webdav: bool,
     pub local: bool,
     pub relay: Option<iroh::RelayUrl>,
+    pub accept_self_signed_relay: bool,
     pub no_relay: bool,
 }
 
@@ -45,14 +45,13 @@ pub struct RecvArgs {
     pub trace: bool,
 }
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone)]
 pub struct RelayArgs {
-    pub config: Option<PathBuf>,
-    pub port: Option<u16>,
-    pub metrics: Option<u16>,
+    pub public: Option<iroh::RelayUrl>,
     pub tls_domain: Option<String>,
     pub cert: Option<PathBuf>,
     pub key: Option<PathBuf>,
+    pub port: Option<u16>,
 }
 
 impl Cli {
@@ -170,6 +169,7 @@ fn parse_send(args: Vec<String>) -> Result<SendArgs, ParseAction> {
                 "-p" => out.portable_webdav = true,
                 "--local" => out.local = true,
                 "--relay" => out.relay = Some(parse_relay_url(&iter.value("--relay")?)?),
+                "-k" => out.accept_self_signed_relay = true,
                 "--no-relay" => out.no_relay = true,
                 _ if arg.starts_with('-') => {
                     return Err(ParseAction::error(format!("unknown option `{arg}`")));
@@ -243,39 +243,66 @@ fn parse_recv(args: Vec<String>) -> Result<RecvArgs, ParseAction> {
 }
 
 fn parse_relay(args: Vec<String>) -> Result<RelayArgs, ParseAction> {
-    let mut out = RelayArgs::default();
+    let mut public = None;
+    let mut tls_domain = None;
+    let mut cert = None;
+    let mut key = None;
+    let mut port = None;
     let mut iter = ArgsIter::new(args);
 
     while let Some(arg) = iter.next() {
         match split_long_value(&arg) {
-            Some(("config", value)) => out.config = Some(PathBuf::from(value)),
-            Some(("port", value)) | Some(("http", value)) => {
-                out.port = Some(parse_port("--port", value)?)
-            }
-            Some(("metrics", value)) => out.metrics = Some(parse_port("--metrics", value)?),
-            Some(("tls", value)) => out.tls_domain = Some(value.to_string()),
-            Some(("cert", value)) => out.cert = Some(PathBuf::from(value)),
-            Some(("key", value)) => out.key = Some(PathBuf::from(value)),
+            Some(("public", value)) => public = Some(parse_public_relay_url(value)?),
+            Some(("tls", value)) => tls_domain = Some(parse_tls_domain(value)?),
+            Some(("cert", value)) => cert = Some(PathBuf::from(value)),
+            Some(("key", value)) => key = Some(PathBuf::from(value)),
             Some((flag, _)) => {
                 return Err(ParseAction::error(format!("unknown option `--{flag}`")));
             }
             None => match arg.as_str() {
                 "-h" | "--help" => return Err(ParseAction::help(RELAY_HELP)),
-                "-c" | "--config" => out.config = Some(PathBuf::from(iter.value(&arg)?)),
-                "-H" | "--port" | "--http" => {
-                    out.port = Some(parse_port(&arg, &iter.value(&arg)?)?)
-                }
-                "-M" | "--metrics" => out.metrics = Some(parse_port(&arg, &iter.value(&arg)?)?),
-                "--tls" => out.tls_domain = Some(iter.value("--tls")?),
-                "--cert" => out.cert = Some(PathBuf::from(iter.value("--cert")?)),
-                "--key" => out.key = Some(PathBuf::from(iter.value("--key")?)),
+                "--public" => public = Some(parse_public_relay_url(&iter.value("--public")?)?),
+                "--tls" => tls_domain = Some(parse_tls_domain(&iter.value("--tls")?)?),
+                "--cert" => cert = Some(PathBuf::from(iter.value("--cert")?)),
+                "--key" => key = Some(PathBuf::from(iter.value("--key")?)),
+                "-H" => port = Some(parse_port("-H", &iter.value("-H")?)?),
                 _ => return Err(ParseAction::error(format!("unexpected argument `{arg}`"))),
             },
         }
     }
 
-    validate_relay(&out)?;
-    Ok(out)
+    match (&public, &tls_domain, &cert, &key) {
+        (Some(_), None, None, None) => {}
+        (Some(_), _, _, _) => {
+            return Err(ParseAction::error(
+                "--public conflicts with --tls, --cert, and --key",
+            ));
+        }
+        (None, Some(_), Some(_), Some(_)) => {}
+        (None, Some(_), _, _) => {
+            return Err(ParseAction::error(
+                "--tls requires both --cert <path> and --key <path>",
+            ));
+        }
+        (None, None, Some(_), _) | (None, None, _, Some(_)) => {
+            return Err(ParseAction::error(
+                "--cert and --key require --tls <domain>",
+            ));
+        }
+        (None, None, None, None) => {
+            return Err(ParseAction::error(
+                "ii relay requires --public <https-url> or --tls <domain> --cert <path> --key <path>",
+            ));
+        }
+    }
+
+    Ok(RelayArgs {
+        public,
+        tls_domain,
+        cert,
+        key,
+        port,
+    })
 }
 
 fn validate_send(args: &SendArgs) -> Result<(), ParseAction> {
@@ -299,32 +326,11 @@ fn validate_send(args: &SendArgs) -> Result<(), ParseAction> {
     if args.portable_webdav && !args.webdav {
         return Err(ParseAction::error("-p requires --webdav"));
     }
+    if args.accept_self_signed_relay && args.relay.is_none() {
+        return Err(ParseAction::error("-k requires --relay <https-url>"));
+    }
 
     Ok(())
-}
-
-fn validate_relay(args: &RelayArgs) -> Result<(), ParseAction> {
-    if let Some(domain) = &args.tls_domain {
-        if domain.is_empty()
-            || domain.contains("://")
-            || domain.contains('/')
-            || domain.contains(':')
-        {
-            return Err(ParseAction::error(
-                "--tls expects a bare DNS name such as relay.example.com",
-            ));
-        }
-    }
-
-    match (&args.tls_domain, &args.cert, &args.key) {
-        (Some(_), Some(_), Some(_)) | (None, None, None) => Ok(()),
-        (Some(_), _, _) => Err(ParseAction::error(
-            "--tls requires both --cert <path> and --key <path>",
-        )),
-        (None, _, _) => Err(ParseAction::error(
-            "--cert and --key require --tls <domain>",
-        )),
-    }
 }
 
 fn reject_extra(command: &str, args: Vec<String>) -> Result<(), ParseAction> {
@@ -344,14 +350,58 @@ fn reject_extra(command: &str, args: Vec<String>) -> Result<(), ParseAction> {
 }
 
 fn parse_relay_url(value: &str) -> Result<iroh::RelayUrl, ParseAction> {
-    iroh::RelayUrl::from_str(value)
-        .map_err(|err| ParseAction::error(format!("invalid relay URL `{value}`: {err}")))
+    parse_public_relay_url(value)
+}
+
+fn parse_public_relay_url(value: &str) -> Result<iroh::RelayUrl, ParseAction> {
+    let url = url::Url::parse(value)
+        .map_err(|err| ParseAction::error(format!("invalid relay URL `{value}`: {err}")))?;
+    if url.scheme() != "https" {
+        return Err(ParseAction::error("relay URL must use https://"));
+    }
+    if url.host_str().is_none() {
+        return Err(ParseAction::error("relay URL must include a host"));
+    }
+    if !url.username().is_empty()
+        || url.password().is_some()
+        || !(url.path().is_empty() || url.path() == "/")
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err(ParseAction::error(
+            "relay URL may contain only https://host[:port]",
+        ));
+    }
+    if url.port() == Some(0) {
+        return Err(ParseAction::error("relay URL port must be from 1 to 65535"));
+    }
+    Ok(iroh::RelayUrl::from(url))
+}
+
+fn parse_tls_domain(value: &str) -> Result<String, ParseAction> {
+    if value.is_empty()
+        || value.contains("://")
+        || value.contains('/')
+        || value.contains(':')
+        || value.parse::<std::net::IpAddr>().is_ok()
+    {
+        return Err(ParseAction::error(
+            "--tls expects a bare DNS name such as relay.example.com",
+        ));
+    }
+    Ok(value.to_string())
 }
 
 fn parse_port(flag: &str, value: &str) -> Result<u16, ParseAction> {
-    value
+    let port: u16 = value
         .parse()
-        .map_err(|_| ParseAction::error(format!("{flag} expects a port from 0 to 65535")))
+        .map_err(|_| ParseAction::error(format!("{flag} expects a port from 1 to 65535")))?;
+    if port == 0 {
+        return Err(ParseAction::error(format!(
+            "{flag} expects a port from 1 to 65535"
+        )));
+    }
+    Ok(port)
 }
 
 fn split_long_value(arg: &str) -> Option<(&str, &str)> {
@@ -410,6 +460,7 @@ Options:
   --profile <name>
   --local
   --relay <url>
+  -k
   --no-relay
 ";
 
@@ -428,15 +479,14 @@ Options:
 
 const RELAY_HELP: &str = "\
 Usage:
-  ii relay [options]
+  ii relay (--public <https-url> | --tls <domain> --cert <path> --key <path>) [-H <bind-port>]
 
 Options:
-  -c, --config <path>
-  -H, --port <port>
-  -M, --metrics <port>
-  --tls <domain>
-  --cert <path>
-  --key <path>
+  --public <https-url>  Self-signed mode; public HTTPS address including an optional port
+  --tls <domain>        Manual TLS mode; certificate DNS name
+  --cert <path>         PEM certificate chain for manual TLS mode
+  --key <path>          PEM private key for manual TLS mode
+  -H <bind-port>        Local HTTPS listener port; defaults to the public URL port or 443
 ";
 
 const DOCTOR_HELP: &str = "Usage:\n  ii doctor";
@@ -525,54 +575,122 @@ mod tests {
     }
 
     #[test]
-    fn relay_accepts_tls_with_manual_certificate_paths() {
+    fn send_accepts_self_signed_relay_flag_only_with_relay() {
+        let cli = Cli::parse_from([
+            "ii",
+            "send",
+            "file.txt",
+            "--relay",
+            "https://127.0.0.1:8443",
+            "-k",
+        ]);
+        match cli.command {
+            Command::Send(args) => assert!(args.accept_self_signed_relay),
+            _ => panic!("expected send command"),
+        }
+
+        let result = parse_args(["ii", "send", "file.txt", "-k"]);
+        assert!(matches!(result, Err(ParseAction::Print { code: 2, .. })));
+    }
+
+    #[test]
+    fn relay_accepts_public_https_url() {
         let cli = Cli::parse_from([
             "ii",
             "relay",
-            "--tls",
-            "relay.example.com",
+            "--public",
+            "https://relay.example.com:8443",
             "-H",
             "8443",
-            "--cert",
-            "fullchain.pem",
-            "--key",
-            "privkey.pem",
         ]);
         match cli.command {
             Command::Relay(args) => {
                 assert_eq!(args.port, Some(8443));
-                assert_eq!(args.tls_domain.as_deref(), Some("relay.example.com"));
-                assert_eq!(args.cert, Some(PathBuf::from("fullchain.pem")));
-                assert_eq!(args.key, Some(PathBuf::from("privkey.pem")));
+                assert_eq!(
+                    args.public.as_ref().map(|url| url.as_str()),
+                    Some("https://relay.example.com:8443/")
+                );
+                assert!(args.tls_domain.is_none());
             }
             _ => panic!("expected relay command"),
         }
     }
 
     #[test]
-    fn relay_rejects_incomplete_tls_arguments() {
-        let result = parse_args(["ii", "relay", "--tls", "relay.example.com"]);
-        assert!(matches!(result, Err(ParseAction::Print { code: 2, .. })));
-    }
-
-    #[test]
-    fn relay_rejects_tls_url_instead_of_domain() {
-        let result = parse_args([
+    fn relay_accepts_manual_tls_mode() {
+        let cli = Cli::parse_from([
             "ii",
             "relay",
             "--tls",
-            "https://relay.example.com",
+            "relay.example.com",
             "--cert",
             "fullchain.pem",
             "--key",
             "privkey.pem",
+            "-H",
+            "8443",
         ]);
+        match cli.command {
+            Command::Relay(args) => {
+                assert!(args.public.is_none());
+                assert_eq!(args.tls_domain.as_deref(), Some("relay.example.com"));
+                assert_eq!(args.cert, Some(PathBuf::from("fullchain.pem")));
+                assert_eq!(args.key, Some(PathBuf::from("privkey.pem")));
+                assert_eq!(args.port, Some(8443));
+            }
+            _ => panic!("expected relay command"),
+        }
+    }
+
+    #[test]
+    fn relay_rejects_missing_mode() {
+        let result = parse_args(["ii", "relay"]);
         assert!(matches!(result, Err(ParseAction::Print { code: 2, .. })));
     }
 
     #[test]
-    fn relay_rejects_removed_dev_mode() {
-        let result = parse_args(["ii", "relay", "--dev"]);
+    fn relay_rejects_non_https_public_url() {
+        let result = parse_args(["ii", "relay", "--public", "http://127.0.0.1:3340"]);
+        assert!(matches!(result, Err(ParseAction::Print { code: 2, .. })));
+    }
+
+    #[test]
+    fn relay_rejects_zero_ports_and_conflicting_modes() {
+        let invalid_public_port = parse_args(["ii", "relay", "--public", "https://127.0.0.1:0"]);
+        let invalid_bind_port = parse_args([
+            "ii",
+            "relay",
+            "--public",
+            "https://127.0.0.1:8443",
+            "-H",
+            "0",
+        ]);
+        let conflicting_modes = parse_args([
+            "ii",
+            "relay",
+            "--public",
+            "https://127.0.0.1:8443",
+            "--tls",
+            "relay.example.com",
+        ]);
+
+        assert!(matches!(
+            invalid_public_port,
+            Err(ParseAction::Print { code: 2, .. })
+        ));
+        assert!(matches!(
+            invalid_bind_port,
+            Err(ParseAction::Print { code: 2, .. })
+        ));
+        assert!(matches!(
+            conflicting_modes,
+            Err(ParseAction::Print { code: 2, .. })
+        ));
+    }
+
+    #[test]
+    fn send_rejects_non_https_custom_relay() {
+        let result = parse_args(["ii", "send", "file.txt", "--relay", "http://127.0.0.1"]);
         assert!(matches!(result, Err(ParseAction::Print { code: 2, .. })));
     }
 }

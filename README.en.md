@@ -179,31 +179,40 @@ ii version
 
 You do not need to understand relay hosting to send ordinary files. This section is only for running your own relay service or using a fixed relay entrypoint in a company network.
 
-Start a relay:
+Start a self-signed HTTPS relay:
 
 ```powershell
-ii relay
+ii relay --public https://SERVER_PUBLIC_IP:8443
 ```
 
-The default is an HTTP-only relay:
-
-- It listens on `0.0.0.0:3340`; only allow `3340/tcp`.
-- Use the server's public IP directly. No domain, DNS, or certificate is required.
-- HTTPS, QUIC, and metrics do not start.
-
-Clients use it with:
+You can use a domain too:
 
 ```powershell
-ii send .\video.mp4 --relay http://SERVER_PUBLIC_IP:3340
+ii relay --public https://relay.example.com
 ```
 
-For HTTPS and a domain, explicitly provide an existing certificate and private key:
+`--public` is the public HTTPS address used by clients and must be `https://host[:port]`. On first start, `ii` generates and persists a self-signed certificate and key in the relay state directory. It listens on the public URL port, or on `443` when the URL has no port. Use `-H` for a different local backend port behind NAT or a reverse proxy:
+
+```powershell
+ii relay --public https://relay.example.com:8443 -H 9443
+```
+
+Send through the relay:
+
+```powershell
+ii send .\video.mp4 --relay https://SERVER_PUBLIC_IP:8443 -k
+```
+
+`-k` accepts the self-signed certificate and puts that policy in the ticket; the receiver needs no certificate installation or relay configuration. A first connection can still be replaced by a man-in-the-middle.
+
+With a domain and PEM certificate files, use manual TLS:
 
 ```powershell
 ii relay --tls relay.example.com -H 8443 --cert D:\certs\fullchain.pem --key D:\certs\privkey.pem
+ii send .\video.mp4 --relay https://relay.example.com:8443
 ```
 
-Clients use `https://relay.example.com:8443`. `ii` does not issue or renew certificates; the operator owns those files. See [ii.md](ii.md) for the full configuration. Plain HTTP is not suitable for a long-lived public deployment.
+Manual TLS does not use `-k`; clients use normal system TLS verification. Both `--relay` modes force HTTPS relay-only transport and skip UDP and direct paths. See [ii.md](ii.md) for ports, state paths, and the security boundary.
 
 ## Full Manual
 
@@ -215,7 +224,7 @@ Release changes are documented in [CHANGELOG.en.md](CHANGELOG.en.md). The defaul
 
 ## Version
 
-The current version is managed by Git tags. This repository currently uses `v0.1.10`.
+The current version is managed by Git tags. This repository currently uses `v0.1.11`.
 
 ## License
 

@@ -6,6 +6,22 @@ All notable changes to `ii` are documented here. The default Chinese version is 
 
 Nothing yet.
 
+## 0.1.11 - 2026-07-17
+
+### Added
+
+- Added `ii relay --public <https-url>` to generate and persist a self-signed HTTPS relay certificate.
+- Added `ii send --relay <https-url> -k` to trust a self-signed relay and carry that policy in the ticket for receivers.
+
+### Changed
+
+- Made explicit `--relay` sends and receives relay-only, without UDP, LAN discovery, or direct paths.
+- Kept normal system TLS verification for manual TLS relays; first use of a self-signed relay can still be replaced by a man-in-the-middle.
+
+### Documentation
+
+- Updated self-signed relay, manual TLS, port, state-file, and security-boundary guidance.
+
 ## 0.1.10 - 2026-07-17
 
 ### Changed

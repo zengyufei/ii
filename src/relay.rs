@@ -1,8 +1,7 @@
 use crate::cli::RelayArgs;
 use anyhow::{Context, Result, bail};
-#[cfg(feature = "relay-metrics")]
-use iroh_relay::defaults::DEFAULT_METRICS_PORT;
 use iroh_relay::server::{self, CertConfig};
+use rcgen::generate_simple_self_signed;
 use rustls::pki_types::pem::PemObject;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -12,40 +11,53 @@ use std::{
     sync::Arc,
 };
 use tokio::signal;
+use tracing::info;
+use tracing_subscriber::EnvFilter;
 
-const DEFAULT_PLAIN_HTTP_PORT: u16 = 3340;
+const RELAY_STATE_VERSION: u8 = 1;
+const CERT_FILE_NAME: &str = "relay-cert.pem";
+const KEY_FILE_NAME: &str = "relay-key.pem";
 const DEFAULT_TLS_PORT: u16 = 443;
-const DEFAULT_CONFIG_TEXT: &str = r#"# ii relay configuration
-#
-# Default: plain HTTP relay reachable by IP address.
-# For HTTPS, use: ii relay --tls relay.example.com --cert fullchain.pem --key privkey.pem
 
-http_bind_addr = "0.0.0.0:3340"
-enable_metrics = false
-"#;
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-struct RelayFile {
-    #[serde(default)]
-    http_bind_addr: Option<SocketAddr>,
-    #[serde(default)]
-    tls: Option<TlsFile>,
-    #[serde(default)]
-    enable_metrics: bool,
-    #[serde(default)]
-    metrics_bind_addr: Option<SocketAddr>,
+#[derive(Debug, Clone, Copy)]
+enum RelayTlsMode {
+    SelfSigned,
+    Manual,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-struct TlsFile {
-    #[serde(default)]
-    https_bind_addr: Option<SocketAddr>,
-    #[serde(default)]
-    domain: Option<String>,
-    #[serde(default, alias = "manual_cert_path")]
-    cert_path: Option<PathBuf>,
-    #[serde(default, alias = "manual_key_path")]
-    key_path: Option<PathBuf>,
+struct RelayState {
+    version: u8,
+    public_url: String,
+}
+
+#[derive(Debug, Clone)]
+struct RelayPaths {
+    config_path: PathBuf,
+    cert_path: PathBuf,
+    key_path: PathBuf,
+}
+
+#[derive(Debug)]
+struct RelayAccessLogger;
+
+impl server::AccessControl for RelayAccessLogger {
+    async fn on_connect(&self, request: &server::ClientRequest) -> server::Access {
+        info!(
+            endpoint = %request.endpoint_id(),
+            connection = %request.connection_id(),
+            "relay client connected"
+        );
+        server::Access::Allow
+    }
+
+    fn on_disconnect(&self, endpoint_id: iroh::EndpointId, connection_id: server::ConnectionId) {
+        info!(
+            endpoint = %endpoint_id,
+            connection = %connection_id,
+            "relay client disconnected"
+        );
+    }
 }
 
 pub fn default_config_path() -> Result<PathBuf> {
@@ -62,198 +74,229 @@ pub fn default_config_path() -> Result<PathBuf> {
 }
 
 pub async fn run(args: RelayArgs) -> Result<()> {
+    install_logging();
     rustls::crypto::ring::default_provider()
         .install_default()
         .ok();
 
-    let create_if_missing = args.config.is_none();
-    let config_path = args.config.clone().unwrap_or(default_config_path()?);
-
-    let mut cfg = load_or_create_config(&config_path, create_if_missing).await?;
-    if disable_incomplete_tls(&mut cfg) {
-        eprintln!(
-            "ii relay: ignored incomplete TLS settings; starting plain HTTP relay on port {} instead",
-            cfg.http_bind_addr
-                .unwrap_or_else(|| socket_addr(DEFAULT_PLAIN_HTTP_PORT))
-                .port()
-        );
+    if let Some(public_url) = args.public {
+        let bind_port = args.port.unwrap_or_else(|| {
+            public_url
+                .port_or_known_default()
+                .expect("validated public URL")
+        });
+        let paths = relay_paths(default_config_path()?);
+        load_or_create_state(&paths, &public_url)?;
+        let server_config = load_self_signed_server_config(&paths.cert_path, &paths.key_path)
+            .context("load persisted self-signed relay certificate")?;
+        return run_server(
+            server_config,
+            public_url.to_string(),
+            bind_port,
+            RelayTlsMode::SelfSigned,
+        )
+        .await;
     }
-    apply_cli_overrides(&mut cfg, &args)?;
-    let start_message = relay_start_message(&cfg);
-    let server_cfg = build_server_config(cfg).await?;
-    let mut server = server::Server::spawn(server_cfg).await?;
-    eprintln!("{start_message}");
+
+    let domain = args
+        .tls_domain
+        .expect("CLI requires a relay mode before calling relay::run");
+    let cert_path = args.cert.expect("CLI validates --cert for manual TLS mode");
+    let key_path = args.key.expect("CLI validates --key for manual TLS mode");
+    let bind_port = args.port.unwrap_or(DEFAULT_TLS_PORT);
+    let server_config = load_self_signed_server_config(&cert_path, &key_path)
+        .context("load manual TLS certificate")?;
+    run_server(
+        server_config,
+        relay_url_for_domain(&domain, bind_port),
+        bind_port,
+        RelayTlsMode::Manual,
+    )
+    .await
+}
+
+fn relay_url_for_domain(domain: &str, port: u16) -> String {
+    if port == DEFAULT_TLS_PORT {
+        format!("https://{domain}")
+    } else {
+        format!("https://{domain}:{port}")
+    }
+}
+
+async fn run_server(
+    server_config: rustls::ServerConfig,
+    public_url: String,
+    bind_port: u16,
+    tls_mode: RelayTlsMode,
+) -> Result<()> {
+    let mut server = server::Server::spawn(build_server_config(server_config, bind_port)?)
+        .await
+        .context("start HTTPS relay")?;
+
+    eprintln!("ii relay: listening on {public_url}");
+    eprintln!("ii relay: local HTTPS listener 0.0.0.0:{bind_port}");
+    match tls_mode {
+        RelayTlsMode::SelfSigned => {
+            eprintln!("ii relay: self-signed TLS; clients must use ii send --relay <url> -k");
+        }
+        RelayTlsMode::Manual => {
+            eprintln!("ii relay: manual TLS; clients use normal certificate verification");
+        }
+    }
+    eprintln!("ii relay: relay-only mode; no UDP, QUIC, or direct peer path");
 
     tokio::select! {
-        _ = signal::ctrl_c() => {}
-        _ = server.join() => {}
+        _ = signal::ctrl_c() => {
+            eprintln!("ii relay: stopping");
+        }
+        result = server.join() => {
+            result.context("relay server task failed")??;
+        }
     }
 
-    server.shutdown().await?;
+    server.shutdown().await.context("stop relay")?;
     Ok(())
 }
 
-async fn load_or_create_config(path: &Path, create_if_missing: bool) -> Result<RelayFile> {
-    if !path.exists() {
-        if !create_if_missing {
-            bail!("config file does not exist: {}", path.display());
-        }
-        if let Some(parent) = path.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("create config directory {}", parent.display()))?;
-        }
-        fs::write(path, DEFAULT_CONFIG_TEXT)
-            .with_context(|| format!("write default config {}", path.display()))?;
-    }
-    let text =
-        fs::read_to_string(path).with_context(|| format!("read config {}", path.display()))?;
-    let cfg: RelayFile = toml::from_str(&text).context("parse relay config")?;
-    Ok(cfg)
+fn install_logging() {
+    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
+    let _ = tracing_subscriber::fmt()
+        .with_env_filter(filter)
+        .with_target(false)
+        .compact()
+        .try_init();
 }
 
-fn apply_cli_overrides(cfg: &mut RelayFile, args: &RelayArgs) -> Result<()> {
-    if let Some(domain) = &args.tls_domain {
-        cfg.tls = Some(TlsFile {
-            https_bind_addr: args.port.map(socket_addr),
-            domain: Some(domain.clone()),
-            cert_path: args.cert.clone(),
-            key_path: args.key.clone(),
-        });
-    } else if let Some(port) = args.port {
-        cfg.http_bind_addr = Some(socket_addr(port));
+fn relay_paths(config_path: PathBuf) -> RelayPaths {
+    let parent = config_path
+        .parent()
+        .map(Path::to_path_buf)
+        .unwrap_or_else(|| PathBuf::from("."));
+    RelayPaths {
+        cert_path: parent.join(CERT_FILE_NAME),
+        key_path: parent.join(KEY_FILE_NAME),
+        config_path,
     }
-    if let Some(port) = args.metrics {
-        cfg.enable_metrics = true;
-        cfg.metrics_bind_addr = Some(socket_addr(port));
-    }
-    Ok(())
 }
 
-async fn build_server_config(cfg: RelayFile) -> Result<server::ServerConfig> {
-    let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let http_bind_addr = if cfg.tls.is_some() {
-        SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0)
-    } else {
-        cfg.http_bind_addr
-            .unwrap_or_else(|| socket_addr(DEFAULT_PLAIN_HTTP_PORT))
-    };
+fn load_or_create_state(paths: &RelayPaths, public_url: &iroh::RelayUrl) -> Result<RelayState> {
+    if paths.config_path.exists() {
+        let text = fs::read_to_string(&paths.config_path)
+            .with_context(|| format!("read relay state {}", paths.config_path.display()))?;
+        let state: RelayState = toml::from_str(&text).map_err(|err| {
+            anyhow::anyhow!(
+                "unsupported relay.toml for the self-signed relay mode; remove relay.toml, relay-cert.pem, and relay-key.pem together, then run ii relay --public <https-url>: {err}"
+            )
+        })?;
+        if state.version != RELAY_STATE_VERSION {
+            bail!("unsupported relay state version {}", state.version);
+        }
+        if state.public_url != public_url.as_str() {
+            bail!(
+                "relay state is bound to {}; requested {}. Remove relay.toml, relay-cert.pem, and relay-key.pem together to create a new relay identity",
+                state.public_url,
+                public_url
+            );
+        }
+        match (paths.cert_path.exists(), paths.key_path.exists()) {
+            (true, true) => return Ok(state),
+            _ => bail!(
+                "relay certificate state is incomplete: expected {} and {}",
+                paths.cert_path.display(),
+                paths.key_path.display()
+            ),
+        }
+    }
 
-    let mut relay_cfg = server::RelayConfig::new(http_bind_addr);
-
-    let tls_file = cfg.tls.clone();
-    let tls_cfg = match tls_file.as_ref() {
-        Some(tls) => Some(build_tls_config(tls, provider.clone()).await?),
-        None => None,
-    };
-
-    relay_cfg.tls = tls_cfg;
-
-    let mut server_cfg = server::ServerConfig::default();
-    server_cfg.relay = Some(relay_cfg);
-    #[cfg(feature = "relay-metrics")]
-    if cfg.enable_metrics {
-        server_cfg.metrics_addr = Some(
-            cfg.metrics_bind_addr
-                .unwrap_or_else(|| socket_addr(DEFAULT_METRICS_PORT)),
+    if paths.cert_path.exists() || paths.key_path.exists() {
+        bail!(
+            "relay certificate state is incomplete: relay.toml is missing but certificate material exists beside it"
         );
     }
-    #[cfg(not(feature = "relay-metrics"))]
-    if cfg.enable_metrics {
-        bail!("relay metrics are not enabled in this build");
+    if let Some(parent) = paths.config_path.parent() {
+        fs::create_dir_all(parent)
+            .with_context(|| format!("create relay state directory {}", parent.display()))?;
     }
-    Ok(server_cfg)
+
+    let host = public_url
+        .host_str()
+        .context("public relay URL must include a host")?;
+    let certified_key = generate_simple_self_signed(vec![host.to_string()])
+        .context("generate self-signed relay certificate")?;
+    fs::write(&paths.cert_path, certified_key.cert.pem())
+        .with_context(|| format!("write relay certificate {}", paths.cert_path.display()))?;
+    fs::write(&paths.key_path, certified_key.signing_key.serialize_pem())
+        .with_context(|| format!("write relay key {}", paths.key_path.display()))?;
+    set_private_key_permissions(&paths.key_path)?;
+
+    let state = RelayState {
+        version: RELAY_STATE_VERSION,
+        public_url: public_url.to_string(),
+    };
+    let text = toml::to_string_pretty(&state).context("serialize relay state")?;
+    fs::write(&paths.config_path, text)
+        .with_context(|| format!("write relay state {}", paths.config_path.display()))?;
+    Ok(state)
 }
 
-async fn build_tls_config(
-    tls: &TlsFile,
-    provider: Arc<rustls::crypto::CryptoProvider>,
-) -> Result<server::TlsConfig> {
-    let _domain = tls
-        .domain
-        .as_deref()
-        .filter(|domain| !domain.is_empty())
-        .context("TLS requires a domain")?;
-    let cert_path = tls
-        .cert_path
-        .as_ref()
-        .context("TLS requires a certificate path")?;
-    let key_path = tls.key_path.as_ref().context("TLS requires a key path")?;
-    let server_config = load_manual_server_config(cert_path, key_path, &provider)?;
-    let cert = CertConfig::Manual { server_config };
+#[cfg(unix)]
+fn set_private_key_permissions(path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
 
-    let https_bind_addr = tls
-        .https_bind_addr
-        .unwrap_or_else(|| socket_addr(DEFAULT_TLS_PORT));
-    Ok(server::TlsConfig::new(https_bind_addr, cert))
+    fs::set_permissions(path, fs::Permissions::from_mode(0o600))
+        .with_context(|| format!("set private key permissions {}", path.display()))
 }
 
-fn relay_start_message(cfg: &RelayFile) -> String {
-    match &cfg.tls {
-        Some(tls) => format!(
-            "ii relay: listening on https://{}:{}",
-            tls.domain.as_deref().unwrap_or("<unknown>"),
-            tls.https_bind_addr
-                .unwrap_or_else(|| socket_addr(DEFAULT_TLS_PORT))
-                .port()
-        ),
-        None => format!(
-            "ii relay: listening on http://0.0.0.0:{}",
-            cfg.http_bind_addr
-                .unwrap_or_else(|| socket_addr(DEFAULT_PLAIN_HTTP_PORT))
-                .port()
-        ),
-    }
+#[cfg(not(unix))]
+fn set_private_key_permissions(_path: &Path) -> Result<()> {
+    Ok(())
 }
 
-fn rustls_server_config_builder(
-    provider: &Arc<rustls::crypto::CryptoProvider>,
-) -> Result<rustls::ConfigBuilder<rustls::ServerConfig, rustls::server::WantsServerCert>> {
-    let builder = rustls::ServerConfig::builder_with_provider(provider.clone())
-        .with_safe_default_protocol_versions()
-        .context("protocol versions")?
-        .with_no_client_auth();
-    Ok(builder)
+fn build_server_config(
+    server_config: rustls::ServerConfig,
+    bind_port: u16,
+) -> Result<server::ServerConfig> {
+    let mut relay_config =
+        server::RelayConfig::new(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0));
+    relay_config.tls = Some(server::TlsConfig::new(
+        SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), bind_port),
+        CertConfig::Manual { server_config },
+    ));
+    relay_config.access = Arc::new(RelayAccessLogger);
+
+    let mut config = server::ServerConfig::default();
+    config.relay = Some(relay_config);
+    Ok(config)
 }
 
-fn load_manual_server_config(
+fn load_self_signed_server_config(
     cert_path: &Path,
     key_path: &Path,
-    provider: &Arc<rustls::crypto::CryptoProvider>,
 ) -> Result<rustls::ServerConfig> {
     let certs = rustls::pki_types::CertificateDer::pem_file_iter(cert_path)
         .with_context(|| format!("read certificate file {}", cert_path.display()))?
         .collect::<std::result::Result<Vec<_>, _>>()
         .context("parse certificate chain")?;
+    if certs.is_empty() {
+        bail!("relay certificate file is empty: {}", cert_path.display());
+    }
     let key = rustls::pki_types::PrivateKeyDer::from_pem_file(key_path)
         .with_context(|| format!("read key file {}", key_path.display()))?;
-    let config = rustls_server_config_builder(provider)?
+    rustls::ServerConfig::builder_with_provider(Arc::new(rustls::crypto::ring::default_provider()))
+        .with_safe_default_protocol_versions()
+        .context("configure TLS protocol versions")?
+        .with_no_client_auth()
         .with_single_cert(certs, key)
-        .context("build rustls server config")?;
-    Ok(config)
-}
-
-fn disable_incomplete_tls(cfg: &mut RelayFile) -> bool {
-    let should_disable = cfg.tls.as_ref().is_some_and(|tls| {
-        tls.cert_path.is_none()
-            || tls.key_path.is_none()
-            || tls.domain.as_deref().is_none_or(str::is_empty)
-    });
-    if should_disable {
-        cfg.tls = None;
-        if cfg.http_bind_addr == Some(socket_addr(80)) {
-            cfg.http_bind_addr = Some(socket_addr(DEFAULT_PLAIN_HTTP_PORT));
-        }
-    }
-    should_disable
-}
-
-fn socket_addr(port: u16) -> SocketAddr {
-    SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port)
+        .context("build self-signed relay TLS config")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn public_url() -> iroh::RelayUrl {
+        "https://127.0.0.1:8443".parse().unwrap()
+    }
 
     #[test]
     fn default_path_is_platform_specific() {
@@ -265,50 +308,64 @@ mod tests {
     }
 
     #[test]
-    fn default_config_is_plain_http_only() {
-        let cfg: RelayFile = toml::from_str(DEFAULT_CONFIG_TEXT).unwrap();
-        assert_eq!(
-            cfg.http_bind_addr,
-            Some(socket_addr(DEFAULT_PLAIN_HTTP_PORT))
-        );
-        assert!(cfg.tls.is_none());
+    fn first_setup_generates_and_reuses_certificate() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = relay_paths(temp.path().join("relay.toml"));
+
+        let first = load_or_create_state(&paths, &public_url()).unwrap();
+        let first_cert = fs::read(&paths.cert_path).unwrap();
+        let first_key = fs::read(&paths.key_path).unwrap();
+        let second = load_or_create_state(&paths, &public_url()).unwrap();
+
+        assert_eq!(first.public_url, second.public_url);
+        assert_eq!(first_cert, fs::read(&paths.cert_path).unwrap());
+        assert_eq!(first_key, fs::read(&paths.key_path).unwrap());
+        load_self_signed_server_config(&paths.cert_path, &paths.key_path).unwrap();
     }
 
     #[test]
-    fn incomplete_legacy_tls_config_falls_back_to_plain_http() {
-        let mut cfg: RelayFile = toml::from_str(
-            r#"
-                http_bind_addr = "0.0.0.0:80"
-                [tls]
-                cert_mode = "LetsEncrypt"
-                hostname = []
-                contact = ""
-            "#,
-        )
-        .unwrap();
+    fn missing_certificate_material_fails_clearly() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = relay_paths(temp.path().join("relay.toml"));
+        load_or_create_state(&paths, &public_url()).unwrap();
+        fs::remove_file(&paths.key_path).unwrap();
 
-        assert!(disable_incomplete_tls(&mut cfg));
-        assert!(cfg.tls.is_none());
-        assert_eq!(
-            cfg.http_bind_addr,
-            Some(socket_addr(DEFAULT_PLAIN_HTTP_PORT))
+        let err = load_or_create_state(&paths, &public_url()).unwrap_err();
+        assert!(err.to_string().contains("incomplete"));
+    }
+
+    #[test]
+    fn malformed_persisted_certificate_fails_clearly() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = relay_paths(temp.path().join("relay.toml"));
+        load_or_create_state(&paths, &public_url()).unwrap();
+        fs::write(&paths.cert_path, "not a certificate").unwrap();
+
+        let err = load_self_signed_server_config(&paths.cert_path, &paths.key_path).unwrap_err();
+        assert!(
+            !err.to_string().is_empty(),
+            "a malformed persisted certificate must return a clear error"
         );
     }
 
     #[test]
-    fn tls_arguments_configure_https_and_hide_http_listener() {
-        let mut cfg: RelayFile = toml::from_str(DEFAULT_CONFIG_TEXT).unwrap();
-        let args = RelayArgs {
-            port: Some(8443),
-            tls_domain: Some("relay.example.com".to_string()),
-            cert: Some(PathBuf::from("fullchain.pem")),
-            key: Some(PathBuf::from("privkey.pem")),
-            ..Default::default()
-        };
+    fn state_rejects_a_changed_public_url() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = relay_paths(temp.path().join("relay.toml"));
+        load_or_create_state(&paths, &public_url()).unwrap();
+        let changed: iroh::RelayUrl = "https://relay.example.com".parse().unwrap();
 
-        apply_cli_overrides(&mut cfg, &args).unwrap();
-        let tls = cfg.tls.unwrap();
-        assert_eq!(tls.https_bind_addr, Some(socket_addr(8443)));
-        assert_eq!(tls.domain.as_deref(), Some("relay.example.com"));
+        let err = load_or_create_state(&paths, &changed).unwrap_err();
+        assert!(err.to_string().contains("bound to"));
+    }
+
+    #[test]
+    fn legacy_relay_config_has_a_migration_error() {
+        let temp = tempfile::tempdir().unwrap();
+        let paths = relay_paths(temp.path().join("relay.toml"));
+        fs::write(&paths.config_path, "http_bind_addr = \"0.0.0.0:3340\"").unwrap();
+
+        let err = load_or_create_state(&paths, &public_url()).unwrap_err();
+        assert!(err.to_string().contains("unsupported relay.toml"));
     }
 }

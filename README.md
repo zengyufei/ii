@@ -190,31 +190,40 @@ ii version
 
 普通发文件不需要先理解 relay。只有你要自建中继服务，或者公司网络环境需要固定中继入口时，才需要看这一段。
 
-启动 relay：
+启动自签 HTTPS relay：
 
 ```powershell
-ii relay
+ii relay --public https://服务器公网IP:8443
 ```
 
-默认就是 HTTP relay：
-
-- 监听 `0.0.0.0:3340`，只需要开放 `3340/tcp`
-- 直接填服务器公网 IP，不需要域名、DNS 或证书
-- 不启动 HTTPS、QUIC 和 metrics
-
-客户端使用：
+也可以使用域名：
 
 ```powershell
-ii send .\video.mp4 --relay http://服务器公网IP:3340
+ii relay --public https://relay.example.com
 ```
 
-需要 HTTPS 和域名时，显式提供已有证书和私钥：
+`--public` 是客户端实际访问的公网 HTTPS 地址，必须是 `https://主机[:端口]`。首次启动会自动在 relay 状态目录生成并持久化自签证书和私钥。默认监听 `--public` 的端口，未写端口就是 `443`；NAT 或反向代理需要转到不同后端端口时，用 `-H`：
+
+```powershell
+ii relay --public https://relay.example.com:8443 -H 9443
+```
+
+发送端指定 relay：
+
+```powershell
+ii send .\video.mp4 --relay https://服务器公网IP:8443 -k
+```
+
+`-k` 表示接受自签证书，并把该策略带进 ticket；接收方无需安装证书或配置 relay。首次连接仍可能遭遇中间人替换。
+
+已有域名和 PEM 证书时，使用手工证书模式：
 
 ```powershell
 ii relay --tls relay.example.com -H 8443 --cert D:\certs\fullchain.pem --key D:\certs\privkey.pem
+ii send .\video.mp4 --relay https://relay.example.com:8443
 ```
 
-客户端使用 `https://relay.example.com:8443`。`ii` 不申请、不续期证书；证书文件由运维方负责。完整配置见 [ii.md](ii.md)。纯 HTTP 不适合不受信任的公网长期部署。
+手工证书模式不带 `-k`，客户端使用系统正常 TLS 校验。两种 `--relay` 都只走 HTTPS relay，不尝试 UDP 或直连；完整端口、状态路径和安全边界见 [ii.md](ii.md)。
 
 ## 详细手册
 
@@ -226,7 +235,7 @@ ii relay --tls relay.example.com -H 8443 --cert D:\certs\fullchain.pem --key D:\
 
 ## 版本
 
-当前版本由 Git tag 管理。仓库内已使用 `v0.1.10`。
+当前版本由 Git tag 管理。仓库内已使用 `v0.1.11`。
 
 ## 许可证
 

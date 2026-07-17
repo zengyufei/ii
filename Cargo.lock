@@ -1442,7 +1442,7 @@ dependencies = [
 
 [[package]]
 name = "ii"
-version = "0.1.10"
+version = "0.1.11"
 dependencies = [
  "anyhow",
  "attohttpc",
@@ -1452,6 +1452,7 @@ dependencies = [
  "iroh-relay",
  "md-5",
  "postcard",
+ "rcgen",
  "reqwest_dav",
  "rust-s3",
  "rustls",
@@ -1461,6 +1462,8 @@ dependencies = [
  "tokio",
  "tokio-util",
  "toml",
+ "tracing",
+ "tracing-subscriber",
  "url",
  "winresource",
 ]
@@ -1566,41 +1569,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "iroh-metrics"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "291065721ad7c477b972e581bbc528df031dc8eb5e39fe1ff3300ae5dfb157ef"
-dependencies = [
- "http-body-util",
- "hyper",
- "hyper-util",
- "iroh-metrics-derive",
- "itoa",
- "n0-error",
- "portable-atomic",
- "reqwest",
- "rustls",
- "rustls-platform-verifier",
- "ryu",
- "serde",
- "tokio",
- "tokio-util",
- "tracing",
-]
-
-[[package]]
-name = "iroh-metrics-derive"
-version = "1.0.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ae5f0c4405d1fbc9fb16ff422ca40620e93dc36c30ecaba0c2aee3992b7bd48"
-dependencies = [
- "heck",
- "proc-macro2",
- "quote",
- "syn",
-]
-
-[[package]]
 name = "iroh-relay"
 version = "1.0.2"
 dependencies = [
@@ -1617,7 +1585,6 @@ dependencies = [
  "hyper-util",
  "iroh-base",
  "iroh-dns",
- "iroh-metrics",
  "lru",
  "n0-error",
  "n0-future",
@@ -2451,9 +2418,6 @@ name = "portable-atomic"
 version = "1.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c33a9471896f1c69cecef8d20cbe2f7accd12527ce60845ff44c153bb2a21b49"
-dependencies = [
- "serde",
-]
 
 [[package]]
 name = "postcard"
@@ -2693,7 +2657,6 @@ dependencies = [
  "rustls-pki-types",
  "rustls-platform-verifier",
  "serde",
- "serde_json",
  "serde_urlencoded",
  "sync_wrapper",
  "tokio",
