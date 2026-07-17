@@ -1,5 +1,5 @@
 use anyhow::Result;
-use std::net::{Ipv4Addr, SocketAddr, TcpListener, UdpSocket};
+use std::net::{Ipv4Addr, SocketAddr, TcpListener};
 
 use crate::{relay, storage};
 
@@ -21,13 +21,11 @@ pub async fn run() -> Result<()> {
     report_s3_config(&s3_config_path);
     report_webdav_config(&s3_config_path);
 
-    check_tcp("http", 80);
-    check_tcp("https", 443);
+    check_tcp("default relay http", 3340);
     #[cfg(feature = "relay-metrics")]
     check_tcp("metrics", 9090);
     #[cfg(not(feature = "relay-metrics"))]
     println!("metrics: disabled in this build");
-    check_udp("quic", 7842);
     Ok(())
 }
 
@@ -103,19 +101,6 @@ fn check_tcp(label: &str, port: u16) {
     match TcpListener::bind(addr) {
         Ok(listener) => {
             drop(listener);
-            println!("{label}: bind ok on {addr}");
-        }
-        Err(err) => {
-            println!("{label}: bind failed on {addr}: {err}");
-        }
-    }
-}
-
-fn check_udp(label: &str, port: u16) {
-    let addr = SocketAddr::from((Ipv4Addr::UNSPECIFIED, port));
-    match UdpSocket::bind(addr) {
-        Ok(sock) => {
-            drop(sock);
             println!("{label}: bind ok on {addr}");
         }
         Err(err) => {

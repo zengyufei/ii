@@ -6,6 +6,19 @@ All notable changes to `ii` are documented here. The default Chinese version is 
 
 Nothing yet.
 
+## 0.1.10 - 2026-07-17
+
+### Changed
+
+- Added `ii relay --tls <domain> --cert <path> --key <path>` for HTTPS relays using operator-provided PEM certificate and key files.
+- TLS mode no longer exposes a public HTTP relay; certificate files and the domain are owned by the operator.
+- Removed ACME certificate issuance, certificate renewal, and QUIC address discovery while retaining the HTTP-only default relay.
+- Made `ii doctor` check `3340/tcp` by default.
+
+### Documentation
+
+- Updated manual-certificate HTTPS and relay port guidance.
+
 ## 0.1.9 - 2026-07-17
 
 ### Added

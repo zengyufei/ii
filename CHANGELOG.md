@@ -6,6 +6,19 @@
 
 暂无。
 
+## 0.1.10 - 2026-07-17
+
+### 变更
+
+- `ii relay` 新增 `--tls <domain> --cert <path> --key <path>`，使用运维方提供的 PEM 证书和私钥启动 HTTPS relay。
+- TLS 模式不再开放公网 HTTP relay；证书和域名必须由运维方负责。
+- 移除 ACME 自动证书、自动续期和 QUIC 地址发现，默认 relay 保持纯 HTTP。
+- `ii doctor` 默认检查 `3340/tcp`。
+
+### 文档
+
+- 更新 HTTPS 手工证书和 relay 端口说明。
+
 ## 0.1.9 - 2026-07-17
 
 ### 新增

@@ -11,7 +11,7 @@
 ```text
 ii send [<path>] [--name <name>] [-t] [-c] [-o <path>] [--s3] [--webdav] [--profile <name>] [-d] [-p] [--local] [--relay <url>] [--no-relay]
 ii recv <ticket> [-o <dir>] [--stdout] [--overwrite] [--resume] [--local] [--trace]
-ii relay [--config <path>] [--http <port>] [--https <port>] [--quic <port>] [--metrics <port>]
+ii relay [--config <path>] [--port <port>] [--metrics <port>] [--tls <domain> --cert <path> --key <path>]
 ii doctor
 ii version
 ```
@@ -262,7 +262,7 @@ iroh-relay
 ii relay
 ii relay --config .\relay.toml
 ii relay -H 8080
-ii relay --config .\relay.toml -S 8443 -Q 7843
+ii relay --tls relay.example.com -H 8443 --cert .\fullchain.pem --key .\privkey.pem
 ```
 
 ### 默认启动
@@ -286,7 +286,7 @@ ii send .\video.mp4 --relay http://203.0.113.10:3340
 
 这是默认路径。公网 HTTP 没有 TLS 保护，只适合临时、受信任的网络；要长期公开提供 relay，再配置 HTTPS。
 
-旧版自动生成的空 LetsEncrypt 模板会被识别并忽略，`ii relay` 会回退到 HTTP，不再因缺域名启动失败。
+旧版自动生成的不完整 TLS 模板会被识别并忽略，`ii relay` 会回退到 HTTP，不再因缺域名启动失败。
 
 ### 配置文件路径
 
@@ -314,79 +314,54 @@ ii send .\video.mp4 --relay http://203.0.113.10:8080
 
 端口参数：
 
-- `--http <port>` / `-H <port>`：HTTP 端口，对应 `http_bind_addr`
-- `--https <port>` / `-S <port>`：HTTPS 端口，必须已有 `[tls]` 配置
-- `--quic <port>` / `-Q <port>`：QUIC 地址发现端口，必须已有 `[tls]` 配置
+- 默认或未传 `--tls` 时，`--port <port>` / `-H <port>` 是 HTTP relay 端口，对应 `http_bind_addr`
+- 传了 `--tls` 时，`-H <port>` 改为 HTTPS relay 端口，默认 `443`
 - `--metrics <port>` / `-M <port>`：开启 metrics 并设置 metrics 端口，对应 `metrics_bind_addr`
 
-### HTTPS、域名和 QUIC
+### HTTPS 和域名
 
-这些全是进阶配置，不是 `ii relay` 的前置条件。先创建并编辑配置文件，再启动：
-
-```powershell
-ii relay --config .\relay.toml
-```
-
-Cloudflare、Nginx 或其他反向代理已经占用 `80/443` 时，建议让它负责公网 TLS，`ii relay` 监听后端端口。ACME 由 `ii relay` 自己签发时，域名必须解析到该机器，并且验证请求必须能到达它。
-
-一个 ACME + QUIC 示例：
-
-```toml
-http_bind_addr = "0.0.0.0:8080"
-enable_quic_addr_discovery = true
-
-[tls]
-https_bind_addr = "0.0.0.0:8443"
-quic_bind_addr = "0.0.0.0:7843"
-cert_mode = "LetsEncrypt"
-hostname = ["relay.example.com"]
-contact = "ops@example.com"
-prod_tls = true
-```
-
-启动时可覆盖端口：
+HTTPS 是显式进阶模式，必须同时给域名、完整证书链和私钥：
 
 ```powershell
-ii relay --config .\relay.toml -S 8443 -Q 7843
+ii relay --tls relay.example.com -H 8443 --cert .\fullchain.pem --key .\privkey.pem
 ```
 
-客户端：
+域名必须已经解析到 relay 服务器；`--cert` 指向 PEM 格式的完整证书链，`--key` 指向匹配的 PEM 私钥。证书的 SAN 必须包含 `--tls` 指定的域名。`ii` 不申请、不续期证书，也不要求联系邮箱。
+
+客户端使用 HTTPS：
 
 ```powershell
 ii send .\video.mp4 --relay https://relay.example.com:8443
 ```
 
+TLS 模式不会在公网开放 HTTP relay。底层所需的 HTTP 探测监听只绑定本机随机端口，因此下面的地址不成立：
+
+```powershell
+ii send .\video.mp4 --relay http://relay.example.com:8443
+```
+
+`--config` 也可保存手工 TLS 配置：
+
+```toml
+[tls]
+domain = "relay.example.com"
+https_bind_addr = "0.0.0.0:8443"
+cert_path = "/etc/ii/fullchain.pem"
+key_path = "/etc/ii/privkey.pem"
+```
+
 端口职责：
 
 - `3340/tcp`：默认 HTTP relay
-- `443/tcp` 或自定义 TCP 端口：启用 `[tls]` 后的 HTTPS relay
-- `7842/udp` 或自定义 UDP 端口：启用 `[tls]` 后的 QUIC 地址发现
-- `9090/tcp`：metrics，默认关闭
+- `443/tcp` 或 `-H` 指定的 TCP 端口：启用 `--tls` 后的 HTTPS relay
+- `9090/tcp`：metrics，默认关闭；官方 release 当前未启用 metrics，传 `-M` 会报错
 
 - 反向代理必须支持 WebSocket / HTTP upgrade。
-- `7842/udp` 不能由普通 HTTP 反向代理代替；不需要 QUIC 就保持 `enable_quic_addr_discovery = false`。
-- `--https` 和 `--quic` 不会替你猜域名或证书；没有 `[tls]` 时会明确报错。
+- `--cert` 或 `--key` 缺任意一个都会拒绝启动。
 
 ### TLS 来源
 
-显式配置 `[tls]` 后，HTTPS 可使用 ACME 自动签发、手工证书或文件重载。ACME 需要公网 IP、已解析到 relay 的 DNS 名和联系邮箱；IP 地址本身不能用于 LetsEncrypt 签发。
-
-可调项：
-
-- `IROH_RELAY_ACME_URL`：覆盖 ACME directory URL
-- `IROH_RELAY_ACME_CA`：给本地 ACME 测试服务器额外信任根证书
-
-手工证书模式读取：
-
-- `default.crt`
-- `default.key`
-
-也可以显式覆盖：
-
-- `manual_cert_path`
-- `manual_key_path`
-
-还有 `Reloading` 模式，用于按证书文件重载。
+TLS 只读取用户显式指定的 `--cert` 和 `--key`，或 `relay.toml` 里的 `cert_path` 和 `key_path`。ACME、LetsEncrypt 和证书自动续期不属于 `ii`。
 
 ## `ii doctor`
 

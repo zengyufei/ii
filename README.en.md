@@ -197,7 +197,13 @@ Clients use it with:
 ii send .\video.mp4 --relay http://SERVER_PUBLIC_IP:3340
 ```
 
-Configure HTTPS, a domain, ACME certificates, or QUIC address discovery only when needed by editing `relay.toml` and starting with `--config`. See [ii.md](ii.md) for the full configuration and Nginx reverse-proxy setup. Plain HTTP is not suitable for a long-lived public deployment.
+For HTTPS and a domain, explicitly provide an existing certificate and private key:
+
+```powershell
+ii relay --tls relay.example.com -H 8443 --cert D:\certs\fullchain.pem --key D:\certs\privkey.pem
+```
+
+Clients use `https://relay.example.com:8443`. `ii` does not issue or renew certificates; the operator owns those files. See [ii.md](ii.md) for the full configuration. Plain HTTP is not suitable for a long-lived public deployment.
 
 ## Full Manual
 
@@ -209,7 +215,7 @@ Release changes are documented in [CHANGELOG.en.md](CHANGELOG.en.md). The defaul
 
 ## Version
 
-The current version is managed by Git tags. This repository currently uses `v0.1.9`.
+The current version is managed by Git tags. This repository currently uses `v0.1.10`.
 
 ## License
 

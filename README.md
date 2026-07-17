@@ -208,7 +208,13 @@ ii relay
 ii send .\video.mp4 --relay http://服务器公网IP:3340
 ```
 
-需要 HTTPS、域名、ACME 证书或 QUIC 地址发现时，再编辑 `relay.toml` 并通过 `--config` 启动。完整配置和 Nginx 反向代理方式见 [ii.md](ii.md)。纯 HTTP 不适合不受信任的公网长期部署。
+需要 HTTPS 和域名时，显式提供已有证书和私钥：
+
+```powershell
+ii relay --tls relay.example.com -H 8443 --cert D:\certs\fullchain.pem --key D:\certs\privkey.pem
+```
+
+客户端使用 `https://relay.example.com:8443`。`ii` 不申请、不续期证书；证书文件由运维方负责。完整配置见 [ii.md](ii.md)。纯 HTTP 不适合不受信任的公网长期部署。
 
 ## 详细手册
 
@@ -220,7 +226,7 @@ ii send .\video.mp4 --relay http://服务器公网IP:3340
 
 ## 版本
 
-当前版本由 Git tag 管理。仓库内已使用 `v0.1.9`。
+当前版本由 Git tag 管理。仓库内已使用 `v0.1.10`。
 
 ## 许可证
 
