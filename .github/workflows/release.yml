@@ -23,7 +23,7 @@ jobs:
           - name: linux-x86_64
             os: ubuntu-latest
             artifact: ii-linux-x86_64
-            binary: target/release/ii
+            binary: target/x86_64-unknown-linux-musl/release/ii
           - name: macos-aarch64
             os: macos-latest
             artifact: ii-macos-aarch64
@@ -36,13 +36,35 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
+      - name: Install Linux musl toolchain
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y musl-tools
+          rustup target add x86_64-unknown-linux-musl
+
       - name: Cache cargo
         uses: Swatinem/rust-cache@v2
 
       - name: Test
         run: cargo test --locked
 
+      - name: Build Linux static release
+        if: runner.os == 'Linux'
+        shell: bash
+        env:
+          CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
+          CC_x86_64_unknown_linux_musl: musl-gcc
+        run: cargo build --release --locked --target x86_64-unknown-linux-musl
+
+      - name: Verify Linux binary is statically linked
+        if: runner.os == 'Linux'
+        shell: bash
+        run: file "${{ matrix.binary }}" | grep -Eq 'statically linked|static-pie linked'
+
       - name: Build release
+        if: runner.os != 'Linux'
         run: cargo build --release --locked
 
       - name: Compress Windows binary with bundled UPX
