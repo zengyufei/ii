@@ -185,16 +185,19 @@ Start a relay:
 ii relay
 ```
 
-Default ports:
+The default is an HTTP-only relay:
 
-- HTTP: `80`
-- HTTPS: `443`
-- QUIC: `7842`
-- metrics: `9090`, disabled by default
+- It listens on `0.0.0.0:3340`; only allow `3340/tcp`.
+- Use the server's public IP directly. No domain, DNS, or certificate is required.
+- HTTPS, QUIC, and metrics do not start.
 
-If `80/443` are already used by Nginx, run `ii relay` on non-standard backend ports and forward through the front proxy. `7842/udp` is an independent QUIC port and cannot be replaced by a normal HTTP reverse proxy.
+Clients use it with:
 
-Production TLS primarily uses automatic ACME issuance. Development mode can use `--dev` for plain HTTP.
+```powershell
+ii send .\video.mp4 --relay http://SERVER_PUBLIC_IP:3340
+```
+
+Configure HTTPS, a domain, ACME certificates, or QUIC address discovery only when needed by editing `relay.toml` and starting with `--config`. See [ii.md](ii.md) for the full configuration and Nginx reverse-proxy setup. Plain HTTP is not suitable for a long-lived public deployment.
 
 ## Full Manual
 
@@ -206,7 +209,7 @@ Release changes are documented in [CHANGELOG.en.md](CHANGELOG.en.md). The defaul
 
 ## Version
 
-The current version is managed by Git tags. This repository currently uses `v0.1.8`.
+The current version is managed by Git tags. This repository currently uses `v0.1.9`.
 
 ## License
 

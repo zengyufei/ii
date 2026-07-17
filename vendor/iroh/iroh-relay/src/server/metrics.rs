@@ -45,13 +45,19 @@ pub struct Metrics {
     ///
     /// [`RelayToClientDatagram`]: crate::protos::common::FrameType::RelayToClientDatagram
     /// [`RelayToClientDatagramBatch`]: crate::protos::common::FrameType::RelayToClientDatagramBatch
-    #[cfg_attr(feature = "metrics", metrics(help = "Number of 'send' packets relayed."))]
+    #[cfg_attr(
+        feature = "metrics",
+        metrics(help = "Number of 'send' packets relayed.")
+    )]
     pub send_packets_sent: Counter,
     /// [`ClientToRelayDatagram`] or [`ClientToRelayDatagramBatch`] frames received from a client.
     ///
     /// [`ClientToRelayDatagram`]: crate::protos::common::FrameType::ClientToRelayDatagram
     /// [`ClientToRelayDatagramBatch`]: crate::protos::common::FrameType::ClientToRelayDatagramBatch
-    #[cfg_attr(feature = "metrics", metrics(help = "Number of 'send' packets received."))]
+    #[cfg_attr(
+        feature = "metrics",
+        metrics(help = "Number of 'send' packets received.")
+    )]
     pub send_packets_recv: Counter,
     /// [`RelayToClientDatagram`] or [`RelayToClientDatagramBatch`] frames dropped instead of being
     /// delivered to a client, because the recipient is not connected or writing to its stream failed.
@@ -61,28 +67,49 @@ pub struct Metrics {
     ///
     /// [`RelayToClientDatagram`]: crate::protos::common::FrameType::RelayToClientDatagram
     /// [`RelayToClientDatagramBatch`]: crate::protos::common::FrameType::RelayToClientDatagramBatch
-    #[cfg_attr(feature = "metrics", metrics(help = "Number of 'send' packets dropped."))]
+    #[cfg_attr(
+        feature = "metrics",
+        metrics(help = "Number of 'send' packets dropped.")
+    )]
     pub send_packets_dropped: Counter,
 
     /// Intended to count sent frames other than datagrams, but currently unused (never incremented).
-    #[cfg_attr(feature = "metrics", metrics(help = "Number of packets sent that were not 'send' packets"))]
+    #[cfg_attr(
+        feature = "metrics",
+        metrics(help = "Number of packets sent that were not 'send' packets")
+    )]
     pub other_packets_sent: Counter,
     /// Intended to count received frames other than datagrams, but currently unused (never incremented).
-    #[cfg_attr(feature = "metrics", metrics(help = "Number of packets received that were not 'send' packets"))]
+    #[cfg_attr(
+        feature = "metrics",
+        metrics(help = "Number of packets received that were not 'send' packets")
+    )]
     pub other_packets_recv: Counter,
     /// Intended to count dropped frames other than datagrams, but currently unused (never incremented).
-    #[cfg_attr(feature = "metrics", metrics(help = "Number of times, non-send packet was dropped."))]
+    #[cfg_attr(
+        feature = "metrics",
+        metrics(help = "Number of times, non-send packet was dropped.")
+    )]
     pub other_packets_dropped: Counter,
 
     /// Number of [`FrameType::Ping`](crate::protos::common::FrameType::Ping) frames received from a client.
-    #[cfg_attr(feature = "metrics", metrics(help = "Number of times the server has received a Ping from a client."))]
+    #[cfg_attr(
+        feature = "metrics",
+        metrics(help = "Number of times the server has received a Ping from a client.")
+    )]
     pub got_ping: Counter,
     /// Number of [`FrameType::Pong`](crate::protos::common::FrameType::Pong) frames sent to a client.
-    #[cfg_attr(feature = "metrics", metrics(help = "Number of times the server has sent a Pong to a client."))]
+    #[cfg_attr(
+        feature = "metrics",
+        metrics(help = "Number of times the server has sent a Pong to a client.")
+    )]
     pub sent_pong: Counter,
     /// Intended to count received frames with an unrecognized [`FrameType`](crate::protos::common::FrameType),
     /// but currently unused (never incremented).
-    #[cfg_attr(feature = "metrics", metrics(help = "Number of unknown frames sent to this server."))]
+    #[cfg_attr(
+        feature = "metrics",
+        metrics(help = "Number of unknown frames sent to this server.")
+    )]
     pub unknown_frames: Counter,
 
     /// Number of bytes received from client connection which have been rate-limited.
@@ -98,7 +125,10 @@ pub struct Metrics {
     /// Number of times a client connection was disconnected.
     ///
     /// Incremented once per connection, paired with [`Self::accepts`].
-    #[cfg_attr(feature = "metrics", metrics(help = "Number of clients that have then disconnected."))]
+    #[cfg_attr(
+        feature = "metrics",
+        metrics(help = "Number of clients that have then disconnected.")
+    )]
     pub disconnects: Counter,
 
     /// Number of unique client keys per day

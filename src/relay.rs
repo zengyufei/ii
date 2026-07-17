@@ -3,12 +3,12 @@ use anyhow::{Context, Result, bail};
 #[cfg(feature = "relay-metrics")]
 use iroh_relay::defaults::DEFAULT_METRICS_PORT;
 use iroh_relay::{
-    defaults::{DEFAULT_HTTP_PORT, DEFAULT_HTTPS_PORT, DEFAULT_RELAY_QUIC_PORT},
+    defaults::{DEFAULT_HTTPS_PORT, DEFAULT_RELAY_QUIC_PORT},
     server::{
         self, AcmeConfig, CertConfig, DEFAULT_CERT_RELOAD_INTERVAL, QuicConfig, reloading_resolver,
     },
 };
-use rustls_pki_types::pem::PemObject;
+use rustls::pki_types::pem::PemObject;
 use serde::{Deserialize, Serialize};
 use std::{
     fs,
@@ -18,22 +18,15 @@ use std::{
 };
 use tokio::signal;
 
-const DEV_HTTP_PORT: u16 = 3340;
+const DEFAULT_PLAIN_HTTP_PORT: u16 = 3340;
 const DEFAULT_CONFIG_TEXT: &str = r#"# ii relay configuration
 #
-# Edit this file before running ii relay in production.
+# Default: plain HTTP relay reachable by IP address.
+# For HTTPS, certificates, or QUIC address discovery, add an explicit [tls] section.
 
-http_bind_addr = "0.0.0.0:80"
-enable_quic_addr_discovery = true
+http_bind_addr = "0.0.0.0:3340"
+enable_quic_addr_discovery = false
 enable_metrics = false
-
-[tls]
-https_bind_addr = "0.0.0.0:443"
-quic_bind_addr = "0.0.0.0:7842"
-cert_mode = "LetsEncrypt"
-hostname = []
-contact = ""
-prod_tls = true
 "#;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -69,8 +62,6 @@ struct TlsFile {
     prod_tls: bool,
     #[serde(default)]
     contact: Option<String>,
-    #[serde(default)]
-    dangerous_http_only: bool,
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -107,8 +98,16 @@ pub async fn run(args: RelayArgs) -> Result<()> {
     let config_path = args.config.clone().unwrap_or(default_config_path()?);
 
     let mut cfg = load_or_create_config(&config_path, create_if_missing).await?;
-    apply_cli_overrides(&mut cfg, &args);
-    let server_cfg = build_server_config(cfg, args.dev).await?;
+    if disable_unconfigured_acme(&mut cfg) {
+        eprintln!(
+            "ii relay: ignored incomplete LetsEncrypt settings; starting plain HTTP relay on port {} instead",
+            cfg.http_bind_addr
+                .unwrap_or_else(|| socket_addr(DEFAULT_PLAIN_HTTP_PORT))
+                .port()
+        );
+    }
+    apply_cli_overrides(&mut cfg, &args)?;
+    let server_cfg = build_server_config(cfg).await?;
     let mut server = server::Server::spawn(server_cfg).await?;
 
     tokio::select! {
@@ -138,7 +137,7 @@ async fn load_or_create_config(path: &Path, create_if_missing: bool) -> Result<R
     Ok(cfg)
 }
 
-fn apply_cli_overrides(cfg: &mut RelayFile, args: &RelayArgs) {
+fn apply_cli_overrides(cfg: &mut RelayFile, args: &RelayArgs) -> Result<()> {
     if let Some(port) = args.http {
         cfg.http_bind_addr = Some(socket_addr(port));
     }
@@ -147,37 +146,38 @@ fn apply_cli_overrides(cfg: &mut RelayFile, args: &RelayArgs) {
         cfg.metrics_bind_addr = Some(socket_addr(port));
     }
     if let Some(port) = args.https {
-        let tls = cfg.tls.get_or_insert_with(default_tls);
+        let tls = cfg
+            .tls
+            .as_mut()
+            .context("--https requires a [tls] configuration with certificate settings")?;
         tls.https_bind_addr = Some(socket_addr(port));
     }
     if let Some(port) = args.quic {
-        let tls = cfg.tls.get_or_insert_with(default_tls);
+        let tls = cfg
+            .tls
+            .as_mut()
+            .context("--quic requires a [tls] configuration with certificate settings")?;
         tls.quic_bind_addr = Some(socket_addr(port));
         cfg.enable_quic_addr_discovery = true;
     }
+    Ok(())
 }
 
-async fn build_server_config(cfg: RelayFile, dev: bool) -> Result<server::ServerConfig> {
+async fn build_server_config(cfg: RelayFile) -> Result<server::ServerConfig> {
     let provider = Arc::new(rustls::crypto::ring::default_provider());
-    let http_bind_addr = if dev {
-        cfg.http_bind_addr
-            .unwrap_or_else(|| socket_addr(DEV_HTTP_PORT))
-    } else {
-        cfg.http_bind_addr
-            .unwrap_or_else(|| socket_addr(DEFAULT_HTTP_PORT))
-    };
+    let http_bind_addr = cfg
+        .http_bind_addr
+        .unwrap_or_else(|| socket_addr(DEFAULT_PLAIN_HTTP_PORT));
 
     let mut relay_cfg = server::RelayConfig::new(http_bind_addr);
 
-    let tls_file = if dev { None } else { cfg.tls.clone() };
+    let tls_file = cfg.tls.clone();
     let tls_cfg = match tls_file.as_ref() {
         Some(tls) => Some(build_tls_config(tls, provider.clone()).await?),
         None => None,
     };
 
-    let quic_cfg = if dev {
-        None
-    } else if cfg.enable_quic_addr_discovery {
+    let quic_cfg = if cfg.enable_quic_addr_discovery {
         let tls = tls_file
             .as_ref()
             .context("QUIC address discovery requires TLS configuration")?;
@@ -189,11 +189,7 @@ async fn build_server_config(cfg: RelayFile, dev: bool) -> Result<server::Server
         None
     };
 
-    if dev {
-        relay_cfg.tls = None;
-    } else {
-        relay_cfg.tls = tls_cfg;
-    }
+    relay_cfg.tls = tls_cfg;
 
     let mut server_cfg = server::ServerConfig::default();
     server_cfg.relay = Some(relay_cfg);
@@ -298,11 +294,11 @@ fn load_manual_server_config(
     key_path: &Path,
     provider: &Arc<rustls::crypto::CryptoProvider>,
 ) -> Result<rustls::ServerConfig> {
-    let certs = rustls_pki_types::CertificateDer::pem_file_iter(cert_path)
+    let certs = rustls::pki_types::CertificateDer::pem_file_iter(cert_path)
         .with_context(|| format!("read certificate file {}", cert_path.display()))?
         .collect::<std::result::Result<Vec<_>, _>>()
         .context("parse certificate chain")?;
-    let key = rustls_pki_types::PrivateKeyDer::from_pem_file(key_path)
+    let key = rustls::pki_types::PrivateKeyDer::from_pem_file(key_path)
         .with_context(|| format!("read key file {}", key_path.display()))?;
     let config = rustls_server_config_builder(provider)?
         .with_single_cert(certs, key)
@@ -310,19 +306,20 @@ fn load_manual_server_config(
     Ok(config)
 }
 
-fn default_tls() -> TlsFile {
-    TlsFile {
-        https_bind_addr: None,
-        quic_bind_addr: None,
-        hostname: Vec::new(),
-        cert_mode: CertMode::LetsEncrypt,
-        cert_dir: None,
-        manual_cert_path: None,
-        manual_key_path: None,
-        prod_tls: true,
-        contact: None,
-        dangerous_http_only: false,
+fn disable_unconfigured_acme(cfg: &mut RelayFile) -> bool {
+    let should_disable = cfg.tls.as_ref().is_some_and(|tls| {
+        tls.cert_mode == CertMode::LetsEncrypt
+            && tls.hostname.is_empty()
+            && tls.contact.as_deref().is_none_or(str::is_empty)
+    });
+    if should_disable {
+        cfg.tls = None;
+        cfg.enable_quic_addr_discovery = false;
+        if cfg.http_bind_addr == Some(socket_addr(80)) {
+            cfg.http_bind_addr = Some(socket_addr(DEFAULT_PLAIN_HTTP_PORT));
+        }
     }
+    should_disable
 }
 
 fn socket_addr(port: u16) -> SocketAddr {
@@ -340,5 +337,56 @@ mod tests {
         assert!(path.ends_with("relay.toml"));
         #[cfg(not(target_os = "windows"))]
         assert_eq!(path, PathBuf::from("/etc/ii/relay.toml"));
+    }
+
+    #[test]
+    fn default_config_is_plain_http_only() {
+        let cfg: RelayFile = toml::from_str(DEFAULT_CONFIG_TEXT).unwrap();
+        assert_eq!(
+            cfg.http_bind_addr,
+            Some(socket_addr(DEFAULT_PLAIN_HTTP_PORT))
+        );
+        assert!(cfg.tls.is_none());
+        assert!(!cfg.enable_quic_addr_discovery);
+    }
+
+    #[test]
+    fn incomplete_acme_config_falls_back_to_plain_http() {
+        let mut cfg: RelayFile = toml::from_str(
+            r#"
+                http_bind_addr = "0.0.0.0:80"
+                enable_quic_addr_discovery = true
+
+                [tls]
+                cert_mode = "LetsEncrypt"
+                hostname = []
+                contact = ""
+            "#,
+        )
+        .unwrap();
+
+        assert!(disable_unconfigured_acme(&mut cfg));
+        assert!(cfg.tls.is_none());
+        assert!(!cfg.enable_quic_addr_discovery);
+        assert_eq!(
+            cfg.http_bind_addr,
+            Some(socket_addr(DEFAULT_PLAIN_HTTP_PORT))
+        );
+    }
+
+    #[test]
+    fn https_override_requires_explicit_tls_configuration() {
+        let mut cfg: RelayFile = toml::from_str(DEFAULT_CONFIG_TEXT).unwrap();
+        let args = RelayArgs {
+            https: Some(8443),
+            ..Default::default()
+        };
+
+        let error = apply_cli_overrides(&mut cfg, &args).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("--https requires a [tls] configuration")
+        );
     }
 }

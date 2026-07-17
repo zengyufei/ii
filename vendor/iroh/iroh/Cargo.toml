@@ -73,8 +73,6 @@ axum = { version = "0.8", optional = true }
 
 # non-wasm-in-browser dependencies
 [target.'cfg(not(all(target_family = "wasm", target_os = "unknown")))'.dependencies]
-
-hickory-resolver = { version = "0.26.0", default-features = false }
 portmapper = { version = "0.19.1", optional = true, default-features = false }
 noq = { version = "1.0.1", default-features = false, features = ["runtime-tokio", "rustls"] }
 tokio = { version = "1", features = [
@@ -105,6 +103,7 @@ chrono = "0.4.43"
 
 # *non*-wasm-in-browser test/dev dependencies
 [target.'cfg(not(all(target_family = "wasm", target_os = "unknown")))'.dev-dependencies]
+hickory-resolver = { version = "0.26.0", default-features = false }
 axum = { version = "0.8" }
 pretty_assertions = "1.4"
 rand_chacha = "0.10"
@@ -156,6 +155,7 @@ qlog = ["noq/qlog"]
 fast-apple-datapath = ["noq/fast-apple-datapath"]
 # Use ring as the crypto backend.
 tls-ring = ["noq/ring", "iroh-relay/tls-ring", "iroh-dns/tls-ring"]
+peer-discovery = ["iroh-dns/peer-discovery"]
 # Use aws-lc-rs as the crypto backend, unless `ring` is also enabled.
 tls-aws-lc-rs = ["noq/aws-lc-rs", "iroh-relay/tls-aws-lc-rs", "iroh-dns/tls-aws-lc-rs"]
 # Unstable: Custom transport API (may change without notice)

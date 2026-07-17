@@ -272,6 +272,10 @@ pub(crate) mod portmapper;
 pub(crate) mod runtime;
 pub(crate) mod util;
 
+#[cfg(feature = "peer-discovery")]
+pub mod address_lookup;
+#[cfg(not(feature = "peer-discovery"))]
+#[path = "address_lookup_disabled.rs"]
 pub mod address_lookup;
 pub mod defaults;
 pub mod endpoint;
@@ -286,6 +290,7 @@ pub use iroh_base::{
 };
 #[cfg(not(wasm_browser))]
 pub use iroh_dns::dns;
+#[cfg(feature = "peer-discovery")]
 pub use iroh_dns::endpoint_info;
 pub use iroh_relay::{RelayConfig, RelayMap};
 pub use n0_watcher::Watcher;

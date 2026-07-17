@@ -196,16 +196,19 @@ ii version
 ii relay
 ```
 
-默认端口：
+默认就是 HTTP relay：
 
-- HTTP: `80`
-- HTTPS: `443`
-- QUIC: `7842`
-- metrics: `9090`，默认关闭
+- 监听 `0.0.0.0:3340`，只需要开放 `3340/tcp`
+- 直接填服务器公网 IP，不需要域名、DNS 或证书
+- 不启动 HTTPS、QUIC 和 metrics
 
-如果 `80/443` 已经被 Nginx 占用，可以把 `ii relay` 放到非标准端口，再让前置代理转发。`7842/udp` 是独立 QUIC 端口，不能靠普通 HTTP 反代替代。
+客户端使用：
 
-TLS 生产模式主要走 ACME 自动签发；开发模式可以用 `--dev` 走 plain HTTP。
+```powershell
+ii send .\video.mp4 --relay http://服务器公网IP:3340
+```
+
+需要 HTTPS、域名、ACME 证书或 QUIC 地址发现时，再编辑 `relay.toml` 并通过 `--config` 启动。完整配置和 Nginx 反向代理方式见 [ii.md](ii.md)。纯 HTTP 不适合不受信任的公网长期部署。
 
 ## 详细手册
 
@@ -217,7 +220,7 @@ TLS 生产模式主要走 ACME 自动签发；开发模式可以用 `--dev` 走 
 
 ## 版本
 
-当前版本由 Git tag 管理。仓库内已使用 `v0.1.8`。
+当前版本由 Git tag 管理。仓库内已使用 `v0.1.9`。
 
 ## 许可证
 

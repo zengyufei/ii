@@ -1,14 +1,14 @@
-use clap::{Args, Parser, Subcommand};
+use std::fmt;
 use std::path::PathBuf;
+use std::process;
+use std::str::FromStr;
 
-#[derive(Debug, Parser)]
-#[command(name = "ii", version, about = "ii file transfer")]
+#[derive(Debug)]
 pub struct Cli {
-    #[command(subcommand)]
     pub command: Command,
 }
 
-#[derive(Debug, Subcommand)]
+#[derive(Debug)]
 pub enum Command {
     Send(SendArgs),
     Recv(RecvArgs),
@@ -17,74 +17,401 @@ pub enum Command {
     Version,
 }
 
-#[derive(Debug, Args, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct SendArgs {
     pub path: Option<PathBuf>,
-
-    #[arg(long)]
     pub name: Option<String>,
-
-    #[arg(short = 't')]
     pub keep_alive: bool,
-
-    #[arg(short = 'c', long)]
     pub copy: bool,
-
-    #[arg(short = 'o', long, value_name = "path")]
     pub output: Option<PathBuf>,
-
-    #[arg(long, conflicts_with_all = ["webdav", "local", "relay", "no_relay"])]
     pub s3: bool,
-
-    #[arg(short = 'd')]
     pub delete_after_recv: bool,
-
-    #[arg(long, value_name = "name")]
     pub profile: Option<String>,
-
-    #[arg(long, conflicts_with_all = ["s3", "local", "relay", "no_relay"])]
     pub webdav: bool,
-
-    #[arg(short = 'p', requires = "webdav")]
     pub portable_webdav: bool,
-
-    #[arg(long, conflicts_with_all = ["s3", "webdav", "relay", "no_relay"])]
     pub local: bool,
-
-    #[arg(long, value_name = "url", conflicts_with_all = ["s3", "webdav", "local", "no_relay"])]
     pub relay: Option<iroh::RelayUrl>,
-
-    #[arg(long, conflicts_with_all = ["s3", "webdav", "local", "relay"])]
     pub no_relay: bool,
 }
 
-#[derive(Debug, Args, Clone)]
+#[derive(Debug, Clone)]
 pub struct RecvArgs {
     pub ticket: String,
-
-    #[arg(short = 'o', value_name = "dir")]
     pub out_dir: Option<PathBuf>,
-
-    #[arg(long, conflicts_with = "resume")]
     pub stdout: bool,
-
-    #[arg(long)]
     pub overwrite: bool,
-
-    #[arg(long, conflicts_with = "stdout")]
     pub resume: bool,
-
-    #[arg(long)]
     pub local: bool,
-
-    #[arg(long)]
     pub trace: bool,
 }
+
+#[derive(Debug, Clone, Default)]
+pub struct RelayArgs {
+    pub config: Option<PathBuf>,
+    pub http: Option<u16>,
+    pub https: Option<u16>,
+    pub quic: Option<u16>,
+    pub metrics: Option<u16>,
+}
+
+impl Cli {
+    pub fn parse() -> Self {
+        match parse_args(std::env::args()) {
+            Ok(cli) => cli,
+            Err(ParseAction::Print { text, code }) => {
+                if code == 0 {
+                    println!("{text}");
+                } else {
+                    eprintln!("{text}");
+                }
+                process::exit(code);
+            }
+        }
+    }
+
+    #[cfg(test)]
+    pub fn parse_from<I, T>(args: I) -> Self
+    where
+        I: IntoIterator<Item = T>,
+        T: Into<String>,
+    {
+        match parse_args(args.into_iter().map(Into::into)) {
+            Ok(cli) => cli,
+            Err(ParseAction::Print { text, code }) => panic!("parse exited with {code}: {text}"),
+        }
+    }
+}
+
+enum ParseAction {
+    Print { text: String, code: i32 },
+}
+
+impl ParseAction {
+    fn error(message: impl fmt::Display) -> Self {
+        Self::Print {
+            text: format!("error: {message}\n\n{}", HELP),
+            code: 2,
+        }
+    }
+
+    fn help(text: &'static str) -> Self {
+        Self::Print {
+            text: text.to_string(),
+            code: 0,
+        }
+    }
+
+    fn version() -> Self {
+        Self::Print {
+            text: env!("CARGO_PKG_VERSION").to_string(),
+            code: 0,
+        }
+    }
+}
+
+fn parse_args<I, T>(args: I) -> Result<Cli, ParseAction>
+where
+    I: IntoIterator<Item = T>,
+    T: Into<String>,
+{
+    let mut args: Vec<String> = args.into_iter().map(Into::into).collect();
+    if !args.is_empty() {
+        args.remove(0);
+    }
+
+    let Some(command) = args.first().cloned() else {
+        return Err(ParseAction::help(HELP));
+    };
+
+    if is_help(&command) {
+        return Err(ParseAction::help(HELP));
+    }
+    if command == "--version" || command == "-V" {
+        return Err(ParseAction::version());
+    }
+
+    let rest = args.split_off(1);
+    let command = match command.as_str() {
+        "send" => Command::Send(parse_send(rest)?),
+        "recv" => Command::Recv(parse_recv(rest)?),
+        "relay" => Command::Relay(parse_relay(rest)?),
+        "doctor" => reject_extra("doctor", rest).map(|_| Command::Doctor)?,
+        "version" => reject_extra("version", rest).map(|_| Command::Version)?,
+        other => return Err(ParseAction::error(format!("unknown command `{other}`"))),
+    };
+
+    Ok(Cli { command })
+}
+
+fn parse_send(args: Vec<String>) -> Result<SendArgs, ParseAction> {
+    let mut out = SendArgs::default();
+    let mut iter = ArgsIter::new(args);
+
+    while let Some(arg) = iter.next() {
+        match split_long_value(&arg) {
+            Some(("name", value)) => out.name = Some(value.to_string()),
+            Some(("output", value)) => out.output = Some(PathBuf::from(value)),
+            Some(("profile", value)) => out.profile = Some(value.to_string()),
+            Some(("relay", value)) => out.relay = Some(parse_relay_url(value)?),
+            Some((flag, _)) => {
+                return Err(ParseAction::error(format!("unknown option `--{flag}`")));
+            }
+            None => match arg.as_str() {
+                "-h" | "--help" => return Err(ParseAction::help(SEND_HELP)),
+                "--name" => out.name = Some(iter.value("--name")?),
+                "-t" => out.keep_alive = true,
+                "-c" | "--copy" => out.copy = true,
+                "-o" | "--output" => out.output = Some(PathBuf::from(iter.value(&arg)?)),
+                "--s3" => out.s3 = true,
+                "-d" => out.delete_after_recv = true,
+                "--profile" => out.profile = Some(iter.value("--profile")?),
+                "--webdav" => out.webdav = true,
+                "-p" => out.portable_webdav = true,
+                "--local" => out.local = true,
+                "--relay" => out.relay = Some(parse_relay_url(&iter.value("--relay")?)?),
+                "--no-relay" => out.no_relay = true,
+                _ if arg.starts_with('-') => {
+                    return Err(ParseAction::error(format!("unknown option `{arg}`")));
+                }
+                _ => {
+                    if out.path.replace(PathBuf::from(&arg)).is_some() {
+                        return Err(ParseAction::error("send accepts only one path"));
+                    }
+                }
+            },
+        }
+    }
+
+    validate_send(&out)?;
+    Ok(out)
+}
+
+fn parse_recv(args: Vec<String>) -> Result<RecvArgs, ParseAction> {
+    let mut ticket = None;
+    let mut out_dir = None;
+    let mut stdout = false;
+    let mut overwrite = false;
+    let mut resume = false;
+    let mut local = false;
+    let mut trace = false;
+    let mut iter = ArgsIter::new(args);
+
+    while let Some(arg) = iter.next() {
+        match split_long_value(&arg) {
+            Some(("output", value)) => out_dir = Some(PathBuf::from(value)),
+            Some((flag, _)) => {
+                return Err(ParseAction::error(format!("unknown option `--{flag}`")));
+            }
+            None => match arg.as_str() {
+                "-h" | "--help" => return Err(ParseAction::help(RECV_HELP)),
+                "-o" => out_dir = Some(PathBuf::from(iter.value("-o")?)),
+                "--stdout" => stdout = true,
+                "--overwrite" => overwrite = true,
+                "--resume" => resume = true,
+                "--local" => local = true,
+                "--trace" => trace = true,
+                _ if arg.starts_with('-') => {
+                    return Err(ParseAction::error(format!("unknown option `{arg}`")));
+                }
+                _ => {
+                    if ticket.replace(arg).is_some() {
+                        return Err(ParseAction::error("recv accepts only one ticket"));
+                    }
+                }
+            },
+        }
+    }
+
+    if stdout && resume {
+        return Err(ParseAction::error("--stdout conflicts with --resume"));
+    }
+
+    let Some(ticket) = ticket else {
+        return Err(ParseAction::error("missing ticket"));
+    };
+
+    Ok(RecvArgs {
+        ticket,
+        out_dir,
+        stdout,
+        overwrite,
+        resume,
+        local,
+        trace,
+    })
+}
+
+fn parse_relay(args: Vec<String>) -> Result<RelayArgs, ParseAction> {
+    let mut out = RelayArgs::default();
+    let mut iter = ArgsIter::new(args);
+
+    while let Some(arg) = iter.next() {
+        match split_long_value(&arg) {
+            Some(("config", value)) => out.config = Some(PathBuf::from(value)),
+            Some(("http", value)) => out.http = Some(parse_port("--http", value)?),
+            Some(("https", value)) => out.https = Some(parse_port("--https", value)?),
+            Some(("quic", value)) => out.quic = Some(parse_port("--quic", value)?),
+            Some(("metrics", value)) => out.metrics = Some(parse_port("--metrics", value)?),
+            Some((flag, _)) => {
+                return Err(ParseAction::error(format!("unknown option `--{flag}`")));
+            }
+            None => match arg.as_str() {
+                "-h" | "--help" => return Err(ParseAction::help(RELAY_HELP)),
+                "-c" | "--config" => out.config = Some(PathBuf::from(iter.value(&arg)?)),
+                "-H" | "--http" => out.http = Some(parse_port(&arg, &iter.value(&arg)?)?),
+                "-S" | "--https" => out.https = Some(parse_port(&arg, &iter.value(&arg)?)?),
+                "-Q" | "--quic" => out.quic = Some(parse_port(&arg, &iter.value(&arg)?)?),
+                "-M" | "--metrics" => out.metrics = Some(parse_port(&arg, &iter.value(&arg)?)?),
+                _ => return Err(ParseAction::error(format!("unexpected argument `{arg}`"))),
+            },
+        }
+    }
+
+    Ok(out)
+}
+
+fn validate_send(args: &SendArgs) -> Result<(), ParseAction> {
+    let backend_count = [
+        args.s3,
+        args.webdav,
+        args.local,
+        args.relay.is_some(),
+        args.no_relay,
+    ]
+    .into_iter()
+    .filter(|value| *value)
+    .count();
+
+    if backend_count > 1 {
+        return Err(ParseAction::error(
+            "--s3, --webdav, --local, --relay and --no-relay conflict with each other",
+        ));
+    }
+
+    if args.portable_webdav && !args.webdav {
+        return Err(ParseAction::error("-p requires --webdav"));
+    }
+
+    Ok(())
+}
+
+fn reject_extra(command: &str, args: Vec<String>) -> Result<(), ParseAction> {
+    if args.iter().any(|arg| is_help(arg)) {
+        return Err(ParseAction::help(match command {
+            "doctor" => DOCTOR_HELP,
+            "version" => VERSION_HELP,
+            _ => HELP,
+        }));
+    }
+    if let Some(extra) = args.first() {
+        return Err(ParseAction::error(format!(
+            "`{command}` does not accept `{extra}`"
+        )));
+    }
+    Ok(())
+}
+
+fn parse_relay_url(value: &str) -> Result<iroh::RelayUrl, ParseAction> {
+    iroh::RelayUrl::from_str(value)
+        .map_err(|err| ParseAction::error(format!("invalid relay URL `{value}`: {err}")))
+}
+
+fn parse_port(flag: &str, value: &str) -> Result<u16, ParseAction> {
+    value
+        .parse()
+        .map_err(|_| ParseAction::error(format!("{flag} expects a port from 0 to 65535")))
+}
+
+fn split_long_value(arg: &str) -> Option<(&str, &str)> {
+    arg.strip_prefix("--")?.split_once('=')
+}
+
+fn is_help(arg: &str) -> bool {
+    arg == "-h" || arg == "--help"
+}
+
+struct ArgsIter {
+    args: std::vec::IntoIter<String>,
+}
+
+impl ArgsIter {
+    fn new(args: Vec<String>) -> Self {
+        Self {
+            args: args.into_iter(),
+        }
+    }
+
+    fn next(&mut self) -> Option<String> {
+        self.args.next()
+    }
+
+    fn value(&mut self, flag: &str) -> Result<String, ParseAction> {
+        self.next()
+            .ok_or_else(|| ParseAction::error(format!("{flag} expects a value")))
+    }
+}
+
+const HELP: &str = "\
+ii file transfer
+
+Usage:
+  ii send [options] [path]
+  ii recv [options] <ticket>
+  ii relay [options]
+  ii doctor
+  ii version
+";
+
+const SEND_HELP: &str = "\
+Usage:
+  ii send [options] [path]
+
+Options:
+  --name <name>
+  -t
+  -c, --copy
+  -o, --output <path>
+  --s3
+  --webdav
+  -p
+  -d
+  --profile <name>
+  --local
+  --relay <url>
+  --no-relay
+";
+
+const RECV_HELP: &str = "\
+Usage:
+  ii recv [options] <ticket>
+
+Options:
+  -o <dir>
+  --stdout
+  --overwrite
+  --resume
+  --local
+  --trace
+";
+
+const RELAY_HELP: &str = "\
+Usage:
+  ii relay [options]
+
+Options:
+  -c, --config <path>
+  -H, --http <port>
+  -S, --https <port>
+  -Q, --quic <port>
+  -M, --metrics <port>
+";
+
+const DOCTOR_HELP: &str = "Usage:\n  ii doctor";
+const VERSION_HELP: &str = "Usage:\n  ii version";
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use clap::Parser;
 
     #[test]
     fn recv_accepts_trace() {
@@ -163,25 +490,23 @@ mod tests {
             _ => panic!("expected send command"),
         }
     }
-}
 
-#[derive(Debug, Args, Clone)]
-pub struct RelayArgs {
-    #[arg(long)]
-    pub dev: bool,
+    #[test]
+    fn relay_accepts_short_ports() {
+        let cli = Cli::parse_from(["ii", "relay", "-H", "8080", "-S", "8443", "-Q", "7843"]);
+        match cli.command {
+            Command::Relay(args) => {
+                assert_eq!(args.http, Some(8080));
+                assert_eq!(args.https, Some(8443));
+                assert_eq!(args.quic, Some(7843));
+            }
+            _ => panic!("expected relay command"),
+        }
+    }
 
-    #[arg(long, short = 'c')]
-    pub config: Option<PathBuf>,
-
-    #[arg(long = "http", short = 'H')]
-    pub http: Option<u16>,
-
-    #[arg(long = "https", short = 'S')]
-    pub https: Option<u16>,
-
-    #[arg(long = "quic", short = 'Q')]
-    pub quic: Option<u16>,
-
-    #[arg(long = "metrics", short = 'M')]
-    pub metrics: Option<u16>,
+    #[test]
+    fn relay_rejects_removed_dev_mode() {
+        let result = parse_args(["ii", "relay", "--dev"]);
+        assert!(matches!(result, Err(ParseAction::Print { code: 2, .. })));
+    }
 }

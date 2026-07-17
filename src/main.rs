@@ -6,16 +6,11 @@ mod ticket;
 mod transfer;
 
 use anyhow::Result;
-use clap::Parser;
 use cli::{Cli, Command};
 
 #[tokio::main]
 async fn main() -> Result<()> {
     let _ = rustls::crypto::ring::default_provider().install_default();
-    tracing_subscriber::fmt()
-        .with_env_filter(tracing_subscriber::EnvFilter::from_default_env())
-        .without_time()
-        .init();
 
     let cli = Cli::parse();
     match cli.command {

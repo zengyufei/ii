@@ -5,14 +5,14 @@
 #![deny(missing_docs, rustdoc::broken_intra_doc_links, unreachable_pub)]
 #![cfg_attr(not(test), deny(clippy::unwrap_used))]
 
-#[cfg(any(target_os = "android", doc))]
-mod android;
+#[cfg(feature = "peer-discovery")]
 mod attrs;
 #[cfg(not(wasm_browser))]
 pub mod dns;
+#[cfg(feature = "peer-discovery")]
 pub mod endpoint_info;
+#[cfg(feature = "peer-discovery")]
 pub mod pkarr;
 
-#[cfg(any(target_os = "android", doc))]
-pub use android::install_android_jni_context;
+#[cfg(feature = "peer-discovery")]
 pub use attrs::{EncodingError, IROH_TXT_NAME, ParseError};

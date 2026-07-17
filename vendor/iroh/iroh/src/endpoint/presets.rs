@@ -114,23 +114,28 @@ pub struct N0;
 #[cfg(with_crypto_provider)]
 impl Preset for N0 {
     fn apply(self, mut builder: Builder) -> Builder {
-        use crate::{address_lookup::PkarrPublisher, endpoint::default_relay_mode};
+        use crate::endpoint::default_relay_mode;
 
         builder = Minimal.apply(builder);
 
-        builder = builder.address_lookup(PkarrPublisher::n0_dns());
-
-        // Resolve using HTTPS requests to our DNS server's /pkarr path in browsers
-        #[cfg(wasm_browser)]
+        #[cfg(feature = "peer-discovery")]
         {
-            use crate::address_lookup::PkarrResolver;
+            use crate::address_lookup::PkarrPublisher;
 
-            builder = builder.address_lookup(PkarrResolver::n0_dns());
-        }
-        // Resolve using DNS queries outside browsers.
-        #[cfg(not(wasm_browser))]
-        {
-            builder = builder.address_lookup(crate::address_lookup::DnsAddressLookup::n0_dns());
+            builder = builder.address_lookup(PkarrPublisher::n0_dns());
+
+            // Resolve using HTTPS requests to our DNS server's /pkarr path in browsers
+            #[cfg(wasm_browser)]
+            {
+                use crate::address_lookup::PkarrResolver;
+
+                builder = builder.address_lookup(PkarrResolver::n0_dns());
+            }
+            // Resolve using DNS queries outside browsers.
+            #[cfg(not(wasm_browser))]
+            {
+                builder = builder.address_lookup(crate::address_lookup::DnsAddressLookup::n0_dns());
+            }
         }
 
         builder = builder.relay_mode(default_relay_mode());

@@ -26,7 +26,7 @@ use iroh_relay::{
 use n0_error::{AnyError, Result, StdResultExt, bail_any};
 use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
-use tracing_subscriber::{EnvFilter, prelude::*};
+use tracing_subscriber::{filter::LevelFilter, prelude::*};
 use url::Url;
 use webpki_types::{CertificateDer, PrivateKeyDer, pem::PemObject};
 
@@ -567,7 +567,7 @@ impl Config {
 async fn main() -> Result<()> {
     tracing_subscriber::registry()
         .with(tracing_subscriber::fmt::layer().with_writer(std::io::stderr))
-        .with(EnvFilter::from_default_env())
+        .with(LevelFilter::WARN)
         .init();
 
     // Install `ring` as default crypto provider for rustls.

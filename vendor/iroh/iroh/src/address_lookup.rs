@@ -117,14 +117,16 @@ use tracing::debug;
 pub use crate::endpoint_info::{EndpointData, EndpointInfo, UserData};
 use crate::{Endpoint, endpoint::EndpointError};
 
-#[cfg(not(wasm_browser))]
+#[cfg(all(not(wasm_browser), feature = "peer-discovery"))]
 pub mod dns;
 pub mod memory;
+#[cfg(feature = "peer-discovery")]
 pub mod pkarr;
 
-#[cfg(not(wasm_browser))]
+#[cfg(all(not(wasm_browser), feature = "peer-discovery"))]
 pub use dns::*;
 pub use memory::*;
+#[cfg(feature = "peer-discovery")]
 pub use pkarr::*;
 
 /// Trait for structs that can be converted into [`AddressLookup`]s.

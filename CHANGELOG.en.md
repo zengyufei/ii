@@ -6,6 +6,21 @@ All notable changes to `ii` are documented here. The default Chinese version is 
 
 Nothing yet.
 
+## 0.1.9 - 2026-07-17
+
+### Added
+
+- Made `ii relay` start an HTTP-only relay on `3340/tcp` without requiring a domain or certificate.
+
+### Changed
+
+- Made TLS, QUIC address discovery, and metrics opt-in through the relay configuration.
+- Removed default DNS peer discovery and unused CLI dependencies to reduce the release dependency tree.
+
+### Documentation
+
+- Updated relay startup, HTTPS/QUIC configuration, and reverse-proxy guidance.
+
 ## 0.1.8 - 2026-07-16
 
 ### Fixed

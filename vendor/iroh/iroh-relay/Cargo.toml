@@ -61,7 +61,7 @@ tokio = { version = "1", features = [
     "sync",
     "rt",
 ] }
-tokio-rustls = { version = "0.26", default-features = false, features = ["logging"] }
+tokio-rustls = { version = "0.26", default-features = false }
 tokio-util = { version = "0.7", features = ["io-util", "io", "codec", "rt"] }
 tracing = "0.1"
 url = { version = "2.5.3", features = ["serde"] }
@@ -82,11 +82,10 @@ simdutf8 = { version = "0.1.5", optional = true } # minimal version fix
 sha1 = { version = "0.11.0", optional = true }
 toml = { version = "1.0", optional = true }
 serde_json = { version = "1", optional = true }
-tracing-subscriber = { version = "0.3", features = ["env-filter"], optional = true }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["ansi", "fmt", "std"], optional = true }
 
 # non-wasm-in-browser dependencies
 [target.'cfg(not(all(target_family = "wasm", target_os = "unknown")))'.dependencies]
-hickory-resolver = { version = "0.26.0", features = ["tokio", "system-config"] }
 tokio = { version = "1", features = [
     "io-util",
     "macros",
@@ -118,7 +117,7 @@ tokio = { version = "1", features = [
     "time",
     "test-util",
 ] }
-tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing-subscriber = { version = "0.3", default-features = false, features = ["ansi", "fmt", "std"] }
 serde_json = "1"
 n0-tracing-test = "0.3"
 # Used by the embedding integration tests.
@@ -134,7 +133,6 @@ default = ["metrics", "tls-ring"]
 platform-verifier = ["dep:rustls-platform-verifier"]
 server = [
     "tokio/signal",
-    "dep:clap",
     "dep:dashmap",
     "dep:rcgen",
     "dep:reloadable-state",
@@ -147,8 +145,6 @@ server = [
     "dep:sha1",
     "dep:toml",
     "dep:serde_json",
-    "dep:tracing-subscriber",
-    "noq/platform-verifier",
     "noq/runtime-tokio",
     "tls-ring",
 ]
@@ -159,7 +155,6 @@ tls-ring = [
     "rustls/ring",
     "tokio-rustls/ring",
     "tokio-websockets/ring",
-    "hickory-resolver/https-ring",
     "iroh-dns/tls-ring",
 ]
 tls-aws-lc-rs = [
@@ -167,7 +162,6 @@ tls-aws-lc-rs = [
     "rustls/aws-lc-rs",
     "tokio-rustls/aws-lc-rs",
     "tokio-websockets/aws_lc_rs",
-    "hickory-resolver/https-aws-lc-rs",
     "iroh-dns/tls-aws-lc-rs",
 ]
 

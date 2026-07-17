@@ -353,12 +353,22 @@ pub fn normalized_object_key(prefix: &str, random_id: &str, name: &str) -> Strin
 
 pub fn content_addressed_object_key(prefix: &str, content_md5: [u8; 16]) -> String {
     let prefix = prefix.trim_matches('/');
-    let digest = hex::encode(content_md5);
+    let digest = hex_lower(content_md5);
     if prefix.is_empty() {
         digest
     } else {
         format!("{prefix}/{digest}")
     }
+}
+
+fn hex_lower(bytes: [u8; 16]) -> String {
+    const TABLE: &[u8; 16] = b"0123456789abcdef";
+    let mut out = String::with_capacity(32);
+    for byte in bytes {
+        out.push(TABLE[(byte >> 4) as usize] as char);
+        out.push(TABLE[(byte & 0x0f) as usize] as char);
+    }
+    out
 }
 
 fn missing_cloudflare_fields(profile: &S3Profile) -> Vec<&'static str> {

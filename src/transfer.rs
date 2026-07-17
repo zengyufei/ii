@@ -12,8 +12,11 @@ use std::{
     io::{IsTerminal, Read, Write},
     path::{Path, PathBuf},
     process::{Command, Stdio},
-    sync::{Arc, Mutex},
-    time::{Duration, Instant},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
 use tempfile::NamedTempFile;
 use tokio::{
@@ -24,6 +27,16 @@ use tokio_util::io::ReaderStream;
 
 const ALPN: &[u8] = b"ii/file/1";
 const DEFAULT_CONNECT_FAST_PATH_TIMEOUT: Duration = Duration::from_secs(3);
+static NEXT_OBJECT_ID: AtomicU64 = AtomicU64::new(0);
+
+fn unique_object_id() -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos() as u64)
+        .unwrap_or_default();
+    let sequence = NEXT_OBJECT_ID.fetch_add(1, Ordering::Relaxed) as u32;
+    format!("{nanos:016x}{:08x}{sequence:08x}", std::process::id())
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum FilePlan {
@@ -251,7 +264,7 @@ async fn md5_path(path: PathBuf) -> Result<[u8; 16]> {
 fn md5_path_blocking(path: &Path) -> Result<[u8; 16]> {
     let mut file = std::fs::File::open(path)
         .with_context(|| format!("open file for md5 {}", path.display()))?;
-    let mut ctx = md5::Context::new();
+    let mut ctx = <md5::Md5 as md5::Digest>::new();
     let mut buf = [0u8; 64 * 1024];
     loop {
         let n = file
@@ -260,9 +273,23 @@ fn md5_path_blocking(path: &Path) -> Result<[u8; 16]> {
         if n == 0 {
             break;
         }
-        ctx.consume(&buf[..n]);
+        md5::Digest::update(&mut ctx, &buf[..n]);
     }
-    Ok(ctx.compute().0)
+    Ok(finalize_md5(ctx))
+}
+
+#[cfg(test)]
+fn md5_bytes(bytes: &[u8]) -> [u8; 16] {
+    let mut ctx = <md5::Md5 as md5::Digest>::new();
+    md5::Digest::update(&mut ctx, bytes);
+    finalize_md5(ctx)
+}
+
+fn finalize_md5(ctx: md5::Md5) -> [u8; 16] {
+    let digest = md5::Digest::finalize(ctx);
+    let mut out = [0u8; 16];
+    out.copy_from_slice(&digest);
+    out
 }
 
 pub async fn send(args: SendArgs) -> Result<()> {
@@ -387,11 +414,7 @@ async fn upload_to_s3(
     let profile = profile.clone();
     let object_key = match source.content_md5() {
         Some(content_md5) => storage::content_addressed_object_key(&profile.prefix, content_md5),
-        None => storage::normalized_object_key(
-            &profile.prefix,
-            &uuid::Uuid::new_v4().simple().to_string(),
-            source.name(),
-        ),
+        None => storage::normalized_object_key(&profile.prefix, &unique_object_id(), source.name()),
     };
     let object_path = profile.s3_path(&object_key);
     tokio::task::spawn_blocking(move || -> Result<S3UploadResult> {
@@ -490,11 +513,9 @@ async fn upload_to_webdav(
         Some(content_md5) => {
             storage::content_addressed_object_key(&profile.remote_dir, content_md5)
         }
-        None => storage::normalized_object_key(
-            &profile.remote_dir,
-            &uuid::Uuid::new_v4().simple().to_string(),
-            source.name(),
-        ),
+        None => {
+            storage::normalized_object_key(&profile.remote_dir, &unique_object_id(), source.name())
+        }
     };
     ensure_webdav_parent_dirs(&client, &object_key).await?;
     if webdav_object_exists(&client, &object_key).await? {
@@ -1302,7 +1323,7 @@ where
 
 async fn bind_endpoint(relay_mode: RelayMode) -> Result<Endpoint> {
     let secret_key = SecretKey::generate();
-    let endpoint = Endpoint::builder(presets::N0)
+    let endpoint = Endpoint::builder(presets::Minimal)
         .secret_key(secret_key)
         .alpns(vec![ALPN.to_vec()])
         .relay_mode(relay_mode)
@@ -1910,7 +1931,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("same.txt");
         std::fs::write(&path, b"same").unwrap();
-        let ticket = test_ticket("same.txt", Some(4), Some(md5::compute(b"same").0));
+        let ticket = test_ticket("same.txt", Some(4), Some(md5_bytes(b"same")));
         let args = test_recv_args();
         let trace = RecvTrace::new(false);
         let plan = plan_file_receive(&args, &ticket, &path, &trace)
@@ -1924,11 +1945,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("partial.txt");
         std::fs::write(&path, b"part").unwrap();
-        let ticket = test_ticket(
-            "partial.txt",
-            Some(10),
-            Some(md5::compute(b"partial-all").0),
-        );
+        let ticket = test_ticket("partial.txt", Some(10), Some(md5_bytes(b"partial-all")));
         let args = test_recv_args();
         let trace = RecvTrace::new(false);
         let plan = plan_file_receive(&args, &ticket, &path, &trace)
@@ -1942,7 +1959,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("changed.txt");
         std::fs::write(&path, b"old").unwrap();
-        let ticket = test_ticket("changed.txt", Some(3), Some(md5::compute(b"new").0));
+        let ticket = test_ticket("changed.txt", Some(3), Some(md5_bytes(b"new")));
         let args = test_recv_args();
         let trace = RecvTrace::new(false);
         let plan = plan_file_receive(&args, &ticket, &path, &trace)
