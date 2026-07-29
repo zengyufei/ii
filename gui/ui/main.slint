@@ -1,0 +1,1902 @@
+import { CheckBox, ComboBox, LineEdit as NativeLineEdit, TextEdit, ScrollView } from "std-widgets.slint";
+
+component Button inherits Rectangle {
+    in property <string> text;
+    in property <bool> primary: false;
+    in property <length> text-size: 12px;
+    callback clicked();
+    min-width: 58px;
+    height: 32px;
+    vertical-stretch: 0;
+    border-radius: 5px;
+    border-width: 1px;
+    border-color: root.primary ? #08766f : #d5dedf;
+    background: root.primary ? (touch.has-hover ? #06655f : #08766f) : (touch.has-hover ? #f0f5f5 : #ffffff);
+    drop-shadow-blur: 7px;
+    drop-shadow-color: #1c282d1f;
+    drop-shadow-offset-y: 2px;
+    Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.text;
+        color: root.primary ? #ffffff : #1c282d;
+        font-size: root.text-size;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        clicked => { root.clicked(); }
+    }
+}
+
+component WindowButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> danger: false;
+    callback clicked();
+    width: 32px;
+    height: 32px;
+    vertical-stretch: 0;
+    border-width: 0px;
+    border-radius: 4px;
+    background: touch.has-hover ? (root.danger ? #c73b3b : #e8eeee) : #ffffff;
+    drop-shadow-blur: 7px;
+    drop-shadow-color: #1c282d1c;
+    drop-shadow-offset-y: 2px;
+    Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.text;
+        color: touch.has-hover && root.danger ? #ffffff : #66747b;
+        font-size: 18px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        clicked => { root.clicked(); }
+    }
+}
+
+// Keep the title-bar glyph and pointer region in this component's local space.
+// Hand-writing one coordinate for the background and another for the glyph makes
+// the visible control drift away from the clickable area.
+component TitleBarButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> danger: false;
+    callback clicked();
+    width: 42px;
+    height: 48px;
+    vertical-stretch: 0;
+    border-width: 0px;
+    border-radius: 0px;
+    background: touch.has-hover ? (root.danger ? #c4523c : #e8eeee) : #00000000;
+
+    Rectangle { x: 0px; y: 0px; width: 1px; height: parent.height; background: #d5dedf; }
+    Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.text;
+        color: touch.has-hover && root.danger ? #ffffff : #1c282d;
+        font-size: root.danger ? 18px : 17px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        clicked => { root.clicked(); }
+    }
+}
+
+component ListButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> primary: false;
+    callback clicked();
+    height: 32px;
+    vertical-stretch: 0;
+    border-radius: 4px;
+    border-width: 0px;
+    background: root.primary ? #08766f : (touch.has-hover ? #edf3f3 : #ffffff);
+    drop-shadow-blur: 7px;
+    drop-shadow-color: #1c282d1f;
+    drop-shadow-offset-y: 2px;
+    Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.text;
+        color: root.primary ? #ffffff : #1c282d;
+        font-size: 12px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        clicked => { root.clicked(); }
+    }
+}
+
+component TextAction inherits Rectangle {
+    in property <string> text;
+    in property <int> text-weight: 730;
+    callback clicked();
+    height: 30px;
+    vertical-stretch: 0;
+    border-width: 0px;
+    border-radius: 4px;
+    background: touch.has-hover ? #edf2f2 : #ffffff;
+    drop-shadow-blur: 7px;
+    drop-shadow-color: #1c282d1f;
+    drop-shadow-offset-y: 2px;
+    Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.text;
+        color: #08766f;
+        font-size: 12px;
+        font-weight: root.text-weight;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        clicked => { root.clicked(); }
+    }
+}
+
+component SettingsNavButton inherits Rectangle {
+    in property <string> text;
+    in property <string> icon;
+    in property <bool> active: false;
+    callback clicked();
+    height: 38px;
+    vertical-stretch: 0;
+    border-width: 0px;
+    border-radius: 4px;
+    background: root.active ? #eaf6f4 : (touch.has-hover ? #eef4f3 : #00000000);
+    Rectangle {
+        x: 10px;
+        y: 9px;
+        width: 20px;
+        height: 20px;
+        border-radius: 10px;
+        background: root.active ? #08766f : #9aadae;
+        Text {
+            width: parent.width;
+            height: parent.height;
+            text: root.icon;
+            color: #ffffff;
+            font-size: root.icon == "DB" ? 8px : 10px;
+            font-weight: 800;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+        }
+    }
+    Text {
+        x: 39px;
+        width: parent.width - 49px;
+        height: parent.height;
+        text: root.text;
+        color: root.active ? #005f59 : #4c5d64;
+        font-size: 13px;
+        font-weight: 400;
+        vertical-alignment: center;
+    }
+    touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        clicked => { root.clicked(); }
+    }
+}
+
+component SettingsPaneHeader inherits Rectangle {
+    in property <string> title;
+    in property <string> subtitle;
+    callback save();
+    height: 61px;
+    vertical-stretch: 0;
+    border-width: 0px;
+    Rectangle { y: parent.height - 1px; width: parent.width; height: 1px; background: #d5dedf; }
+    Text { x: 0px; y: 0px; text: root.title; color: #1c282d; font-size: 19px; font-weight: 400; }
+    Text { x: 0px; y: 28px; text: root.subtitle; color: #66747b; font-size: 12px; }
+    Button { x: parent.width - 82px; y: 0px; width: 82px; height: 34px; text: "保存更改"; primary: true; clicked => { root.save(); } }
+}
+
+component DangerButton inherits Rectangle {
+    in property <string> text;
+    callback clicked();
+    min-width: 112px;
+    height: 32px;
+    vertical-stretch: 0;
+    border-radius: 5px;
+    border-width: 1px;
+    border-color: #efb9ad;
+    background: touch.has-hover ? #f9e6dc : #fff7f4;
+    drop-shadow-blur: 7px;
+    drop-shadow-color: #1c282d1f;
+    drop-shadow-offset-y: 2px;
+    Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.text;
+        color: #b6532d;
+        font-size: 12px;
+        font-weight: 760;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        clicked => { root.clicked(); }
+    }
+}
+
+component SectionDivider inherits Rectangle {
+    height: 17px;
+    background: #00000000;
+    Rectangle {
+        y: parent.height - 1px;
+        width: parent.width;
+        height: 1px;
+        background: #d5dedf;
+    }
+}
+
+component ProfileSectionDivider inherits Rectangle {
+    height: 18px;
+    vertical-stretch: 0;
+    background: #00000000;
+    Rectangle {
+        width: parent.width;
+        height: 1px;
+        background: #d5dedf;
+    }
+}
+
+component NavButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> active: false;
+    callback clicked();
+    width: 46px;
+    height: 48px;
+    border-width: 0px;
+    background: touch.has-hover ? #edf2f2 : #00000000;
+    Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.text;
+        color: root.active ? #08766f : #66747b;
+        font-size: root.active ? 13.75px : 14px;
+        font-weight: 400;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    Rectangle {
+        visible: root.active;
+        x: 9px;
+        y: parent.height - 2px;
+        width: parent.width - 18px;
+        height: 2px;
+        background: #08766f;
+    }
+    touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        clicked => { root.clicked(); }
+    }
+}
+
+component GithubButton inherits Rectangle {
+    callback clicked();
+    width: 29px;
+    height: 29px;
+    border-radius: 4px;
+    border-width: 0px;
+    background: touch.has-hover ? #edf2f2 : #00000000;
+    Image { x: 6px; y: 6px; width: 17px; height: 17px; source: @image-url("github.svg"); }
+    touch := TouchArea { width: parent.width; height: parent.height; clicked => { root.clicked(); } }
+}
+
+component HeaderThemeButton inherits Rectangle {
+    callback clicked();
+    width: 74px;
+    height: 32px;
+    border-width: 0px;
+    border-radius: 4px;
+    background: touch.has-hover ? #edf2f2 : #fbfcfc;
+    drop-shadow-blur: 7px;
+    drop-shadow-color: #1c282d1f;
+    drop-shadow-offset-y: 2px;
+    Text {
+        width: parent.width;
+        height: parent.height;
+        text: "系统主题";
+        color: #4c5d64;
+        font-size: 12px;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    touch := TouchArea { width: parent.width; height: parent.height; clicked => { root.clicked(); } }
+}
+
+component ModeButton inherits Rectangle {
+    in property <string> text;
+    in property <bool> active: false;
+    in property <int> text-weight: 600;
+    callback clicked();
+    height: 27px;
+    min-width: 54px;
+    horizontal-stretch: 0;
+    vertical-stretch: 0;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: root.active ? #08766f : #d5dedf;
+    background: root.active ? #d9f0ec : #ffffff;
+    drop-shadow-blur: 7px;
+    drop-shadow-color: #1c282d1f;
+    drop-shadow-offset-y: 2px;
+    Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.text;
+        color: root.active ? #005f59 : #4e5e65;
+        font-size: 12px;
+        font-weight: root.text-weight;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    touch := TouchArea {
+        width: parent.width;
+        height: parent.height;
+        clicked => { root.clicked(); }
+    }
+}
+
+component DestinationButton inherits Rectangle {
+    in property <string> text;
+    in property <int> text-weight: 800;
+    callback clicked();
+    width: 48px;
+    height: 32px;
+    vertical-stretch: 0;
+    border-radius: 4px;
+    border-width: 1px;
+    border-color: #08766f;
+    background: touch.has-hover ? #c5e6e0 : #d9f0ec;
+    drop-shadow-blur: 7px;
+    drop-shadow-color: #1c282d1f;
+    drop-shadow-offset-y: 2px;
+    Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.text;
+        color: #005f59;
+        font-size: 12px;
+        font-weight: root.text-weight;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+    touch := TouchArea { width: parent.width; height: parent.height; clicked => { root.clicked(); } }
+}
+
+component Toggle inherits Rectangle {
+    in-out property <bool> checked: false;
+    height: 22px;
+    width: 38px;
+    vertical-stretch: 0;
+    border-width: 0px;
+    border-radius: 12px;
+    background: root.checked ? #08766f : #aebbbc;
+    drop-shadow-blur: 7px;
+    drop-shadow-color: #1c282d1f;
+    drop-shadow-offset-y: 2px;
+    Rectangle {
+        x: root.checked ? 19px : 3px;
+        y: 3px;
+        width: 16px;
+        height: 16px;
+        border-radius: 8px;
+        background: #ffffff;
+    }
+    TouchArea {
+        width: parent.width;
+        height: parent.height;
+        clicked => { root.checked = !root.checked; }
+    }
+}
+
+component SettingsToggleRow inherits Rectangle {
+    in property <string> title;
+    in property <string> subtitle;
+    in-out property <bool> checked;
+    height: 57px;
+    vertical-stretch: 0;
+    Rectangle {
+        width: parent.width - 38px;
+        height: parent.height;
+        Text { x: 0px; y: 6px; width: parent.width; height: 18px; text: root.title; color: #1c282d; font-size: 13px; font-weight: 400; }
+        Text { x: 0px; y: 27px; width: parent.width; height: 17px; text: root.subtitle; color: #66747b; font-size: 12px; }
+    }
+    Toggle { x: parent.width - 38px; y: 17px; checked <=> root.checked; }
+}
+
+component StatusTag inherits Rectangle {
+    in property <string> text;
+    in property <string> state: "waiting";
+    width: 72px;
+    height: 24px;
+    vertical-stretch: 0;
+    border-width: 0px;
+    border-radius: 12px;
+    background: root.state == "active" ? #d9f0ec : root.state == "done" ? #e8eeee : #fbefc9;
+    Text {
+        width: parent.width;
+        height: parent.height;
+        text: root.text;
+        color: root.state == "active" ? #005f59 : root.state == "done" ? #54636a : #8a6507;
+        font-size: 12px;
+        font-weight: 760;
+        horizontal-alignment: center;
+        vertical-alignment: center;
+    }
+}
+
+component TextField inherits Rectangle {
+    in-out property <string> text;
+    in property <string> placeholder-text: "";
+    in property <bool> read-only: false;
+    in property <bool> password: false;
+    in property <bool> shadow-enabled: true;
+    height: 32px;
+    background: #ffffff;
+    drop-shadow-blur: root.shadow-enabled ? 7px : 0px;
+    drop-shadow-color: root.shadow-enabled ? #1c282d1f : #00000000;
+    drop-shadow-offset-y: 2px;
+    NativeLineEdit {
+        width: parent.width;
+        height: parent.height;
+        text <=> root.text;
+        placeholder-text: root.placeholder-text;
+        read-only: root.read-only;
+        input-type: root.password ? InputType.password : InputType.text;
+    }
+}
+
+component ComboBoxField inherits Rectangle {
+    in property <[string]> values;
+    in-out property <string> current-value;
+    height: 32px;
+    vertical-stretch: 0;
+    background: #ffffff;
+    drop-shadow-blur: 7px;
+    drop-shadow-color: #1c282d1f;
+    drop-shadow-offset-y: 2px;
+    ComboBox {
+        width: parent.width;
+        height: parent.height;
+        model: root.values;
+        current-value <=> root.current-value;
+    }
+}
+
+component SendFormLabel inherits Text {
+    width: 70px;
+    vertical-stretch: 1;
+    color: #66747b;
+    font-size: 12px;
+    vertical-alignment: center;
+}
+
+component SendProfileField inherits Rectangle {
+    in property <string> label;
+    in property <[string]> values;
+    in-out property <string> current-value;
+    callback manage-config();
+    height: 34px;
+    vertical-stretch: 0;
+
+    HorizontalLayout {
+        spacing: 8px;
+        SendFormLabel { text: root.label; }
+        ComboBoxField { values: root.values; current-value <=> root.current-value; horizontal-stretch: 1; }
+        ListButton { width: 56px; text: "管理配置"; clicked => { root.manage-config(); } }
+    }
+}
+
+export struct TaskData {
+    id: string,
+    name: string,
+    direction: string,
+    method: string,
+    status: string,
+    progress: string,
+    ticket: string,
+    destination: string,
+    detail: string,
+}
+
+export struct ProfileData {
+    name: string,
+    kind: string,
+    description: string,
+}
+
+export component MainWindow inherits Window {
+    title: "ii 文件传输";
+    no-frame: true;
+    preferred-width: 1372px;
+    preferred-height: 792px;
+    min-width: 832px;
+    min-height: 592px;
+    background: #00000000;
+
+    in-out property <int> page: 0;
+    in-out property <[TaskData]> tasks;
+    in-out property <[ProfileData]> profiles;
+    in-out property <[string]> backend-profiles;
+    in-out property <string> selected-profile: "";
+    in-out property <string> send-path: "";
+    in-out property <string> send-source-meta: "";
+    in-out property <string> send-mode: "local";
+    in-out property <bool> keep-sending: false;
+    in-out property <bool> delete-after-receive: false;
+    in-out property <bool> portable-webdav: false;
+    in-out property <string> receive-ticket: "";
+    in-out property <string> receive-directory: "";
+    in-out property <string> status-text: "就绪";
+    in-out property <string> detail-name: "未选择任务";
+    in-out property <string> detail-text: "从传输队列选择任务查看详情。";
+    in-out property <string> detail-ticket: "";
+    in-out property <string> detail-method: "";
+    in-out property <string> detail-progress: "";
+    in-out property <string> detail-time: "";
+    in-out property <string> detail-destination: "";
+    in-out property <bool> has-selected-task: false;
+    in-out property <string> profile-kind: "S3";
+    in-out property <string> profile-name: "";
+    in-out property <string> profile-endpoint: "";
+    in-out property <string> profile-bucket: "";
+    in-out property <string> profile-user: "";
+    in-out property <string> profile-secret: "";
+    in-out property <string> profile-provider: "generic-s3";
+    in-out property <string> profile-prefix: "ii/";
+    in-out property <string> profile-region: "auto";
+    in-out property <string> profile-presign-ttl: "86400";
+    in-out property <string> profile-webdav-auth: "Basic";
+    in-out property <bool> profile-self-signed: false;
+    in-out property <bool> profile-modal: false;
+    in-out property <string> profile-new-kind: "S3";
+    in-out property <string> database-path: "";
+    in-out property <string> database-summary: "0 个任务 · 0 B";
+    in-out property <string> diagnostics-text: "等待检查";
+    in-out property <string> gui-version: "GUI";
+    in-out property <string> cli-version: "CLI";
+    in-out property <int> settings-section: 0;
+    in-out property <bool> setting-check-incomplete: true;
+    in-out property <bool> setting-close-to-tray: false;
+    in-out property <bool> setting-open-directory: false;
+    in-out property <bool> confirm-clear-history: false;
+
+    callback set-page(int);
+    callback choose-send-source();
+    callback choose-receive-directory();
+    callback choose-send-mode(string);
+    callback start-send();
+    callback start-receive();
+    callback select-task(string);
+    callback select-profile(string);
+    callback new-profile(string);
+    callback save-profile();
+    callback delete-profile();
+    callback open-config-directory();
+    callback run-diagnostics();
+    callback clear-completed();
+    callback compact-database();
+    callback clear-history();
+    callback request-clear-history();
+    callback open-github();
+    callback minimize-window();
+    callback maximize-window();
+    callback close-window();
+
+    Rectangle {
+        x: 0px;
+        y: 0px;
+        width: parent.width;
+        height: parent.height;
+        background: #ffffff;
+        border-color: #cbd6d7;
+        border-width: 1px;
+        border-radius: 12px;
+        drop-shadow-blur: 36px;
+        drop-shadow-color: #1c282d1f;
+        drop-shadow-offset-y: 8px;
+        clip: true;
+
+            Rectangle {
+                y: 0px;
+                width: parent.width;
+                height: 48px;
+                background: #fbfcfc;
+                border-color: #d5dedf;
+                border-width: 1px;
+
+                Image { x: 14px; y: 11px; width: 25px; height: 25px; source: @image-url("../../logo.svg"); }
+                Text { x: 45px; width: 16px; height: parent.height; text: "ii"; color: #1c282d; font-size: 14px; font-weight: 600; vertical-alignment: center; }
+
+                NavButton { x: 76px; y: 0px; text: "传输"; active: root.page == 0; clicked => { root.set-page(0); } }
+                NavButton { x: 127px; y: 0px; text: "存储"; active: root.page == 1; clicked => { root.set-page(1); } }
+                NavButton { x: 178px; y: 0px; text: "诊断"; active: root.page == 2; clicked => { root.set-page(2); } }
+                NavButton { x: 229px; y: 0px; text: "设置"; active: root.page == 3; clicked => { root.set-page(3); } }
+
+                Text { x: parent.width - 430px; y: 0px; width: 80px; height: parent.height; text: root.gui-version; color: #66747b; font-size: 11px; vertical-alignment: center; }
+                Rectangle { x: parent.width - 344px; y: 16px; width: 1px; height: 16px; background: #d5dedf; }
+                Text { x: parent.width - 337px; y: 0px; width: 64px; height: parent.height; text: root.cli-version; color: #66747b; font-size: 11px; vertical-alignment: center; }
+                HeaderThemeButton { x: parent.width - 269px; y: 8px; clicked => { root.status-text = "主题将跟随系统设置。"; } }
+                Rectangle { x: parent.width - 189px; y: 20px; width: 9px; height: 9px; border-radius: 5px; background: #08766f; }
+                GithubButton { x: parent.width - 171px; y: 9px; clicked => { root.open-github(); } }
+
+                // Only the unoccupied middle section initiates an OS-level window drag.
+                // Navigation, status controls, and the three window buttons keep their own input regions.
+                titlebar-drag-area := TouchArea {
+                    x: 330px;
+                    y: 0px;
+                    width: parent.width - 760px;
+                    height: parent.height;
+                }
+
+                titlebar-controls := HorizontalLayout {
+                    x: parent.width - 126px;
+                    y: 0px;
+                    width: 126px;
+                    height: 48px;
+                    spacing: 0px;
+
+                    TitleBarButton { text: "−"; clicked => { root.minimize-window(); } }
+                    TitleBarButton { text: "□"; clicked => { root.maximize-window(); } }
+                    TitleBarButton { text: "×"; danger: true; clicked => { root.close-window(); } }
+                }
+            }
+
+            Rectangle {
+                y: 48px;
+                width: parent.width;
+                height: parent.height - 48px;
+                background: #f7f9f9;
+
+                if false: Rectangle {
+                    x: 18px;
+                    y: 16px;
+                    width: parent.width - 36px;
+                    height: parent.height - 32px;
+
+                    VerticalLayout {
+                        spacing: 12px;
+                        HorizontalLayout {
+                            spacing: 12px;
+                            Rectangle {
+                                horizontal-stretch: 1.15;
+                                background: #ffffff;
+                                border-color: #d5dedf;
+                                border-width: 1px;
+                                border-radius: 7px;
+                                drop-shadow-blur: 10px;
+                                drop-shadow-color: #1c282d18;
+                                drop-shadow-offset-y: 2px;
+                                VerticalLayout {
+                                    padding: 14px;
+                                    spacing: 8px;
+                                    Text { text: "发送内容"; color: #1c282d; font-size: 17px; font-weight: 800; }
+                                    Text { text: "选择文件或目录，创建传输码后等待接收方。"; color: #66747b; font-size: 12px; }
+                                    HorizontalLayout {
+                                        TextField { text <=> root.send-path; placeholder-text: "选择文件或目录"; horizontal-stretch: 1; }
+                                        Button { text: "更换"; clicked => { root.choose-send-source(); } }
+                                    }
+                                    HorizontalLayout {
+                                        Text { text: "保持发送"; color: #1c282d; vertical-alignment: center; }
+                                        CheckBox { checked <=> root.keep-sending; }
+                                        Rectangle { horizontal-stretch: 1; }
+                                    }
+                                    Text { text: "发送方式"; color: #66747b; font-size: 12px; }
+                                    HorizontalLayout {
+                                        Button { text: "仅局域网"; primary: root.send-mode == "local"; clicked => { root.choose-send-mode("local"); } }
+                                        Button { text: "指定中继"; primary: root.send-mode == "relay"; clicked => { root.choose-send-mode("relay"); } }
+                                        Button { text: "S3"; primary: root.send-mode == "s3"; clicked => { root.choose-send-mode("s3"); } }
+                                        Button { text: "WebDAV"; primary: root.send-mode == "webdav"; clicked => { root.choose-send-mode("webdav"); } }
+                                        Rectangle { horizontal-stretch: 1; }
+                                    }
+                                    HorizontalLayout {
+                                        Rectangle {
+                                            visible: root.send-mode == "relay" || root.send-mode == "s3" || root.send-mode == "webdav";
+                                            horizontal-stretch: 1;
+                                            min-height: 32px;
+                                            ComboBox { width: parent.width; height: parent.height; model: root.backend-profiles; current-value <=> root.selected-profile; }
+                                        }
+                                        Button { text: "创建传输码"; primary: true; clicked => { root.start-send(); } }
+                            }
+                        }
+                    }
+                    }
+                    Rectangle {
+                                horizontal-stretch: 0.85;
+                                background: #ffffff;
+                                border-color: #d5dedf;
+                                border-width: 1px;
+                                border-radius: 7px;
+                                drop-shadow-blur: 10px;
+                                drop-shadow-color: #1c282d18;
+                                drop-shadow-offset-y: 2px;
+                                VerticalLayout {
+                                    padding: 14px;
+                                    spacing: 8px;
+                                    Text { text: "接收内容"; color: #1c282d; font-size: 17px; font-weight: 800; }
+                                    Text { text: "粘贴传输码，选择保存位置后开始接收。"; color: #66747b; font-size: 12px; }
+                                    Rectangle {
+                                        height: 92px;
+                                        background: #ffffff;
+                                        drop-shadow-blur: 5px;
+                                        drop-shadow-color: #1c282d14;
+                                        drop-shadow-offset-y: 1px;
+                                        TextEdit { width: parent.width; height: parent.height; text <=> root.receive-ticket; wrap: word-wrap; }
+                                    }
+                                    HorizontalLayout {
+                                        TextField { text <=> root.receive-directory; placeholder-text: "保存目录"; horizontal-stretch: 1; }
+                                        Button { text: "更换"; clicked => { root.choose-receive-directory(); } }
+                                        Button { text: "开始接收"; primary: true; clicked => { root.start-receive(); } }
+                                    }
+                                }
+                            }
+                        }
+                        Rectangle {
+                            vertical-stretch: 1;
+                            background: #ffffff;
+                            border-color: #d5dedf;
+                            border-width: 1px;
+                            border-radius: 7px;
+                            VerticalLayout {
+                                spacing: 0px;
+                                Rectangle {
+                                    height: 50px;
+                                    border-color: #d5dedf;
+                                    border-width: 1px;
+                                    HorizontalLayout {
+                                        padding: 12px;
+                                        Text { text: "传输队列"; color: #1c282d; font-size: 17px; font-weight: 400; vertical-alignment: center; }
+                                        Rectangle { width: 10px; }
+                                        Text { text: "" + root.tasks.length + " 个任务"; color: #66747b; font-size: 12px; vertical-alignment: center; }
+                                        Rectangle { horizontal-stretch: 1; }
+                                        Button { text: "清除已完成"; clicked => { root.clear-completed(); } }
+                                    }
+                                }
+                                HorizontalLayout {
+                                    vertical-stretch: 1;
+                                    ScrollView {
+                                        horizontal-stretch: 1;
+                                        VerticalLayout {
+                                            spacing: 0px;
+                                            for task in root.tasks: Rectangle {
+                                                height: 58px;
+                                                border-color: #d5dedf;
+                                                border-width: 1px;
+                                                HorizontalLayout {
+                                                    padding: 10px;
+                                                    Text { text: task.name; width: 230px; color: #1c282d; font-weight: 400; vertical-alignment: center; }
+                                                    Text { text: task.direction; width: 60px; color: #4f6067; vertical-alignment: center; }
+                                                    Text { text: task.method; width: 100px; color: #4f6067; vertical-alignment: center; }
+                                                    Text { text: task.status; width: 80px; color: #08766f; vertical-alignment: center; }
+                                                    Text { text: task.progress; color: #4f6067; vertical-alignment: center; horizontal-stretch: 1; }
+                                                }
+                                                TouchArea { clicked => { root.select-task(task.id); } }
+                                            }
+                                        }
+                                    }
+                                    Rectangle {
+                                        width: 310px;
+                                        border-color: #d5dedf;
+                                        border-width: 1px;
+                                        VerticalLayout {
+                                            padding: 14px;
+                                            spacing: 7px;
+                                            Text { text: "当前任务"; color: #66747b; font-size: 11px; }
+                                            Text { text: root.detail-name; color: #1c282d; font-size: 17px; font-weight: 800; wrap: word-wrap; }
+                                            Text { text: root.detail-text; color: #4f6067; wrap: word-wrap; }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                Rectangle {
+                    visible: root.page == 0;
+                    width: parent.width;
+                    height: parent.height;
+                    background: #ffffff;
+                    VerticalLayout {
+                        width: parent.width;
+                        height: parent.height;
+                        spacing: 0px;
+                        Rectangle {
+                            // The quick-action deck follows the reviewed HTML proportions.
+                            // Do not let the send card force the receive card off-screen.
+                            height: 326px;
+                            background: #f7f9f9;
+                            border-color: #d5dedf;
+                            border-width: 0px;
+                            VerticalLayout {
+                                padding-left: 18px;
+                                padding-right: 18px;
+                                padding-top: 15px;
+                                padding-bottom: 17px;
+                                spacing: 8px;
+                                Text { text: "快速操作"; color: #66747b; font-size: 11px; font-weight: 600; }
+                                HorizontalLayout {
+                                    height: 272px;
+                                    vertical-stretch: 0;
+                                    spacing: 12px;
+                                    Rectangle {
+                                        horizontal-stretch: 1.15;
+                                        min-width: 440px;
+                                        background: #ffffff;
+                                        border-color: #d5dedf;
+                                        border-width: 1px;
+                                        border-radius: 6px;
+                                        drop-shadow-blur: 11px;
+                                        drop-shadow-color: #1c282d1a;
+                                        drop-shadow-offset-y: 2px;
+                                        VerticalLayout {
+                                            padding: 15px;
+                                            spacing: 0px;
+                                            Rectangle {
+                                                height: 44px;
+                                                vertical-stretch: 0;
+                                                HorizontalLayout {
+                                                    spacing: 10px;
+                                                    Rectangle { width: 28px; height: 44px; Rectangle { y: 8px; width: 28px; height: 28px; border-radius: 14px; background: #08766f; Text { width: parent.width; height: parent.height; text: "↗"; color: #ffffff; font-size: 17px; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; } } }
+                                                    VerticalLayout { spacing: 1px; Text { text: "发送内容"; color: #1c282d; font-size: 16px; font-weight: 400; } Text { text: "选择文件或目录，创建传输码后等待接收方。"; color: #66747b; font-size: 12px; } }
+                                                }
+                                            }
+                                            Rectangle { height: 12px; vertical-stretch: 0; }
+                                            VerticalLayout {
+                                                height: 59px;
+                                                vertical-stretch: 0;
+                                                spacing: 0px;
+                                                Rectangle { height: 1px; vertical-stretch: 0; background: #d5dedf; }
+                                                Rectangle {
+                                                    height: 57px;
+                                                    vertical-stretch: 0;
+                                                    HorizontalLayout {
+                                                        width: parent.width;
+                                                        height: parent.height;
+                                                        spacing: 12px;
+                                                        Rectangle { width: 35px; height: 57px; Rectangle { y: 9px; width: 35px; height: 38px; background: #d9f0ec; Text { width: parent.width; height: parent.height; text: "ZIP"; color: #005f59; font-size: 10px; font-weight: 400; horizontal-alignment: center; vertical-alignment: center; } } }
+                                                        Rectangle { horizontal-stretch: 1; height: 57px; VerticalLayout { y: 10px; height: 33px; spacing: 1px; Text { text: root.send-path == "" ? "未选择文件或目录" : root.send-path; color: #1c282d; font-weight: 400; overflow: elide; } Text { text: root.send-path == "" ? "请选择要发送的文件或目录" : root.send-source-meta == "" ? "已选择" : root.send-source-meta; color: #66747b; font-size: 12px; } } }
+                                                        Rectangle { width: 46px; height: 57px; TextAction { y: 13px; width: 46px; text: "更换"; text-weight: 400; clicked => { root.choose-send-source(); } } }
+                                                    }
+                                                }
+                                                Rectangle { height: 1px; vertical-stretch: 0; background: #d5dedf; }
+                                            }
+                                            Rectangle { height: 12px; vertical-stretch: 0; }
+                                            HorizontalLayout {
+                                                height: 115px;
+                                                vertical-stretch: 0;
+                                                VerticalLayout {
+                                                    horizontal-stretch: 1;
+                                                    spacing: 0px;
+                                                    Rectangle {
+                                                        height: 27px;
+                                                        vertical-stretch: 0;
+                                                        HorizontalLayout {
+                                                            spacing: 5px;
+                                                            ModeButton { width: 66px; text: "仅局域网"; text-weight: 400; active: root.send-mode == "local"; clicked => { root.choose-send-mode("local"); } }
+                                                            ModeButton { width: 66px; text: "指定中继"; text-weight: 400; active: root.send-mode == "relay"; clicked => { root.choose-send-mode("relay"); } }
+                                                            ModeButton { width: 34px; text: "S3"; text-weight: 400; active: root.send-mode == "s3"; clicked => { root.choose-send-mode("s3"); } }
+                                                            ModeButton { width: 67px; text: "WebDAV"; text-weight: 400; active: root.send-mode == "webdav"; clicked => { root.choose-send-mode("webdav"); } }
+                                                        }
+                                                    }
+                                                    Rectangle { height: 8px; vertical-stretch: 0; }
+                                                    Rectangle {
+                                                        height: 80px;
+                                                        vertical-stretch: 0;
+                                                        VerticalLayout {
+                                                            spacing: 0px;
+                                                            Rectangle {
+                                                                height: 28px;
+                                                                Rectangle {
+                                                                    visible: root.send-mode == "local" || root.send-mode == "relay";
+                                                                    width: parent.width;
+                                                                    height: parent.height;
+                                                                    HorizontalLayout { spacing: 8px; SendFormLabel { text: "保持发送"; } Toggle { checked <=> root.keep-sending; } Rectangle { horizontal-stretch: 1; } }
+                                                                }
+                                                                Rectangle {
+                                                                    visible: root.send-mode == "s3";
+                                                                    width: parent.width;
+                                                                    height: parent.height;
+                                                                    HorizontalLayout { spacing: 8px; SendFormLabel { text: "传完删除"; } Toggle { checked <=> root.delete-after-receive; } Rectangle { horizontal-stretch: 1; } }
+                                                                }
+                                                                Rectangle {
+                                                                    visible: root.send-mode == "webdav";
+                                                                    width: parent.width;
+                                                                    height: parent.height;
+                                                                    HorizontalLayout { spacing: 8px; SendFormLabel { text: "传完删除"; } Toggle { checked <=> root.delete-after-receive; } Text { text: "传账密"; color: #66747b; font-size: 12px; vertical-alignment: center; } Toggle { checked <=> root.portable-webdav; } Rectangle { horizontal-stretch: 1; } }
+                                                                }
+                                                            }
+                                                            Rectangle { height: 4px; vertical-stretch: 0; }
+                                                            Rectangle {
+                                                                height: root.send-mode == "webdav" ? 14px : 0px;
+                                                                visible: root.send-mode == "webdav";
+                                                                Text {
+                                                                    width: parent.width;
+                                                                    height: parent.height;
+                                                                    text: root.send-mode == "webdav" ? "启用传账密后，传输码会携带 URL、用户名和密码。" : "";
+                                                                    color: root.send-mode == "webdav" ? #b6532d : #66747b;
+                                                                    font-size: 11px;
+                                                                    vertical-alignment: center;
+                                                                }
+                                                            }
+                                                            Rectangle { height: root.send-mode == "webdav" ? 0px : 6px; vertical-stretch: 0; }
+                                                            Rectangle {
+                                                                height: 34px;
+                                                                Rectangle {
+                                                                    visible: root.send-mode == "local";
+                                                                    width: parent.width;
+                                                                    height: parent.height;
+                                                                    Text { width: parent.width; height: parent.height; text: "仅局域网无需配置"; color: #66747b; font-size: 12px; vertical-alignment: center; }
+                                                                }
+                                                                Rectangle {
+                                                                    visible: root.send-mode == "relay";
+                                                                    width: parent.width;
+                                                                    height: parent.height;
+                                                                    SendProfileField { label: "中继配置"; values: root.backend-profiles; current-value <=> root.selected-profile; manage-config => { root.set-page(1); } }
+                                                                }
+                                                                Rectangle {
+                                                                    visible: root.send-mode == "s3";
+                                                                    width: parent.width;
+                                                                    height: parent.height;
+                                                                    SendProfileField { label: "S3 配置"; values: root.backend-profiles; current-value <=> root.selected-profile; manage-config => { root.set-page(1); } }
+                                                                }
+                                                                Rectangle {
+                                                                    visible: root.send-mode == "webdav";
+                                                                    width: parent.width;
+                                                                    height: parent.height;
+                                                                    SendProfileField { label: "WebDAV 配置"; values: root.backend-profiles; current-value <=> root.selected-profile; manage-config => { root.set-page(1); } }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                }
+                                                Rectangle { horizontal-stretch: 1; }
+                                                Rectangle { width: 94px; height: 115px; Button { y: 38px; width: 94px; height: 34px; text: "创建传输码"; text-size: 13px; primary: true; clicked => { root.start-send(); } } }
+                                            }
+                                        }
+                                    }
+                                    Rectangle {
+                                        horizontal-stretch: 0.85;
+                                        min-width: 330px;
+                                        background: #ffffff;
+                                        border-color: #d5dedf;
+                                        border-width: 1px;
+                                        border-radius: 6px;
+                                        drop-shadow-blur: 11px;
+                                        drop-shadow-color: #1c282d1a;
+                                        drop-shadow-offset-y: 2px;
+                                            VerticalLayout {
+                                                padding: 15px;
+                                                spacing: 13px;
+                                                HorizontalLayout {
+                                                    height: 44px;
+                                                    vertical-stretch: 0;
+                                                    spacing: 10px;
+                                                    Rectangle { width: 28px; height: 44px; Rectangle { y: 8px; width: 28px; height: 28px; border-radius: 14px; background: #08766f; Text { width: parent.width; height: parent.height; text: "↙"; color: #ffffff; font-size: 17px; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; } } }
+                                                    VerticalLayout { spacing: 1px; Text { text: "接收内容"; color: #1c282d; font-size: 16px; font-weight: 400; } Text { text: "粘贴对方传输码，选择保存位置后开始接收。"; color: #66747b; font-size: 12px; } }
+                                                }
+                                                Rectangle { height: 88px; background: #ffffff; drop-shadow-blur: 7px; drop-shadow-color: #1c282d1f; drop-shadow-offset-y: 2px; TextEdit { width: parent.width; height: parent.height; text <=> root.receive-ticket; wrap: word-wrap; } }
+                                                HorizontalLayout {
+                                                    height: 16px;
+                                                    vertical-stretch: 0;
+                                                    Text { width: 48px; text: "保存到"; color: #66747b; font-size: 12px; }
+                                                    Text { text: root.receive-directory == "" ? "未选择目录" : root.receive-directory; color: #1c282d; font-size: 12px; font-weight: 400; horizontal-stretch: 1; overflow: elide; }
+                                                }
+                                                Rectangle { vertical-stretch: 1; }
+                                                HorizontalLayout {
+                                                    height: 34px;
+                                                    vertical-stretch: 0;
+                                                    DestinationButton { text: "更换"; text-weight: 400; clicked => { root.choose-receive-directory(); } }
+                                                    Rectangle { horizontal-stretch: 1; }
+                                                    Button { width: 80px; height: 34px; text: "开始接收"; text-size: 13px; primary: true; clicked => { root.start-receive(); } }
+                                                }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        Rectangle {
+                            vertical-stretch: 1;
+                            background: #ffffff;
+                            Rectangle {
+                                width: parent.width;
+                                height: parent.height;
+                                Rectangle { y: 0px; width: parent.width; height: 58px; border-width: 0px; Rectangle { y: parent.height - 1px; width: parent.width; height: 1px; background: #d5dedf; } HorizontalLayout { width: parent.width; height: parent.height; padding-left: 18px; padding-right: 18px; Text { text: "传输队列"; color: #1c282d; font-size: 16px; font-weight: 400; vertical-alignment: center; } Rectangle { width: 10px; } Text { text: "" + root.tasks.length + " 个任务"; color: #66747b; font-size: 12px; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; } Rectangle { width: 168px; height: 58px; Rectangle { y: 12px; width: parent.width; height: 33px; background: #ffffff; border-radius: 5px; drop-shadow-blur: 4px; drop-shadow-color: #1c282d14; drop-shadow-offset-y: 1px; TextField { width: parent.width; height: parent.height; placeholder-text: "搜索任务"; shadow-enabled: false; } } } Rectangle { width: 7px; } Rectangle { width: 84px; height: 58px; Button { y: 13px; width: parent.width; text: "清除已完成"; clicked => { root.clear-completed(); } } } } }
+                                HorizontalLayout {
+                                    y: 58px;
+                                    width: parent.width;
+                                    height: parent.height - 58px;
+                                    Rectangle {
+                                        horizontal-stretch: 1;
+                                        height: parent.height;
+                                        VerticalLayout {
+                                            width: parent.width;
+                                            height: parent.height;
+                                            spacing: 0px;
+                                            Rectangle { height: 30px; background: #f5f8f8; border-width: 0px; Rectangle { y: parent.height - 1px; width: parent.width; height: 1px; background: #d5dedf; } HorizontalLayout { padding-left: 18px; padding-right: 18px; spacing: 11px; Text { text: "名称"; width: 399px; color: #66747b; font-size: 10px; font-weight: 800; vertical-alignment: center; } Text { text: "方向"; width: 78px; color: #66747b; font-size: 10px; font-weight: 800; vertical-alignment: center; } Text { text: "方式"; width: 90px; color: #66747b; font-size: 10px; font-weight: 800; vertical-alignment: center; } Text { text: "状态"; width: 88px; color: #66747b; font-size: 10px; font-weight: 800; vertical-alignment: center; } Text { text: "进度"; color: #66747b; font-size: 10px; font-weight: 800; horizontal-stretch: 1; vertical-alignment: center; } Text { text: "操作"; width: 58px; color: #66747b; font-size: 10px; font-weight: 800; vertical-alignment: center; } } }
+                                            ScrollView {
+                                                vertical-stretch: 1;
+                                                VerticalLayout {
+                                                    spacing: 0px;
+                                                    Rectangle {
+                                                        visible: root.tasks.length == 0;
+                                                        height: root.tasks.length == 0 ? 156px : 0px;
+                                                        Rectangle {
+                                                            width: 262px;
+                                                            height: 82px;
+                                                            x: (parent.width - self.width) / 2;
+                                                            y: 28px;
+                                                            background: #f7f9f9;
+                                                            border-color: #d5dedf;
+                                                            border-width: 1px;
+                                                            border-radius: 6px;
+                                                            HorizontalLayout {
+                                                                padding-left: 16px;
+                                                                padding-right: 16px;
+                                                                spacing: 11px;
+                                                                Rectangle {
+                                                                    width: 30px;
+                                                                    height: 30px;
+                                                                    border-radius: 15px;
+                                                                    background: #d9f0ec;
+                                                                    Text { width: parent.width; height: parent.height; text: "↗"; color: #005f59; font-size: 16px; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; }
+                                                                }
+                                                                VerticalLayout {
+                                                                    spacing: 2px;
+                                                                    Text { text: "暂无传输任务"; color: #1c282d; font-size: 13px; font-weight: 780; }
+                                                                    Text { text: "创建传输码后会出现在这里"; color: #66747b; font-size: 11px; }
+                                                                }
+                                                            }
+                                                        }
+                                                    }
+                                                    for task in root.tasks: Rectangle {
+                                                        height: 58px;
+                                                        background: root.detail-name == task.name ? #eff8f6 : #ffffff;
+                                                        Rectangle { visible: root.detail-name == task.name; x: 0px; y: 0px; width: 3px; height: parent.height; background: #08766f; }
+                                                        Rectangle { y: parent.height - 1px; width: parent.width; height: 1px; background: #d5dedf; }
+                                                        HorizontalLayout { padding-left: 18px; padding-right: 18px; spacing: 11px; Rectangle { width: 399px; height: 58px; VerticalLayout { y: 10px; height: 35px; spacing: 1px; Text { text: task.name; color: #1c282d; font-size: 13px; font-weight: 400; overflow: elide; } Text { text: task.destination; color: #66747b; font-size: 11px; overflow: elide; } } } Text { text: task.direction; width: 78px; color: #1c282d; font-size: 12px; vertical-alignment: center; } Text { text: task.method; width: 90px; color: #1c282d; font-size: 12px; vertical-alignment: center; overflow: elide; } Rectangle { width: 88px; StatusTag { x: 0px; y: 17px; text: task.status; state: task.status == "传输中" ? "active" : task.status == "已完成" ? "done" : "waiting"; } } Rectangle { horizontal-stretch: 1; height: 58px; VerticalLayout { y: 14px; height: 30px; spacing: 4px; Rectangle { visible: task.status != "等待中"; height: 6px; border-radius: 3px; background: #dfe8e8; Rectangle { width: task.status == "已完成" ? parent.width : task.status == "传输中" ? parent.width * 0.62 : 0px; height: parent.height; background: #08766f; border-radius: 3px; } } Text { text: task.progress; color: #66747b; font-size: 11px; } } } Text { text: task.status == "传输中" ? "取消" : task.status == "已完成" ? "打开" : "查看"; width: 58px; color: #08766f; font-size: 12px; font-weight: 760; vertical-alignment: center; } }
+                                                        TouchArea { clicked => { root.select-task(task.id); } }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Rectangle {
+                                        width: 322px;
+                                        height: parent.height;
+                                        background: #f8faf9;
+                                        border-width: 0px;
+                                        Text { x: 16px; y: 16px; text: "当前任务"; color: #66747b; font-size: 11px; font-weight: 600; }
+                                        Text { x: 16px; y: 39px; width: 244px; text: root.detail-name; color: #1c282d; font-size: 17px; font-weight: 600; overflow: elide; }
+                                        Text { x: 16px; y: 72px; width: 270px; text: root.has-selected-task ? root.detail-text : "从队列选择任务，检查传输码、路径与状态。"; color: #66747b; font-size: 12px; overflow: elide; }
+                                        Rectangle {
+                                            visible: root.has-selected-task;
+                                            x: 16px;
+                                            y: 100px;
+                                            width: parent.width - 32px;
+                                            height: 32px;
+                                            background: #ffffff;
+                                            border-color: #bfcccd;
+                                            border-width: 1px;
+                                            Text { x: 8px; width: parent.width - 16px; height: parent.height; text: root.detail-ticket; color: #42545c; font-size: 11px; overflow: elide; vertical-alignment: center; }
+                                        }
+                                        Rectangle { visible: root.has-selected-task; x: 0px; y: 144px; width: 80px; height: 16px; Text { text: "连接方式"; color: #66747b; font-size: 12px; } }
+                                        Text { visible: root.has-selected-task; x: 105px; y: 144px; width: 198px; text: root.detail-method; color: #1c282d; font-size: 12px; font-weight: 600; overflow: elide; }
+                                        Rectangle { visible: root.has-selected-task; x: 0px; y: 168px; width: 80px; height: 16px; Text { text: "当前进度"; color: #66747b; font-size: 12px; } }
+                                        Text { visible: root.has-selected-task; x: 105px; y: 168px; width: 198px; text: root.detail-progress; color: #1c282d; font-size: 12px; font-weight: 600; overflow: elide; }
+                                        Rectangle { visible: root.has-selected-task; x: 0px; y: 192px; width: 80px; height: 16px; Text { text: "开始时间"; color: #66747b; font-size: 12px; } }
+                                        Text { visible: root.has-selected-task; x: 105px; y: 192px; width: 198px; text: root.detail-time; color: #1c282d; font-size: 12px; font-weight: 600; overflow: elide; }
+                                        Rectangle { visible: root.has-selected-task; x: 0px; y: 216px; width: 80px; height: 16px; Text { text: "目标位置"; color: #66747b; font-size: 12px; } }
+                                        Text { visible: root.has-selected-task; x: 105px; y: 216px; width: 198px; text: root.detail-destination; color: #1c282d; font-size: 12px; font-weight: 600; overflow: elide; }
+                                        Button { visible: root.has-selected-task; x: 16px; y: 238px; width: 94px; height: 34px; text: "复制传输码"; clicked => { root.status-text = "传输码已复制。"; } }
+                                        Rectangle {
+                                            visible: root.has-selected-task;
+                                            x: 118px;
+                                            y: 238px;
+                                            width: 54px;
+                                            height: 34px;
+                                            border-width: 1px;
+                                            border-color: #efb9ad;
+                                            border-radius: 4px;
+                                            background: #fff7f4;
+                                            Text { width: parent.width; height: parent.height; text: "停止"; color: #b6532d; font-size: 12px; font-weight: 600; horizontal-alignment: center; vertical-alignment: center; }
+                                            TouchArea { clicked => { root.status-text = "已请求停止传输。"; } }
+                                        }
+                                        Rectangle { visible: root.has-selected-task; x: 16px; y: 286px; width: parent.width - 32px; height: 1px; background: #d5dedf; }
+                                        Text { x: 16px; y: root.has-selected-task ? 299px : 98px; text: "网络路径"; color: #66747b; font-size: 12px; }
+                                        Text { x: 206px; y: root.has-selected-task ? 299px : 98px; width: 100px; text: root.has-selected-task ? "已就绪" : ""; color: #1c282d; font-size: 12px; font-weight: 600; horizontal-alignment: right; }
+                                        Text { x: 16px; y: root.has-selected-task ? 323px : 122px; text: "记录来源"; color: #66747b; font-size: 12px; }
+                                        Text { x: 174px; y: root.has-selected-task ? 323px : 122px; width: 132px; text: "SQLite 队列库"; color: #1c282d; font-size: 12px; font-weight: 600; horizontal-alignment: right; }
+                                        Text { x: 16px; y: root.has-selected-task ? 347px : 146px; text: "传输码版本"; color: #66747b; font-size: 12px; }
+                                        Text { x: 260px; y: root.has-selected-task ? 347px : 146px; width: 46px; text: "v6"; color: #1c282d; font-size: 12px; font-weight: 600; horizontal-alignment: right; }
+                                        Rectangle {
+                                            visible: root.has-selected-task;
+                                            x: parent.width - 42px;
+                                            y: 14px;
+                                            width: 26px;
+                                            height: 26px;
+                                            border-radius: 4px;
+                                            background: close-touch.has-hover ? #e8eeee : #00000000;
+                                            Text { width: parent.width; height: parent.height; text: "×"; color: #66747b; font-size: 19px; horizontal-alignment: center; vertical-alignment: center; }
+                                            close-touch := TouchArea { width: parent.width; height: parent.height; clicked => { root.has-selected-task = false; root.detail-name = "未选择任务"; root.detail-text = "从传输队列选择任务查看详情。"; root.detail-ticket = ""; root.detail-method = ""; root.detail-progress = ""; root.detail-time = ""; root.detail-destination = ""; } }
+                                        }
+                                        Rectangle { x: 0px; y: 0px; width: 1px; height: parent.height; background: #d5dedf; }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if false: Rectangle {
+                    x: 18px;
+                    y: 16px;
+                    width: parent.width - 36px;
+                    height: parent.height - 32px;
+                    background: #ffffff;
+                    border-color: #d5dedf;
+                    border-width: 1px;
+                    border-radius: 7px;
+                    HorizontalLayout {
+                        Rectangle {
+                            width: 280px;
+                            background: #fbfcfc;
+                            border-color: #d5dedf;
+                            border-width: 1px;
+                            VerticalLayout {
+                                padding: 12px;
+                                spacing: 6px;
+                                Text { text: "配置列表"; color: #1c282d; font-size: 16px; font-weight: 800; }
+                                HorizontalLayout {
+                                    Button { text: "新增 S3"; clicked => { root.new-profile("S3"); } }
+                                    Button { text: "新增 WebDAV"; clicked => { root.new-profile("WebDAV"); } }
+                                    Button { text: "新增 TLS"; clicked => { root.new-profile("TLS"); } }
+                                }
+                                ScrollView {
+                                    vertical-stretch: 1;
+                                    VerticalLayout {
+                                        spacing: 0px;
+                                        for profile in root.profiles: Rectangle {
+                                            height: 58px;
+                                            border-color: #d5dedf;
+                                            border-width: 1px;
+                                            VerticalLayout {
+                                                padding: 9px;
+                                                Text { text: profile.name; color: #1c282d; font-weight: 700; }
+                                                Text { text: profile.kind + " · " + profile.description; color: #66747b; font-size: 12px; }
+                                            }
+                                            TouchArea { clicked => { root.select-profile(profile.name); } }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        ScrollView {
+                            horizontal-stretch: 1;
+                            VerticalLayout {
+                                padding: 20px;
+                                spacing: 9px;
+                                Text { text: "存储与中继"; color: #1c282d; font-size: 20px; font-weight: 800; }
+                                Text { text: "S3、WebDAV 与 TLS 中继配置供发送页选择。"; color: #66747b; }
+                                ComboBox { model: ["S3", "WebDAV", "TLS"]; current-value <=> root.profile-kind; }
+                                Text { text: "配置名称"; color: #66747b; font-size: 12px; }
+                                TextField { text <=> root.profile-name; placeholder-text: "例如：工作 R2"; }
+                                Text { text: root.profile-kind == "TLS" ? "HTTPS 中继地址" : "终端地址 / 服务器地址"; color: #66747b; font-size: 12px; }
+                                TextField { text <=> root.profile-endpoint; placeholder-text: "https://example.com"; }
+                                Rectangle { visible: root.profile-kind == "S3"; height: root.profile-kind == "S3" ? 64px : 0px; VerticalLayout { Text { text: "Bucket"; color: #66747b; font-size: 12px; } TextField { text <=> root.profile-bucket; } } }
+                                Rectangle { visible: root.profile-kind != "TLS"; height: root.profile-kind != "TLS" ? 64px : 0px; VerticalLayout { Text { text: root.profile-kind == "S3" ? "访问密钥 ID" : "用户名"; color: #66747b; font-size: 12px; } TextField { text <=> root.profile-user; } } }
+                                Rectangle { visible: root.profile-kind != "TLS"; height: root.profile-kind != "TLS" ? 64px : 0px; VerticalLayout { Text { text: root.profile-kind == "S3" ? "访问密钥" : "密码"; color: #66747b; font-size: 12px; } TextField { text <=> root.profile-secret; password: true; } } }
+                                Rectangle { visible: root.profile-kind == "TLS"; height: root.profile-kind == "TLS" ? 34px : 0px; HorizontalLayout { Text { text: "信任自签证书"; vertical-alignment: center; } CheckBox { checked <=> root.profile-self-signed; } } }
+                                HorizontalLayout { Button { text: "删除配置"; clicked => { root.delete-profile(); } } Button { text: "保存配置"; primary: true; clicked => { root.save-profile(); } } }
+                            }
+                        }
+                    }
+                }
+
+                if false: Rectangle {
+                    width: parent.width;
+                    height: parent.height;
+                    background: #f7f9f9;
+                    VerticalLayout {
+                        spacing: 0px;
+                        Rectangle { height: 108px; background: #f7f9f9; border-color: #d5dedf; border-width: 1px; HorizontalLayout { padding-left: 22px; padding-right: 22px; VerticalLayout { spacing: 3px; Text { text: "传输配置"; color: #08766f; font-size: 11px; font-weight: 800; } Text { text: "存储与中继"; color: #1c282d; font-size: 20px; font-weight: 800; } Text { text: "统一管理 S3、WebDAV 与 TLS 中继配置。"; color: #66747b; font-size: 12px; } } Rectangle { horizontal-stretch: 1; } Button { width: 82px; text: "新增配置"; primary: true; clicked => { root.new-profile("S3"); } } } }
+                        Rectangle { vertical-stretch: 1; background: #ffffff; HorizontalLayout {
+                            Rectangle { width: 292px; background: #fbfcfc; border-color: #d5dedf; border-width: 1px; VerticalLayout { padding: 14px; spacing: 8px; HorizontalLayout { Text { text: "配置列表"; color: #1c282d; font-size: 14px; font-weight: 800; } Rectangle { horizontal-stretch: 1; } ListButton { width: 29px; text: "+"; clicked => { root.new-profile("S3"); } } } ScrollView { vertical-stretch: 1; VerticalLayout { spacing: 0px; for profile in root.profiles: Rectangle { height: 58px; border-color: #d5dedf; border-width: 1px; HorizontalLayout { padding-left: 11px; padding-right: 11px; Rectangle { width: 29px; height: 29px; border-radius: 15px; background: profile.kind == "S3" ? #d9f0ec : profile.kind == "TLS" ? #fbefc9 : #e8edf6; Text { width: parent.width; height: parent.height; text: profile.kind; color: #4f6067; font-size: 9px; font-weight: 800; horizontal-alignment: center; vertical-alignment: center; } } VerticalLayout { horizontal-stretch: 1; spacing: 2px; Text { text: profile.name; color: #1c282d; font-weight: 780; overflow: elide; } Text { text: profile.description; color: #66747b; font-size: 12px; overflow: elide; } } } TouchArea { clicked => { root.select-profile(profile.name); } } } } } } }
+                            ScrollView { horizontal-stretch: 1; VerticalLayout { padding: 22px; spacing: 9px; HorizontalLayout { VerticalLayout { spacing: 2px; Text { text: root.profile-name == "" ? "编辑配置" : root.profile-name; color: #1c282d; font-size: 18px; font-weight: 800; } Text { text: "S3、WebDAV 与 TLS 中继配置供发送页选择。"; color: #66747b; font-size: 12px; } } Rectangle { horizontal-stretch: 1; } StatusTag { text: root.profile-kind; state: root.profile-kind == "TLS" ? "waiting" : "active"; } } Rectangle { height: 1px; background: #d5dedf; } Text { text: "配置类型"; color: #66747b; font-size: 12px; } ComboBox { model: ["S3", "WebDAV", "TLS"]; current-value <=> root.profile-kind; } Text { text: "配置名称"; color: #66747b; font-size: 12px; } TextField { text <=> root.profile-name; placeholder-text: "例如：工作 R2"; } Text { text: root.profile-kind == "TLS" ? "HTTPS 中继地址" : "终端地址 / 服务器地址"; color: #66747b; font-size: 12px; } TextField { text <=> root.profile-endpoint; placeholder-text: "https://example.com"; } Rectangle { visible: root.profile-kind == "S3"; height: root.profile-kind == "S3" ? 61px : 0px; VerticalLayout { Text { text: "Bucket"; color: #66747b; font-size: 12px; } TextField { text <=> root.profile-bucket; } } } Rectangle { visible: root.profile-kind != "TLS"; height: root.profile-kind != "TLS" ? 61px : 0px; VerticalLayout { Text { text: root.profile-kind == "S3" ? "访问密钥 ID" : "用户名"; color: #66747b; font-size: 12px; } TextField { text <=> root.profile-user; } } } Rectangle { visible: root.profile-kind != "TLS"; height: root.profile-kind != "TLS" ? 61px : 0px; VerticalLayout { Text { text: root.profile-kind == "S3" ? "访问密钥" : "密码"; color: #66747b; font-size: 12px; } TextField { text <=> root.profile-secret; password: true; } } } Rectangle { visible: root.profile-kind == "TLS"; height: root.profile-kind == "TLS" ? 32px : 0px; HorizontalLayout { Text { text: "信任自签证书"; color: #1c282d; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; } Toggle { checked <=> root.profile-self-signed; } } } Rectangle { vertical-stretch: 1; } HorizontalLayout { Button { width: 82px; text: "删除配置"; clicked => { root.delete-profile(); } } Rectangle { horizontal-stretch: 1; } Button { width: 82px; text: "保存配置"; primary: true; clicked => { root.save-profile(); } } } } }
+                        } }
+                    }
+                }
+
+                Rectangle {
+                    visible: root.page == 1;
+                    width: parent.width;
+                    height: parent.height;
+                    background: #ffffff;
+                    Rectangle {
+                        y: 106px;
+                            width: parent.width;
+                            height: parent.height - 106px;
+                            background: #ffffff;
+                        HorizontalLayout {
+                            width: parent.width;
+                            height: parent.height;
+                            spacing: 0px;
+                            Rectangle {
+                                width: 292px;
+                                height: parent.height;
+                                background: #fbfcfc;
+                                VerticalLayout {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    spacing: 0px;
+                                    Rectangle {
+                                            height: 50px;
+                                            HorizontalLayout {
+                                                padding-left: 14px;
+                                                padding-right: 14px;
+                                                Text { text: "配置列表"; color: #1c282d; font-size: 14px; font-weight: 600; vertical-alignment: center; }
+                                                Rectangle { horizontal-stretch: 1; }
+                                                Rectangle { width: 29px; height: parent.height; Button { y: 9px; width: parent.width; height: 32px; text: "+"; clicked => { root.profile-new-kind = "S3"; root.new-profile("S3"); root.profile-modal = true; } } }
+                                            }
+                                        }
+                                        Rectangle { height: 1px; background: #d5dedf; }
+                                        ScrollView {
+                                            vertical-stretch: 1;
+                                            VerticalLayout {
+                                                spacing: 0px;
+                                                for profile in root.profiles: Rectangle {
+                                                    height: 58px;
+                                                    background: root.profile-name == profile.name ? #eaf6f4 : #00000000;
+                                                    Rectangle { visible: root.profile-name == profile.name; x: 0px; y: 0px; width: 3px; height: parent.height; background: #08766f; }
+                                                    Rectangle { y: parent.height - 1px; width: parent.width; height: 1px; background: #d5dedf; }
+                                                    HorizontalLayout {
+                                                        padding-left: root.profile-name == profile.name ? 11px : 14px;
+                                                        padding-right: 14px;
+                                                        spacing: 10px;
+                                                        Rectangle {
+                                                            width: 29px;
+                                                            height: parent.height;
+                                                            Rectangle { y: 14px; width: 29px; height: 29px; border-radius: 15px; background: profile.kind == "S3" ? #d9f0ec : profile.kind == "TLS" ? #fbefc9 : #e8edf6; Text { width: parent.width; height: parent.height; text: profile.kind == "WebDAV" ? "DAV" : profile.kind; color: profile.kind == "S3" ? #005f59 : profile.kind == "TLS" ? #8a6507 : #455b79; font-size: profile.kind == "WebDAV" ? 8px : 10px; font-weight: 400; horizontal-alignment: center; vertical-alignment: center; } }
+                                                        }
+                                                        Rectangle {
+                                                            horizontal-stretch: 1;
+                                                            height: parent.height;
+                                                            VerticalLayout { y: 11px; height: 36px; spacing: 2px; Text { text: profile.name; color: #1c282d; font-size: 13px; font-weight: 600; overflow: elide; } Text { text: profile.kind + " · " + profile.description; color: #66747b; font-size: 12px; overflow: elide; } }
+                                                        }
+                                                    }
+                                                    TouchArea { clicked => { root.select-profile(profile.name); } }
+                                                }
+                                                Rectangle {
+                                                    visible: root.profiles.length == 0;
+                                                    height: root.profiles.length == 0 ? 210px : 0px;
+                                                    VerticalLayout {
+                                                        spacing: 0px;
+                                                        Rectangle { height: 36px; Text { x: 14px; width: parent.width - 28px; height: parent.height; text: "还没有保存的连接配置"; color: #66747b; font-size: 12px; vertical-alignment: center; } Rectangle { y: parent.height - 1px; width: parent.width; height: 1px; background: #d5dedf; } }
+                                                        Rectangle {
+                                                            height: 58px;
+                                                            background: root.profile-name == "" && root.profile-kind == "S3" ? #eaf6f4 : #00000000;
+                                                            Rectangle { visible: root.profile-name == "" && root.profile-kind == "S3"; x: 0px; y: 0px; width: 3px; height: parent.height; background: #08766f; }
+                                                            Rectangle { y: parent.height - 1px; width: parent.width; height: 1px; background: #d5dedf; }
+                                                            HorizontalLayout {
+                                                                padding-left: 14px;
+                                                                padding-right: 14px;
+                                                                spacing: 10px;
+                                                                Rectangle { width: 29px; height: parent.height; Rectangle { y: 14px; width: 29px; height: 29px; border-radius: 15px; background: #d9f0ec; Text { width: parent.width; height: parent.height; text: "S3"; color: #005f59; font-size: 10px; font-weight: 400; horizontal-alignment: center; vertical-alignment: center; } } }
+                                                                Rectangle { horizontal-stretch: 1; height: parent.height; VerticalLayout { y: 11px; height: 36px; spacing: 2px; Text { text: "新建 S3 配置"; color: #1c282d; font-size: 13px; font-weight: 600; } Text { text: "对象存储连接"; color: #66747b; font-size: 11px; } } }
+                                                            }
+                                                            TouchArea { clicked => { root.profile-new-kind = "S3"; root.new-profile("S3"); } }
+                                                        }
+                                                        Rectangle {
+                                                            height: 58px;
+                                                            background: root.profile-name == "" && root.profile-kind == "WebDAV" ? #eaf6f4 : #00000000;
+                                                            Rectangle { visible: root.profile-name == "" && root.profile-kind == "WebDAV"; x: 0px; y: 0px; width: 3px; height: parent.height; background: #08766f; }
+                                                            Rectangle { y: parent.height - 1px; width: parent.width; height: 1px; background: #d5dedf; }
+                                                            HorizontalLayout {
+                                                                padding-left: 14px;
+                                                                padding-right: 14px;
+                                                                spacing: 10px;
+                                                                Rectangle { width: 29px; height: parent.height; Rectangle { y: 14px; width: 29px; height: 29px; border-radius: 15px; background: #e8edf6; Text { width: parent.width; height: parent.height; text: "DAV"; color: #455b79; font-size: 8px; font-weight: 400; horizontal-alignment: center; vertical-alignment: center; } } }
+                                                                Rectangle { horizontal-stretch: 1; height: parent.height; VerticalLayout { y: 11px; height: 36px; spacing: 2px; Text { text: "新建 WebDAV 配置"; color: #1c282d; font-size: 13px; font-weight: 600; } Text { text: "文件存储连接"; color: #66747b; font-size: 11px; } } }
+                                                            }
+                                                            TouchArea { clicked => { root.profile-new-kind = "WebDAV"; root.new-profile("WebDAV"); } }
+                                                        }
+                                                        Rectangle {
+                                                            height: 58px;
+                                                            background: root.profile-name == "" && root.profile-kind == "TLS" ? #eaf6f4 : #00000000;
+                                                            Rectangle { visible: root.profile-name == "" && root.profile-kind == "TLS"; x: 0px; y: 0px; width: 3px; height: parent.height; background: #08766f; }
+                                                            Rectangle { y: parent.height - 1px; width: parent.width; height: 1px; background: #d5dedf; }
+                                                            HorizontalLayout {
+                                                                padding-left: 14px;
+                                                                padding-right: 14px;
+                                                                spacing: 10px;
+                                                                Rectangle { width: 29px; height: parent.height; Rectangle { y: 14px; width: 29px; height: 29px; border-radius: 15px; background: #fbefc9; Text { width: parent.width; height: parent.height; text: "TLS"; color: #8a6507; font-size: 9px; font-weight: 400; horizontal-alignment: center; vertical-alignment: center; } } }
+                                                                Rectangle { horizontal-stretch: 1; height: parent.height; VerticalLayout { y: 11px; height: 36px; spacing: 2px; Text { text: "新建 TLS 中继"; color: #1c282d; font-size: 13px; font-weight: 600; } Text { text: "指定 HTTPS 中继"; color: #66747b; font-size: 11px; } } }
+                                                            }
+                                                            TouchArea { clicked => { root.profile-new-kind = "TLS"; root.new-profile("TLS"); } }
+                                                        }
+                                                    }
+                                                }
+                                                Rectangle { vertical-stretch: 1; }
+                                            }
+                                    }
+                                }
+                                Rectangle { x: parent.width - 1px; width: 1px; height: parent.height; background: #d5dedf; }
+                                Rectangle { y: parent.height - 1px; width: parent.width; height: 1px; background: #d5dedf; }
+                            }
+                            ScrollView {
+                                    horizontal-stretch: 1;
+                                    vertical-stretch: 1;
+                                    VerticalLayout {
+                                        padding-left: 22px;
+                                        padding-right: 22px;
+                                        padding-top: 20px;
+                                        padding-bottom: 20px;
+                                        spacing: 0px;
+                                        Rectangle {
+                                            height: 58px;
+                                            border-color: #d5dedf;
+                                            border-width: 0px;
+                                            Rectangle { y: parent.height - 1px; width: parent.width; height: 1px; background: #d5dedf; }
+                                            HorizontalLayout {
+                                                VerticalLayout {
+                                                    spacing: 2px;
+                                                    Text { text: root.profile-name == "" ? "新增配置" : root.profile-name; color: #1c282d; font-size: 18px; font-weight: 800; }
+                                                    Text { text: root.profile-kind == "S3" ? "S3 · 对象存储连接" : root.profile-kind == "WebDAV" ? "WebDAV · 文件存储连接" : "TLS · 指定 HTTPS 中继"; color: #66747b; font-size: 12px; }
+                                                }
+                                                Rectangle { horizontal-stretch: 1; }
+                                                Rectangle {
+                                                    width: root.profile-kind == "WebDAV" ? 68px : root.profile-kind == "TLS" ? 34px : 33px;
+                                                    height: 26px;
+                                                    border-radius: 13px;
+                                                    background: root.profile-kind == "S3" ? #d9f0ec : root.profile-kind == "TLS" ? #fbefc9 : #e8edf6;
+                                                    Text { width: parent.width; height: parent.height; text: root.profile-kind; color: root.profile-kind == "S3" ? #005f59 : root.profile-kind == "TLS" ? #8a6507 : #455b79; font-size: 12px; font-weight: 400; horizontal-alignment: center; vertical-alignment: center; }
+                                                }
+                                            }
+                                        }
+                                        Rectangle {
+                                            visible: root.profile-kind == "S3";
+                                            height: root.profile-kind == "S3" ? 440px : 0px;
+                                            VerticalLayout {
+                                                spacing: 0px;
+                                                Rectangle { height: 20px; }
+                                                Text { text: "基本信息"; color: #1c282d; font-size: 14px; font-weight: 800; }
+                                                Rectangle { height: 8px; }
+                                                HorizontalLayout {
+                                                    height: 58px;
+                                                    spacing: 16px;
+                                                    VerticalLayout { horizontal-stretch: 1; spacing: 4px; Text { text: "配置名称"; color: #66747b; font-size: 12px; font-weight: 400; } TextField { text <=> root.profile-name; placeholder-text: "例如：工作 R2"; } }
+                                                    VerticalLayout { horizontal-stretch: 1; spacing: 4px; Text { text: "提供方"; color: #66747b; font-size: 12px; font-weight: 400; } ComboBoxField { values: ["generic-s3", "Cloudflare R2"]; current-value <=> root.profile-provider; } }
+                                                }
+                                                Rectangle { height: 12px; }
+                                                VerticalLayout { height: 58px; spacing: 4px; Text { text: "终端地址"; color: #66747b; font-size: 12px; font-weight: 400; } TextField { text <=> root.profile-endpoint; placeholder-text: "https://account.r2.cloudflarestorage.com"; } }
+                                                ProfileSectionDivider {}
+                                                Text { text: "对象位置"; color: #1c282d; font-size: 14px; font-weight: 800; }
+                                                Rectangle { height: 8px; }
+                                                HorizontalLayout { height: 58px; spacing: 16px; VerticalLayout { horizontal-stretch: 1; spacing: 4px; Text { text: "Bucket"; color: #66747b; font-size: 12px; font-weight: 400; } TextField { text <=> root.profile-bucket; } } VerticalLayout { horizontal-stretch: 1; spacing: 4px; Text { text: "远端前缀"; color: #66747b; font-size: 12px; font-weight: 400; } TextField { text <=> root.profile-prefix; } } }
+                                                Rectangle { height: 12px; }
+                                                HorizontalLayout { height: 58px; spacing: 16px; VerticalLayout { horizontal-stretch: 1; spacing: 4px; Text { text: "区域"; color: #66747b; font-size: 12px; font-weight: 400; } TextField { text <=> root.profile-region; } } VerticalLayout { horizontal-stretch: 1; spacing: 4px; Text { text: "下载链接有效期（秒）"; color: #66747b; font-size: 12px; font-weight: 400; } TextField { text <=> root.profile-presign-ttl; } } }
+                                                ProfileSectionDivider {}
+                                                Text { text: "访问凭据"; color: #1c282d; font-size: 14px; font-weight: 800; }
+                                                Rectangle { height: 8px; }
+                                                HorizontalLayout { height: 58px; spacing: 16px; VerticalLayout { horizontal-stretch: 1; spacing: 4px; Text { text: "访问密钥 ID"; color: #66747b; font-size: 12px; font-weight: 400; } TextField { text <=> root.profile-user; } } VerticalLayout { horizontal-stretch: 1; spacing: 4px; Text { text: "访问密钥"; color: #66747b; font-size: 12px; font-weight: 400; } TextField { text <=> root.profile-secret; password: true; } } }
+                                            }
+                                        }
+                                        Rectangle {
+                                            visible: root.profile-kind == "WebDAV";
+                                            height: root.profile-kind == "WebDAV" ? 295px : 0px;
+                                            VerticalLayout {
+                                                spacing: 0px;
+                                                Rectangle { height: 20px; }
+                                                Text { text: "基本信息"; color: #1c282d; font-size: 14px; font-weight: 800; }
+                                                Rectangle { height: 8px; }
+                                                HorizontalLayout { height: 58px; spacing: 16px; VerticalLayout { horizontal-stretch: 1; spacing: 4px; Text { text: "配置名称"; color: #66747b; font-size: 12px; font-weight: 400; } TextField { text <=> root.profile-name; placeholder-text: "例如：家庭 WebDAV"; } } VerticalLayout { horizontal-stretch: 1; spacing: 4px; Text { text: "认证方式"; color: #66747b; font-size: 12px; font-weight: 400; } ComboBoxField { values: ["Basic", "Digest"]; current-value <=> root.profile-webdav-auth; } } }
+                                                Rectangle { height: 12px; }
+                                                VerticalLayout { height: 58px; spacing: 4px; Text { text: "服务器地址"; color: #66747b; font-size: 12px; font-weight: 400; } TextField { text <=> root.profile-endpoint; placeholder-text: "https://nas.example.com/dav/"; } }
+                                                Rectangle { height: 12px; }
+                                                VerticalLayout { height: 58px; spacing: 4px; Text { text: "远端目录"; color: #66747b; font-size: 12px; font-weight: 400; } TextField { text <=> root.profile-prefix; } }
+                                                Text { height: 34px; text: "WebDAV 便携传输码会在发送时单独二次确认是否包含凭据。"; color: #66747b; font-size: 12px; wrap: word-wrap; }
+                                                ProfileSectionDivider {}
+                                                Text { text: "访问凭据"; color: #1c282d; font-size: 14px; font-weight: 800; }
+                                                Rectangle { height: 8px; }
+                                                HorizontalLayout { height: 58px; spacing: 16px; VerticalLayout { horizontal-stretch: 1; spacing: 4px; Text { text: "用户名"; color: #66747b; font-size: 12px; font-weight: 400; } TextField { text <=> root.profile-user; } } VerticalLayout { horizontal-stretch: 1; spacing: 4px; Text { text: "密码"; color: #66747b; font-size: 12px; font-weight: 400; } TextField { text <=> root.profile-secret; password: true; } } }
+                                            }
+                                        }
+                                        Rectangle {
+                                            visible: root.profile-kind == "TLS";
+                                            height: root.profile-kind == "TLS" ? 248px : 0px;
+                                            VerticalLayout {
+                                                spacing: 0px;
+                                                Rectangle { height: 20px; }
+                                                Text { text: "中继地址"; color: #1c282d; font-size: 14px; font-weight: 800; }
+                                                Rectangle { height: 8px; }
+                                                HorizontalLayout { height: 58px; spacing: 16px; VerticalLayout { horizontal-stretch: 1; spacing: 4px; Text { text: "配置名称"; color: #66747b; font-size: 12px; font-weight: 400; } TextField { text <=> root.profile-name; placeholder-text: "例如：公司中继"; } } VerticalLayout { horizontal-stretch: 1; spacing: 4px; Text { text: "HTTPS 地址"; color: #66747b; font-size: 12px; font-weight: 400; } TextField { text <=> root.profile-endpoint; placeholder-text: "https://relay.example.com:8443"; } } }
+                                                Text { height: 38px; text: "此配置仅用于客户端指定中继；不会从 GUI 启动或托管 Relay 服务。"; color: #66747b; font-size: 12px; wrap: word-wrap; vertical-alignment: center; }
+                                                ProfileSectionDivider {}
+                                                Text { text: "证书策略"; color: #1c282d; font-size: 14px; font-weight: 800; }
+                                                Rectangle { height: 8px; }
+                                                HorizontalLayout { height: 58px; VerticalLayout { horizontal-stretch: 1; spacing: 2px; Text { text: "信任自签证书"; color: #1c282d; font-size: 13px; font-weight: 400; } Text { text: "关闭时使用系统正常 TLS 校验；开启时接受该中继的自签证书。"; color: #66747b; font-size: 12px; } } Toggle { checked <=> root.profile-self-signed; } }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    VerticalLayout {
+                        x: 0px;
+                        y: 0px;
+                        width: parent.width;
+                        height: 106px;
+                        spacing: 0px;
+                        Rectangle {
+                            height: 106px;
+                            background: #f7f9f9;
+                            border-color: #d5dedf;
+                            border-width: 1px;
+                            Text { x: 22px; y: 19px; width: 180px; height: 16px; text: "连接配置"; color: #08766f; font-size: 11px; font-weight: 400; }
+                            Text { x: 22px; y: 39px; width: 280px; height: 26px; text: "存储与中继"; color: #1c282d; font-size: 20px; font-weight: 600; }
+                            Text { x: 22px; y: 70px; width: parent.width - 174px; height: 18px; text: "统一管理 S3、WebDAV 与 TLS 中继 profile，供发送页选择。"; color: #66747b; font-size: 12px; }
+                            Button { x: parent.width - 130px; y: 54px; width: 108px; height: 34px; text: "打开配置目录"; clicked => { root.open-config-directory(); } }
+                        }
+                    }
+                    Rectangle {
+                        x: 314px;
+                        y: parent.height - 54px;
+                        width: parent.width - 336px;
+                        height: 52px;
+                        background: #00000000;
+                        border-width: 0px;
+                        HorizontalLayout {
+                            padding-left: 0px;
+                            padding-right: 0px;
+                            spacing: 7px;
+                            DangerButton { text: "删除此配置"; clicked => { root.delete-profile(); } }
+                            Rectangle { horizontal-stretch: 1; }
+                            Button { text: "测试连接"; clicked => { root.status-text = "当前版本将在实际发送时校验连接。"; } }
+                            Button { text: "保存配置"; primary: true; clicked => { root.save-profile(); } }
+                        }
+                    }
+                    Rectangle {
+                        visible: root.profile-modal;
+                        width: parent.width;
+                        height: parent.height;
+                        background: #1522276b;
+                        Rectangle {
+                            width: 630px;
+                            height: 512px;
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            background: #ffffff;
+                            border-color: #bfcaca;
+                            border-width: 1px;
+                            border-radius: 7px;
+                            drop-shadow-blur: 28px;
+                            drop-shadow-color: #121f364d;
+                            drop-shadow-offset-y: 8px;
+                            VerticalLayout {
+                                width: parent.width;
+                                height: parent.height;
+                                spacing: 0px;
+                                Rectangle {
+                                    height: 80px;
+                                    border-width: 0px;
+                                    Rectangle { y: parent.height - 1px; width: parent.width; height: 1px; background: #d5dedf; }
+                                    Text { x: 20px; y: 18px; height: 22px; text: "新增配置"; color: #1c282d; font-size: 18px; font-weight: 400; }
+                                    Text { x: 20px; y: 46px; height: 16px; text: "先选择类型，再填写对应的连接参数。"; color: #66747b; font-size: 12px; }
+                                    WindowButton { x: parent.width - 52px; y: 16px; text: "×"; clicked => { root.profile-modal = false; } }
+                                }
+                                Rectangle {
+                                    vertical-stretch: 1;
+                                    VerticalLayout {
+                                        padding-left: 20px;
+                                        padding-right: 20px;
+                                        padding-top: 18px;
+                                        padding-bottom: 18px;
+                                        spacing: 0px;
+                                        HorizontalLayout {
+                                            height: 58px;
+                                            spacing: 8px;
+                                            Rectangle { horizontal-stretch: 1; border-color: root.profile-new-kind == "S3" ? #08766f : #d5dedf; border-width: 1px; border-radius: 5px; background: root.profile-new-kind == "S3" ? #eaf6f4 : #ffffff; VerticalLayout { padding: 8px; spacing: 2px; Text { text: "S3"; color: #1c282d; font-size: 13px; font-weight: 400; } Text { text: "R2 或 S3 兼容对象存储"; color: #66747b; font-size: 11px; } } TouchArea { clicked => { root.profile-new-kind = "S3"; root.new-profile("S3"); } } }
+                                            Rectangle { horizontal-stretch: 1; border-color: root.profile-new-kind == "WebDAV" ? #08766f : #d5dedf; border-width: 1px; border-radius: 5px; background: root.profile-new-kind == "WebDAV" ? #eaf6f4 : #ffffff; VerticalLayout { padding: 8px; spacing: 2px; Text { text: "WebDAV"; color: #1c282d; font-size: 13px; font-weight: 400; } Text { text: "用户名与密码认证的 WebDAV"; color: #66747b; font-size: 11px; } } TouchArea { clicked => { root.profile-new-kind = "WebDAV"; root.new-profile("WebDAV"); } } }
+                                            Rectangle { horizontal-stretch: 1; border-color: root.profile-new-kind == "TLS" ? #08766f : #d5dedf; border-width: 1px; border-radius: 5px; background: root.profile-new-kind == "TLS" ? #eaf6f4 : #ffffff; VerticalLayout { padding: 8px; spacing: 2px; Text { text: "TLS"; color: #1c282d; font-size: 13px; font-weight: 400; } Text { text: "指定 HTTPS 中继地址"; color: #66747b; font-size: 11px; } } TouchArea { clicked => { root.profile-new-kind = "TLS"; root.new-profile("TLS"); } } }
+                                        }
+                                        Rectangle { height: 16px; }
+                                        Rectangle {
+                                            visible: root.profile-new-kind == "S3";
+                                            height: root.profile-new-kind == "S3" ? 262px : 0px;
+                                            VerticalLayout { spacing: 10px; HorizontalLayout { height: 58px; spacing: 12px; VerticalLayout { horizontal-stretch: 1; spacing: 4px; Text { text: "配置名称"; color: #66747b; font-size: 12px; } TextField { text <=> root.profile-name; placeholder-text: "例如：工作 R2"; } } VerticalLayout { horizontal-stretch: 1; spacing: 4px; Text { text: "提供方"; color: #66747b; font-size: 12px; } ComboBoxField { values: ["generic-s3", "Cloudflare R2"]; current-value <=> root.profile-provider; } } } VerticalLayout { height: 58px; spacing: 4px; Text { text: "终端地址"; color: #66747b; font-size: 12px; } TextField { text <=> root.profile-endpoint; placeholder-text: "https://account.r2.cloudflarestorage.com"; } } HorizontalLayout { height: 58px; spacing: 12px; VerticalLayout { horizontal-stretch: 1; spacing: 4px; Text { text: "Bucket"; color: #66747b; font-size: 12px; } TextField { text <=> root.profile-bucket; placeholder-text: "ii-transfer"; } } VerticalLayout { horizontal-stretch: 1; spacing: 4px; Text { text: "远端前缀"; color: #66747b; font-size: 12px; } TextField { text <=> root.profile-prefix; placeholder-text: "ii/"; } } } HorizontalLayout { height: 58px; spacing: 12px; VerticalLayout { horizontal-stretch: 1; spacing: 4px; Text { text: "访问密钥 ID"; color: #66747b; font-size: 12px; } TextField { text <=> root.profile-user; } } VerticalLayout { horizontal-stretch: 1; spacing: 4px; Text { text: "访问密钥"; color: #66747b; font-size: 12px; } TextField { text <=> root.profile-secret; password: true; } } } }
+                                        }
+                                        Rectangle {
+                                            visible: root.profile-new-kind == "WebDAV";
+                                            height: root.profile-new-kind == "WebDAV" ? 162px : 0px;
+                                            VerticalLayout { spacing: 10px; HorizontalLayout { spacing: 12px; VerticalLayout { horizontal-stretch: 1; spacing: 4px; Text { text: "配置名称"; color: #66747b; font-size: 12px; } TextField { text <=> root.profile-name; placeholder-text: "例如：家庭 WebDAV"; } } VerticalLayout { horizontal-stretch: 1; spacing: 4px; Text { text: "用户名"; color: #66747b; font-size: 12px; } TextField { text <=> root.profile-user; } } } VerticalLayout { spacing: 4px; Text { text: "服务器地址"; color: #66747b; font-size: 12px; } TextField { text <=> root.profile-endpoint; placeholder-text: "https://nas.example.com/dav/"; } } VerticalLayout { spacing: 4px; Text { text: "密码"; color: #66747b; font-size: 12px; } TextField { text <=> root.profile-secret; password: true; } } }
+                                        }
+                                        Rectangle {
+                                            visible: root.profile-new-kind == "TLS";
+                                            height: root.profile-new-kind == "TLS" ? 162px : 0px;
+                                            VerticalLayout {
+                                                spacing: 10px;
+                                                HorizontalLayout {
+                                                    height: 58px;
+                                                    vertical-stretch: 0;
+                                                    spacing: 12px;
+                                                    VerticalLayout { horizontal-stretch: 1; spacing: 4px; Text { text: "配置名称"; color: #66747b; font-size: 12px; } TextField { text <=> root.profile-name; placeholder-text: "例如：公司中继"; } }
+                                                    VerticalLayout { horizontal-stretch: 1; spacing: 4px; Text { text: "HTTPS 地址"; color: #66747b; font-size: 12px; } TextField { text <=> root.profile-endpoint; placeholder-text: "https://relay.example.com:8443"; } }
+                                                }
+                                                HorizontalLayout {
+                                                    height: 36px;
+                                                    vertical-stretch: 0;
+                                                    Text { text: "信任自签证书"; color: #1c282d; font-size: 13px; vertical-alignment: center; }
+                                                    Rectangle { horizontal-stretch: 1; }
+                                                    Toggle { checked <=> root.profile-self-signed; }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                                Rectangle {
+                                    height: 60px;
+                                    border-width: 0px;
+                                    Rectangle { y: 0px; width: parent.width; height: 1px; background: #d5dedf; }
+                                    HorizontalLayout {
+                                        y: 12px;
+                                        width: parent.width;
+                                        height: 36px;
+                                        padding-left: 20px;
+                                        padding-right: 20px;
+                                        spacing: 7px;
+                                        Rectangle { horizontal-stretch: 1; }
+                                        Button { text: "取消"; clicked => { root.profile-modal = false; } }
+                                        Button { text: "创建配置"; primary: true; clicked => { root.profile-modal = false; root.save-profile(); } }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    visible: root.page == 2;
+                    width: parent.width;
+                    height: parent.height;
+                    background: #f7f9f9;
+                    VerticalLayout {
+                        width: parent.width;
+                        height: parent.height;
+                        spacing: 0px;
+                        Rectangle {
+                            height: 106px;
+                            background: #f7f9f9;
+                            border-width: 0px;
+                            Rectangle { y: parent.height - 1px; width: parent.width; height: 1px; background: #d5dedf; }
+                            Text { x: 22px; y: 19px; text: "本机网络"; color: #08766f; font-size: 11px; font-weight: 400; }
+                            Text { x: 22px; y: 39px; text: "连接诊断"; color: #1c282d; font-size: 20px; font-weight: 400; }
+                            Text { x: 22px; y: 70px; text: "检查端点、网络路径与本机配置是否可用于传输。"; color: #66747b; font-size: 12px; }
+                            Button { x: parent.width - 102px; y: 54px; width: 80px; height: 34px; text: "重新诊断"; primary: true; clicked => { root.run-diagnostics(); } }
+                        }
+                        Rectangle {
+                            vertical-stretch: 1;
+                            background: #f7f9f9;
+                            VerticalLayout {
+                                width: parent.width;
+                                height: parent.height;
+                                padding-left: 22px;
+                                padding-right: 22px;
+                                padding-top: 18px;
+                                padding-bottom: 18px;
+                                spacing: 16px;
+                                Rectangle {
+                                    height: 62px;
+                                    background: #ffffff;
+                                    border-color: #d5dedf;
+                                    border-width: 1px;
+                                    border-radius: 6px;
+                                    drop-shadow-blur: 10px;
+                                    drop-shadow-color: #1c282d18;
+                                    drop-shadow-offset-y: 2px;
+                                    HorizontalLayout {
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            Rectangle { x: parent.width - 1px; width: 1px; height: parent.height; background: #d5dedf; }
+                                            Rectangle { x: 15px; y: 16px; width: 28px; height: 28px; border-radius: 14px; background: #d9f0ec; Text { width: parent.width; height: parent.height; text: "√"; color: #005f59; font-size: 15px; font-weight: 400; horizontal-alignment: center; vertical-alignment: center; } }
+                                            Text { x: 52px; y: 12px; width: parent.width - 67px; height: 18px; text: "端点可用"; color: #1c282d; font-size: 13px; font-weight: 400; }
+                                            Text { x: 52px; y: 33px; width: parent.width - 67px; height: 17px; text: "已建立本机 Iroh 端点"; color: #66747b; font-size: 12px; }
+                                        }
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            Rectangle { x: parent.width - 1px; width: 1px; height: parent.height; background: #d5dedf; }
+                                            Rectangle { x: 15px; y: 16px; width: 28px; height: 28px; border-radius: 14px; background: #d9f0ec; Text { width: parent.width; height: parent.height; text: "√"; color: #005f59; font-size: 15px; font-weight: 400; horizontal-alignment: center; vertical-alignment: center; } }
+                                            Text { x: 52px; y: 12px; width: parent.width - 67px; height: 18px; text: "默认中继可用"; color: #1c282d; font-size: 13px; font-weight: 400; }
+                                            Text { x: 52px; y: 33px; width: parent.width - 67px; height: 17px; text: "回退路径已准备"; color: #66747b; font-size: 12px; }
+                                        }
+                                        Rectangle {
+                                            horizontal-stretch: 1;
+                                            Rectangle { x: 15px; y: 16px; width: 28px; height: 28px; border-radius: 14px; background: #fbefc9; Text { width: parent.width; height: parent.height; text: "!"; color: #8a6507; font-size: 15px; font-weight: 400; horizontal-alignment: center; vertical-alignment: center; } }
+                                            Text { x: 52px; y: 12px; width: parent.width - 67px; height: 18px; text: "局域网发现受限"; color: #1c282d; font-size: 13px; font-weight: 400; }
+                                            Text { x: 52px; y: 33px; width: parent.width - 67px; height: 17px; text: "未检测到可用本地地址"; color: #66747b; font-size: 12px; }
+                                        }
+                                    }
+                                }
+                                HorizontalLayout {
+                                    height: 366px;
+                                    vertical-stretch: 0;
+                                    spacing: 14px;
+                                    Rectangle {
+                                        horizontal-stretch: 1;
+                                        background: #ffffff;
+                                        border-color: #d5dedf;
+                                        border-width: 1px;
+                                        border-radius: 6px;
+                                        drop-shadow-blur: 10px;
+                                        drop-shadow-color: #1c282d18;
+                                        drop-shadow-offset-y: 2px;
+                                        VerticalLayout {
+                                            spacing: 0px;
+                                            Rectangle { height: 50px; Rectangle { y: parent.height - 1px; width: parent.width; height: 1px; background: #d5dedf; } HorizontalLayout { padding-left: 15px; padding-right: 15px; Text { text: "检查结果"; color: #1c282d; font-size: 16px; font-weight: 400; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; } Text { text: "刚刚完成 · 0.8 秒"; color: #66747b; font-size: 12px; vertical-alignment: center; } } }
+                                            Rectangle { height: 64px; Rectangle { y: parent.height - 1px; width: parent.width; height: 1px; background: #d5dedf; } Rectangle { x: 15px; y: 18px; width: 27px; height: 27px; border-radius: 14px; background: #d9f0ec; Text { width: parent.width; height: parent.height; text: "√"; color: #005f59; font-size: 14px; font-weight: 400; horizontal-alignment: center; vertical-alignment: center; } } Text { x: 53px; y: 12px; width: parent.width - 204px; height: 18px; text: "系统网络接口"; color: #1c282d; font-size: 13px; font-weight: 400; } Text { x: 53px; y: 34px; width: parent.width - 204px; height: 17px; text: "检测到 3 个可用接口"; color: #66747b; font-size: 12px; } Text { x: parent.width - 139px; y: 12px; width: 124px; height: 18px; text: "通过"; color: #1c282d; font-size: 12px; font-weight: 400; horizontal-alignment: right; } Text { x: parent.width - 139px; y: 34px; width: 124px; height: 17px; text: "可用于互联网连接"; color: #66747b; font-size: 12px; horizontal-alignment: right; } }
+                                            Rectangle { height: 64px; Rectangle { y: parent.height - 1px; width: parent.width; height: 1px; background: #d5dedf; } Rectangle { x: 15px; y: 18px; width: 27px; height: 27px; border-radius: 14px; background: #d9f0ec; Text { width: parent.width; height: parent.height; text: "√"; color: #005f59; font-size: 14px; font-weight: 400; horizontal-alignment: center; vertical-alignment: center; } } Text { x: 53px; y: 12px; width: parent.width - 204px; height: 18px; text: "UDP 与 NAT"; color: #1c282d; font-size: 13px; font-weight: 400; } Text { x: 53px; y: 34px; width: parent.width - 204px; height: 17px; text: "可尝试直接点对点连接"; color: #66747b; font-size: 12px; } Text { x: parent.width - 139px; y: 12px; width: 124px; height: 18px; text: "通过"; color: #1c282d; font-size: 12px; font-weight: 400; horizontal-alignment: right; } Text { x: parent.width - 139px; y: 34px; width: 124px; height: 17px; text: "预计直连优先"; color: #66747b; font-size: 12px; horizontal-alignment: right; } }
+                                            Rectangle { height: 64px; Rectangle { y: parent.height - 1px; width: parent.width; height: 1px; background: #d5dedf; } Rectangle { x: 15px; y: 18px; width: 27px; height: 27px; border-radius: 14px; background: #d9f0ec; Text { width: parent.width; height: parent.height; text: "√"; color: #005f59; font-size: 14px; font-weight: 400; horizontal-alignment: center; vertical-alignment: center; } } Text { x: 53px; y: 12px; width: parent.width - 204px; height: 18px; text: "默认中继"; color: #1c282d; font-size: 13px; font-weight: 400; } Text { x: 53px; y: 34px; width: parent.width - 204px; height: 17px; text: "HTTPS 回退路径可达"; color: #66747b; font-size: 12px; } Text { x: parent.width - 139px; y: 12px; width: 124px; height: 18px; text: "通过"; color: #1c282d; font-size: 12px; font-weight: 400; horizontal-alignment: right; } Text { x: parent.width - 139px; y: 34px; width: 124px; height: 17px; text: "延迟 72 ms"; color: #66747b; font-size: 12px; horizontal-alignment: right; } }
+                                            Rectangle { height: 64px; vertical-stretch: 0; Rectangle { x: 15px; y: 18px; width: 27px; height: 27px; border-radius: 14px; background: #fbefc9; Text { width: parent.width; height: parent.height; text: "!"; color: #8a6507; font-size: 14px; font-weight: 400; horizontal-alignment: center; vertical-alignment: center; } } Text { x: 53px; y: 12px; width: parent.width - 204px; height: 18px; text: "局域网地址"; color: #1c282d; font-size: 13px; font-weight: 400; } Text { x: 53px; y: 34px; width: parent.width - 204px; height: 17px; text: "当前网络未公布可连接的私网地址"; color: #66747b; font-size: 12px; } Text { x: parent.width - 139px; y: 12px; width: 124px; height: 18px; text: "提示"; color: #1c282d; font-size: 12px; font-weight: 400; horizontal-alignment: right; } Text { x: parent.width - 139px; y: 34px; width: 124px; height: 17px; text: "局域网模式可能失败"; color: #66747b; font-size: 12px; horizontal-alignment: right; } }
+                                            Rectangle { height: 60px; Rectangle { x: 0px; y: 0px; width: parent.width; height: 1px; background: #d5dedf; } HorizontalLayout { padding-left: 15px; padding-right: 15px; Rectangle { horizontal-stretch: 1; } Rectangle { width: 80px; height: 60px; Button { y: 13px; width: parent.width; height: 34px; text: "复制报告"; clicked => { root.status-text = root.diagnostics-text; } } } Rectangle { width: 7px; } Rectangle { width: 108px; height: 60px; Button { y: 13px; width: parent.width; height: 34px; text: "查看完整日志"; clicked => { root.status-text = "已展开完整诊断日志。"; } } } } }
+                                        }
+                                    }
+                                    Rectangle {
+                                        width: 358px;
+                                        vertical-stretch: 1;
+                                        background: #ffffff;
+                                        border-color: #d5dedf;
+                                        border-width: 1px;
+                                        border-radius: 6px;
+                                        drop-shadow-blur: 10px;
+                                        drop-shadow-color: #1c282d18;
+                                        drop-shadow-offset-y: 2px;
+                                        VerticalLayout {
+                                            spacing: 0px;
+                                            Rectangle { height: 50px; Rectangle { y: parent.height - 1px; width: parent.width; height: 1px; background: #d5dedf; } HorizontalLayout { padding-left: 15px; padding-right: 15px; Text { text: "当前路径"; color: #1c282d; font-size: 16px; font-weight: 400; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; } Text { text: "发送 project-backup.zip"; color: #66747b; font-size: 12px; vertical-alignment: center; } } }
+                                            VerticalLayout {
+                                                padding: 15px;
+                                                spacing: 0px;
+                                                Rectangle { height: 58px; Rectangle { x: 9px; y: 22px; width: 1px; height: 36px; background: #b9c9c8; } Rectangle { x: 0px; y: 0px; width: 20px; height: 20px; border-radius: 10px; background: #08766f; Text { width: parent.width; height: parent.height; text: "1"; color: #ffffff; font-size: 11px; font-weight: 400; horizontal-alignment: center; vertical-alignment: center; } } Text { x: 40px; y: 0px; width: parent.width - 40px; height: 18px; text: "本机端点"; color: #1c282d; font-size: 13px; font-weight: 400; } Text { x: 40px; y: 20px; width: parent.width - 40px; height: 17px; text: "已绑定，等待接收方连接"; color: #66747b; font-size: 12px; } }
+                                                Rectangle { height: 58px; Rectangle { x: 9px; y: 22px; width: 1px; height: 36px; background: #b9c9c8; } Rectangle { x: 0px; y: 0px; width: 20px; height: 20px; border-radius: 10px; background: #08766f; Text { width: parent.width; height: parent.height; text: "2"; color: #ffffff; font-size: 11px; font-weight: 400; horizontal-alignment: center; vertical-alignment: center; } } Text { x: 40px; y: 0px; width: parent.width - 40px; height: 18px; text: "直接连接尝试"; color: #1c282d; font-size: 13px; font-weight: 400; } Text { x: 40px; y: 20px; width: parent.width - 40px; height: 17px; text: "预计 3 秒内完成快速路径检测"; color: #66747b; font-size: 12px; } }
+                                                Rectangle { height: 39px; Rectangle { x: 0px; y: 0px; width: 20px; height: 20px; border-radius: 10px; background: #08766f; Text { width: parent.width; height: parent.height; text: "3"; color: #ffffff; font-size: 11px; font-weight: 400; horizontal-alignment: center; vertical-alignment: center; } } Text { x: 40px; y: 0px; width: parent.width - 40px; height: 18px; text: "HTTPS 中继回退"; color: #1c282d; font-size: 13px; font-weight: 400; } Text { x: 40px; y: 20px; width: parent.width - 40px; height: 17px; text: "仅在直连不可用时启用"; color: #66747b; font-size: 12px; } }
+                                                Rectangle { height: 12px; }
+                                                Rectangle { height: 36px; background: #fff8f5; Rectangle { x: 0px; y: 0px; width: 3px; height: parent.height; background: #b6532d; } Text { x: 10px; y: 10px; width: parent.width - 18px; height: 16px; text: "这是状态解释，不会从此页面启动或托管 Relay 服务。"; color: #5d514b; font-size: 12px; wrap: word-wrap; } }
+                                                Rectangle { vertical-stretch: 1; }
+                                            }
+                                        }
+                                    }
+                                }
+                                Rectangle {
+                                    height: 138px;
+                                    background: #ffffff;
+                                    border-color: #d5dedf;
+                                    border-width: 1px;
+                                    border-radius: 6px;
+                                    drop-shadow-blur: 10px;
+                                    drop-shadow-color: #1c282d18;
+                                    drop-shadow-offset-y: 2px;
+                                    VerticalLayout {
+                                        spacing: 0px;
+                                        Rectangle { height: 52px; Rectangle { y: parent.height - 1px; width: parent.width; height: 1px; background: #d5dedf; } HorizontalLayout { padding-left: 15px; padding-right: 15px; Text { text: "诊断日志摘录"; color: #1c282d; font-size: 16px; font-weight: 400; vertical-alignment: center; } Rectangle { horizontal-stretch: 1; } Text { text: "仅演示文本"; color: #66747b; font-size: 12px; vertical-alignment: center; } } }
+                                        Rectangle { vertical-stretch: 1; background: #1d2a30; Text { x: 15px; y: 15px; width: parent.width - 30px; height: parent.height - 30px; text: "12:42:03   已完成  端点初始化\n12:42:03   已完成  默认中继可达，延迟 72 ms\n12:42:04   提示    未发现可用局域网地址"; color: #dfe9e8; font-size: 12px; vertical-alignment: top; } }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                Rectangle {
+                    visible: root.page == 3;
+                    width: parent.width;
+                    height: parent.height;
+                    background: #ffffff;
+                    VerticalLayout {
+                        width: parent.width;
+                        height: parent.height;
+                        spacing: 0px;
+                        Rectangle {
+                            height: 106px;
+                            background: #f7f9f9;
+                            border-width: 0px;
+                            Rectangle { y: parent.height - 1px; width: parent.width; height: 1px; background: #d5dedf; }
+                            Text { x: 22px; y: 19px; text: "应用偏好"; color: #08766f; font-size: 11px; font-weight: 400; }
+                            Text { x: 22px; y: 39px; text: "设置"; color: #1c282d; font-size: 20px; font-weight: 400; }
+                            Text { x: 22px; y: 70px; text: "管理界面、接收行为、发送策略和本地队列数据库。"; color: #66747b; font-size: 12px; }
+                            Button { x: parent.width - 102px; y: 54px; width: 80px; height: 34px; text: "恢复默认"; clicked => { root.settings-section = 0; root.setting-check-incomplete = true; root.setting-close-to-tray = false; root.setting-open-directory = false; root.status-text = "已恢复默认设置。"; } }
+                        }
+                        Rectangle {
+                            vertical-stretch: 1;
+                            background: #ffffff;
+                            HorizontalLayout {
+                                width: parent.width;
+                                height: parent.height;
+                                spacing: 0px;
+                                Rectangle {
+                                    width: 240px;
+                                    vertical-stretch: 1;
+                                    background: #fbfcfc;
+                                    border-color: #d5dedf;
+                                    border-width: 1px;
+                                    VerticalLayout {
+                                        width: parent.width;
+                                        height: parent.height;
+                                        padding: 12px;
+                                        spacing: 4px;
+                                        Text { height: 16px; vertical-stretch: 0; text: "设置分类"; color: #66747b; font-size: 11px; font-weight: 400; }
+                                        Rectangle { height: 2px; }
+                                        SettingsNavButton { text: "通用"; icon: "A"; active: root.settings-section == 0; clicked => { root.settings-section = 0; root.status-text = "通用设置。"; } }
+                                        SettingsNavButton { text: "接收"; icon: "↓"; active: root.settings-section == 1; clicked => { root.settings-section = 1; root.status-text = "接收设置。"; } }
+                                        SettingsNavButton { text: "传输"; icon: "↗"; active: root.settings-section == 2; clicked => { root.settings-section = 2; root.status-text = "传输设置。"; } }
+                                        SettingsNavButton { text: "外观"; icon: "◐"; active: root.settings-section == 3; clicked => { root.settings-section = 3; root.status-text = "外观设置。"; } }
+                                        SettingsNavButton { text: "本地数据"; icon: "DB"; active: root.settings-section == 4; clicked => { root.settings-section = 4; root.status-text = "SQLite 保存传输队列与任务详情。"; } }
+                                        Rectangle { vertical-stretch: 1; }
+                                    }
+                                }
+                                ScrollView {
+                                    horizontal-stretch: 1;
+                                    vertical-stretch: 1;
+                                    VerticalLayout {
+                                        padding-left: 24px;
+                                        padding-right: 24px;
+                                        padding-top: 20px;
+                                        padding-bottom: 20px;
+                                        spacing: 0px;
+                                        Rectangle {
+                                            visible: root.settings-section == 0;
+                                            height: root.settings-section == 0 ? 338px : 0px;
+                                            VerticalLayout {
+                                                spacing: 0px;
+                                                SettingsPaneHeader { title: "通用"; subtitle: "应用启动与本机基础行为。"; save => { root.status-text = "已保存通用设置。"; } }
+                                                Rectangle { height: 16px; }
+                                                Rectangle { height: 19px; Text { width: parent.width; height: parent.height; text: "启动"; color: #1c282d; font-size: 14px; font-weight: 400; vertical-alignment: center; } }
+                                                Rectangle { height: 11px; }
+                                                SettingsToggleRow { title: "启动时检查未完成任务"; subtitle: "发现 SQLite 队列中的中断任务时显示恢复入口。"; checked <=> root.setting-check-incomplete; }
+                                                SettingsToggleRow { title: "关闭到托盘"; subtitle: "关闭窗口后保留后台传输进程。"; checked <=> root.setting-close-to-tray; }
+                                                Rectangle { height: 1px; background: #d5dedf; }
+                                                Rectangle { height: 22px; }
+                                                Rectangle { height: 16px; Text { width: parent.width; height: parent.height; text: "设置会保存到本机配置。"; color: #66747b; font-size: 12px; vertical-alignment: center; } }
+                                            }
+                                        }
+                                        Rectangle {
+                                            visible: root.settings-section == 1;
+                                            height: root.settings-section == 1 ? 280px : 0px;
+                                            VerticalLayout {
+                                                spacing: 0px;
+                                                SettingsPaneHeader { title: "接收"; subtitle: "接收完成后的本机界面动作。"; save => { root.status-text = "已保存接收设置。"; } }
+                                                Rectangle { height: 16px; }
+                                                Rectangle { height: 19px; Text { width: parent.width; height: parent.height; text: "完成动作"; color: #1c282d; font-size: 14px; font-weight: 400; vertical-alignment: center; } }
+                                                Rectangle { height: 11px; }
+                                                SettingsToggleRow { title: "完成后打开目录"; subtitle: "成功接收后在文件管理器显示结果。"; checked <=> root.setting-open-directory; }
+                                                Rectangle { height: 1px; background: #d5dedf; }
+                                                Rectangle { vertical-stretch: 1; }
+                                                Text { text: "保存目录由每个接收任务单独选择。"; color: #66747b; font-size: 12px; }
+                                            }
+                                        }
+                                        Rectangle {
+                                            visible: root.settings-section == 2;
+                                            height: root.settings-section == 2 ? 280px : 0px;
+                                            VerticalLayout {
+                                                spacing: 0px;
+                                                SettingsPaneHeader { title: "传输"; subtitle: "发送任务的生命周期和可见性。"; save => { root.status-text = "已保存传输设置。"; } }
+                                                Rectangle { height: 16px; }
+                                                Rectangle { height: 19px; Text { width: parent.width; height: parent.height; text: "传输码"; color: #1c282d; font-size: 14px; font-weight: 400; vertical-alignment: center; } }
+                                                Rectangle { height: 11px; }
+                                                Rectangle { height: 57px; Text { x: 0px; y: 7px; width: parent.width - 240px; height: 18px; text: "传输码有效期"; color: #1c282d; font-size: 13px; font-weight: 400; } Text { x: 0px; y: 28px; width: parent.width - 240px; height: 17px; text: "仅影响发送页新建的传输码。"; color: #66747b; font-size: 12px; } ComboBoxField { x: parent.width - 220px; y: 12px; width: 220px; values: ["24 小时", "1 小时", "直到手动停止"]; } }
+                                                Rectangle { height: 1px; background: #d5dedf; }
+                                                Rectangle { vertical-stretch: 1; }
+                                                Text { text: "发送方式、配置和保持发送均在创建传输时选择。"; color: #66747b; font-size: 12px; }
+                                            }
+                                        }
+                                        Rectangle {
+                                            visible: root.settings-section == 3;
+                                            height: root.settings-section == 3 ? 390px : 0px;
+                                            VerticalLayout {
+                                                spacing: 0px;
+                                                SettingsPaneHeader { title: "外观"; subtitle: "显示语言、主题和任务列表密度。"; save => { root.status-text = "已保存外观设置。"; } }
+                                                Rectangle { height: 16px; }
+                                                Rectangle { height: 19px; Text { width: parent.width; height: parent.height; text: "界面"; color: #1c282d; font-size: 14px; font-weight: 400; vertical-alignment: center; } }
+                                                Rectangle { height: 11px; }
+                                                Rectangle { height: 57px; Text { x: 0px; y: 7px; width: parent.width - 240px; height: 18px; text: "显示语言"; color: #1c282d; font-size: 13px; font-weight: 400; } Text { x: 0px; y: 28px; width: parent.width - 240px; height: 17px; text: "重启应用后生效。"; color: #66747b; font-size: 12px; } ComboBoxField { x: parent.width - 220px; y: 12px; width: 220px; values: ["简体中文", "English"]; } }
+                                                Rectangle { height: 57px; Text { x: 0px; y: 7px; width: parent.width - 240px; height: 18px; text: "主题"; color: #1c282d; font-size: 13px; font-weight: 400; } Text { x: 0px; y: 28px; width: parent.width - 240px; height: 17px; text: "默认跟随操作系统设置。"; color: #66747b; font-size: 12px; } ComboBoxField { x: parent.width - 220px; y: 12px; width: 220px; values: ["跟随系统", "浅色", "深色"]; } }
+                                                Rectangle { height: 57px; Text { x: 0px; y: 7px; width: parent.width - 240px; height: 18px; text: "任务列表密度"; color: #1c282d; font-size: 13px; font-weight: 400; } Text { x: 0px; y: 28px; width: parent.width - 240px; height: 17px; text: "影响传输队列的单行高度。"; color: #66747b; font-size: 12px; } ComboBoxField { x: parent.width - 220px; y: 12px; width: 220px; values: ["紧凑", "标准"]; } }
+                                                Rectangle { vertical-stretch: 1; }
+                                            }
+                                        }
+                                        Rectangle {
+                                            visible: root.settings-section == 4;
+                                            height: root.settings-section == 4 ? 430px : 0px;
+                                            VerticalLayout {
+                                                spacing: 0px;
+                                                SettingsPaneHeader { title: "本地数据"; subtitle: "SQLite 保存传输队列、任务状态和右侧详情记录。"; save => { root.status-text = "已保存本地数据设置。"; } }
+                                                Rectangle { height: 16px; }
+                                                Rectangle { height: 19px; Text { width: parent.width; height: parent.height; text: "SQLite 队列数据库"; color: #1c282d; font-size: 14px; font-weight: 400; vertical-alignment: center; } }
+                                                Rectangle { height: 11px; }
+                                                Rectangle {
+                                                    height: 65px;
+                                                    HorizontalLayout {
+                                                        width: parent.width;
+                                                        height: parent.height;
+                                                        spacing: 8px;
+                                                    Rectangle { horizontal-stretch: 1; height: 65px; background: #eff9f7; border-color: #9fcfc8; border-width: 1px; border-radius: 5px; drop-shadow-blur: 8px; drop-shadow-color: #1c282d14; VerticalLayout { padding: 10px; spacing: 2px; Text { text: "数据库状态"; color: #66747b; font-size: 12px; } Text { text: "可用"; color: #005f59; font-size: 16px; font-weight: 400; } } }
+                                                    Rectangle { horizontal-stretch: 1; height: 65px; background: #fbfcfc; border-color: #d5dedf; border-width: 1px; border-radius: 5px; drop-shadow-blur: 8px; drop-shadow-color: #1c282d14; VerticalLayout { padding: 10px; spacing: 2px; Text { text: "当前记录"; color: #66747b; font-size: 12px; } Text { text: root.database-summary; color: #1c282d; font-size: 14px; font-weight: 400; overflow: elide; } } }
+                                                    Rectangle { horizontal-stretch: 1; height: 65px; background: #fbfcfc; border-color: #d5dedf; border-width: 1px; border-radius: 5px; drop-shadow-blur: 8px; drop-shadow-color: #1c282d14; VerticalLayout { padding: 10px; spacing: 2px; Text { text: "队列存储"; color: #66747b; font-size: 12px; } Text { text: "SQLite"; color: #1c282d; font-size: 16px; font-weight: 400; } } }
+                                                    }
+                                                }
+                                                Rectangle { height: 15px; }
+                                                Rectangle { height: 62px; Text { x: 0px; y: 6px; width: parent.width - 440px; height: 18px; text: "数据库文件"; color: #1c282d; font-size: 13px; font-weight: 400; } Text { x: 0px; y: 27px; width: parent.width - 440px; height: 17px; text: "传输队列和任务详情的唯一持久化来源。"; color: #66747b; font-size: 12px; } TextField { x: parent.width - 420px; y: 15px; width: 353px; text: root.database-path; read-only: true; } Button { x: parent.width - 60px; y: 15px; width: 60px; height: 32px; text: "打开目录"; clicked => { root.status-text = "数据库目录：" + root.database-path; } }
+                                                }
+                                                Rectangle { height: 62px; Text { x: 0px; y: 6px; width: parent.width - 240px; height: 18px; text: "已完成记录保留"; color: #1c282d; font-size: 13px; font-weight: 400; } Text { x: 0px; y: 27px; width: parent.width - 240px; height: 17px; text: "超过保留期限的完成任务会在清理时删除。"; color: #66747b; font-size: 12px; } ComboBoxField { x: parent.width - 220px; y: 15px; width: 220px; values: ["30 天", "7 天", "永久保留"]; } }
+                                                Rectangle { height: 14px; }
+                                                Rectangle { height: 34px; HorizontalLayout { width: parent.width; height: parent.height; spacing: 7px; Button { width: 106px; height: 34px; text: "清理已完成记录"; clicked => { root.clear-completed(); } } Button { width: 76px; height: 34px; text: "整理数据库"; clicked => { root.compact-database(); } } DangerButton { width: 128px; height: 34px; text: "删除全部传输历史"; clicked => { root.request-clear-history(); } } Rectangle { horizontal-stretch: 1; } } }
+                                                Rectangle { vertical-stretch: 1; }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            Rectangle {
+                visible: false;
+                height: 0px;
+                background: #ffffff;
+                border-color: #d5dedf;
+                border-width: 1px;
+                Text { x: 14px; text: root.status-text; color: #66747b; font-size: 11px; vertical-alignment: center; }
+            }
+    }
+
+    Rectangle {
+        visible: root.confirm-clear-history;
+        width: parent.width;
+        height: parent.height;
+        background: #1c282d55;
+        Rectangle {
+            width: 390px;
+            height: 174px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: #ffffff;
+            border-color: #d5dedf;
+            border-width: 1px;
+            border-radius: 7px;
+            drop-shadow-blur: 16px;
+            drop-shadow-color: #1c282d33;
+            drop-shadow-offset-y: 5px;
+            VerticalLayout {
+                padding: 18px;
+                spacing: 10px;
+                Text { text: "删除全部传输历史？"; color: #1c282d; font-size: 17px; font-weight: 800; }
+                Text { text: "任务、传输码和详情记录会从本机 SQLite 队列中移除。"; color: #4f6067; wrap: word-wrap; vertical-stretch: 1; }
+                HorizontalLayout {
+                    Rectangle { horizontal-stretch: 1; }
+                    Button { text: "取消"; clicked => { root.confirm-clear-history = false; } }
+                    Button { text: "确认删除"; primary: true; clicked => { root.clear-history(); } }
+                }
+            }
+        }
+    }
+}

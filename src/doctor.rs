@@ -19,6 +19,8 @@ pub async fn run() -> Result<()> {
     );
     report_s3_config(&s3_config_path);
     report_webdav_config(&s3_config_path);
+    report_ftp_config(&s3_config_path);
+    report_sftp_config(&s3_config_path);
 
     println!("relay modes: self-signed or manual TLS, always relay-only");
     println!("relay start: ii relay --public https://PUBLIC_HOST[:PORT]");
@@ -89,5 +91,59 @@ fn report_webdav_config(path: &std::path::Path) {
             }
         }
         Err(err) => println!("webdav config parse failed: {err:#}"),
+    }
+}
+
+fn report_ftp_config(path: &std::path::Path) {
+    if !path.exists() {
+        return;
+    }
+    match storage::load_config(path) {
+        Ok(config) => match config.storage.ftp.get("default") {
+            Some(ftp) => {
+                println!("ftp profile: default");
+                println!("ftp url: {}", ftp.url);
+                println!("ftp remote dir: {}", ftp.remote_dir);
+                println!(
+                    "ftp credentials: {}",
+                    if ftp.username.is_empty() || ftp.password.is_empty() {
+                        "missing"
+                    } else {
+                        "configured"
+                    }
+                );
+            }
+            None if config.storage.ftp.is_empty() => println!("ftp profile: not configured"),
+            None => println!("ftp profile configured but default profile is missing"),
+        },
+        Err(err) => println!("ftp config parse failed: {err:#}"),
+    }
+}
+
+fn report_sftp_config(path: &std::path::Path) {
+    if !path.exists() {
+        return;
+    }
+    match storage::load_config(path) {
+        Ok(config) => match config.storage.sftp.get("default") {
+            Some(sftp) => {
+                println!("sftp profile: default");
+                println!("sftp host: {}:{}", sftp.host, sftp.port);
+                println!("sftp remote dir: {}", sftp.remote_dir);
+                println!("sftp auth: {:?}", sftp.auth);
+                println!(
+                    "sftp credentials: {}",
+                    match sftp.auth {
+                        storage::SftpAuth::Password if sftp.password.is_empty() => "missing",
+                        storage::SftpAuth::PrivateKey if sftp.private_key_path.is_none() =>
+                            "missing",
+                        _ => "configured",
+                    }
+                );
+            }
+            None if config.storage.sftp.is_empty() => println!("sftp profile: not configured"),
+            None => println!("sftp profile configured but default profile is missing"),
+        },
+        Err(err) => println!("sftp config parse failed: {err:#}"),
     }
 }

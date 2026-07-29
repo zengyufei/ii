@@ -23,7 +23,7 @@
 
 直发目录 / 一次即走 / 持续发送 / 自动复制到粘贴板或落盘
 
-自动找路 / 局域网优先 / 可公网中继或 `--s3` / `--webdav` 中继
+自动找路 / 局域网优先 / 可公网中继或 `--s3` / `--webdav` / `--ftp` / `--sftp` 中继
 
 断点续收 / 秒传跳过 / 冲突覆盖 / 支持传完清理中转
 
@@ -149,26 +149,58 @@ ii send .\video.mp4 --webdav
 ii recv ii1k7v...x9a
 ```
 
+通过 FTP 或 SFTP 中转：
+
+```powershell
+ii send .\video.mp4 --ftp
+ii send .\video.mp4 --sftp
+ii recv ii1k7v...x9a
+```
+
+FTP 只支持明文 `ftp://`，账号、文件和控制命令都可能被网络上的人读取。SFTP 支持密码和 SSH 私钥认证；每次连接会显示并自动接受服务器的 SSH SHA-256 主机指纹。
+
 选择指定后端 profile：
 
 ```powershell
 ii send .\video.mp4 --s3 --profile work
 ii send .\video.mp4 --webdav --profile nas
+ii send .\video.mp4 --ftp --profile legacy
+ii send .\video.mp4 --sftp --profile server
 ```
 
-如果接收方没有 WebDAV 配置，可以用便携 ticket：
+如果接收方没有后端配置，可以用便携 ticket：
 
 ```powershell
 ii send .\video.mp4 --webdav -p
+ii send .\video.mp4 --ftp -p
+ii send .\video.mp4 --sftp -p
 ```
 
-`-p` 会把 WebDAV URL、用户名和密码写进 ticket，方便但不安全，只适合你信任 ticket 接收方的场景。
+`-p` 会把 WebDAV/FTP 的 URL、用户名和密码写进 ticket；SFTP 密码 ticket 会写入密码，SFTP 私钥 ticket 会写入私钥文本和口令。ticket 只有编码，没有加密，方便但不安全，只适合你信任 ticket 接收方的场景。
 
-接收成功后，`-p` ticket 内的 WebDAV 配置会写入接收端本机 `ii.toml`。如果希望接收后清理 WebDAV 上的对象，可以加 `-d`：
+接收成功后，`-p` ticket 内的配置会写入接收端本机 `ii.toml`；便携 SFTP 私钥会保存为独立密钥文件，配置中只保存路径。如果希望接收后清理后端对象，可以加 `-d`：
 
 ```powershell
 ii send .\video.mp4 --webdav -p -d
+ii send .\video.mp4 --sftp -p -d
 ```
+
+SFTP 私钥 profile 示例：
+
+```toml
+[storage.sftp.server]
+host = "sftp.example.com"
+port = 22
+username = "ii"
+remote_dir = "ii/"
+auth = "private-key"
+private_key_path = "C:\\Users\\you\\.ssh\\id_ed25519"
+private_key_passphrase = "optional-passphrase"
+```
+
+## 图形界面
+
+Release 同时提供 `ii-gui`。它复用 `ii` 的传输逻辑，支持默认自动路径、仅局域网、指定 HTTPS relay、S3 和 WebDAV，并保存本机传输队列和这些 profile。FTP/SFTP 目前只在 CLI 中提供。
 
 ## 诊断
 
@@ -223,7 +255,7 @@ ii relay --tls relay.example.com -H 8443 --cert D:\certs\fullchain.pem --key D:\
 ii send .\video.mp4 --relay https://relay.example.com:8443
 ```
 
-手工证书模式不带 `-k`，客户端使用系统正常 TLS 校验。两种 `--relay` 都只走 HTTPS relay，不尝试 UDP 或直连；完整端口、状态路径和安全边界见 [ii.md](ii.md)。
+手工证书模式不带 `-k`，客户端使用系统正常 TLS 校验。两种 `--relay` 都只走 HTTPS relay，不尝试 UDP 或直连；完整端口、状态路径和安全边界见 [ii.md](ii.md)。FTP 和 SFTP 的配置、ticket 和安全限制分别见 [ftp.md](ftp.md) 与 [sftp.md](sftp.md)。
 
 ## 详细手册
 

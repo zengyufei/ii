@@ -1,0 +1,357 @@
+<!doctype html>
+<!-- 草稿：以方案 B 的双操作台为主，融合方案 C 的队列与详情检查器。 -->
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ii 传输界面草稿</title>
+  <link rel="icon" href="../logo.svg" type="image/svg+xml">
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #1c282d;
+      --muted: #66747b;
+      --border: #d5dedf;
+      --surface: #ffffff;
+      --canvas: #eef3f3;
+      --soft: #f7f9f9;
+      --sea: #08766f;
+      --sea-dark: #005f59;
+      --sea-soft: #d9f0ec;
+      --orange: #b6532d;
+      --orange-soft: #f9e6dc;
+      --yellow: #8a6507;
+      --yellow-soft: #fbefc9;
+      --shadow: 0 14px 36px rgba(28, 40, 45, .12);
+    }
+
+    * { box-sizing: border-box; }
+    html { background: var(--canvas); }
+    body {
+      min-width: 320px;
+      margin: 0;
+      color: var(--ink);
+      font: 14px/1.35 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    button, input, textarea { font: inherit; }
+    button { cursor: pointer; }
+    button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid #3d9c96; outline-offset: 2px; }
+
+    .app {
+      width: min(1400px, calc(100vw - 28px));
+      min-height: calc(100vh - 28px);
+      margin: 14px auto;
+      overflow: hidden;
+      border: 1px solid #cbd6d7;
+      border-radius: 7px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+    .topbar {
+      height: 54px;
+      display: flex;
+      align-items: center;
+      gap: 18px;
+      padding: 0 18px;
+      border-bottom: 1px solid var(--border);
+    }
+    .brand { display: flex; align-items: center; gap: 8px; font-weight: 800; }
+    .brand img { width: 25px; height: 25px; }
+    .brand span { letter-spacing: .02em; }
+    .brand small { color: var(--muted); font-weight: 650; }
+    .nav { display: flex; align-items: stretch; gap: 5px; height: 100%; }
+    .nav button, .nav a, .header-action, .text-button, .tool-button {
+      border: 0;
+      border-radius: 4px;
+      background: transparent;
+      color: var(--muted);
+    }
+    .nav button, .nav a { position: relative; display: flex; align-items: center; padding: 0 9px; text-decoration: none; }
+    .nav button.active, .nav a.active { color: var(--sea); font-weight: 760; }
+    .nav button.active::after, .nav a.active::after { position: absolute; right: 9px; bottom: 0; left: 9px; height: 2px; background: var(--sea); content: ""; }
+    .nav button:hover, .header-action:hover, .text-button:hover, .tool-button:hover { background: #edf2f2; }
+    .header-actions { display: flex; gap: 6px; margin-left: auto; }
+    .header-action { padding: 5px 8px; }
+    .status-dot { width: 9px; height: 9px; margin: auto 2px; border-radius: 50%; background: var(--sea); }
+    .github-link { display: grid; width: 29px; height: 29px; place-items: center; border-radius: 4px; color: var(--muted); text-decoration: none; }
+    .github-link:hover { background: #edf2f2; color: var(--ink); }
+    .github-link svg { width: 17px; height: 17px; stroke: currentColor; stroke-width: 2; fill: none; }
+    .version-info { display: flex; gap: 6px; color: var(--muted); font-size: 11px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+    .version-info span + span { padding-left: 6px; border-left: 1px solid var(--border); }
+
+    .workbench { padding: 16px 18px 18px; border-bottom: 1px solid var(--border); background: var(--soft); }
+    .section-label { margin: 0 0 8px; color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; }
+    .action-deck { display: grid; grid-template-columns: 1.15fr .85fr; gap: 12px; }
+    .action-panel {
+      min-width: 0;
+      padding: 15px;
+      border: 1px solid var(--border);
+      border-radius: 6px;
+      background: var(--surface);
+    }
+    .panel-heading { display: flex; align-items: center; gap: 10px; margin-bottom: 13px; }
+    .panel-mark { display: grid; width: 28px; height: 28px; place-items: center; border-radius: 50%; background: var(--sea); color: white; font-weight: 850; }
+    .panel-heading h1 { margin: 0; font-size: 16px; letter-spacing: 0; }
+    .panel-heading p { margin: 2px 0 0; color: var(--muted); font-size: 12px; }
+    .source-row { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--border); border-bottom: 1px solid var(--border); }
+    .file-type { display: grid; width: 35px; height: 38px; place-items: center; background: var(--sea-soft); color: var(--sea-dark); font-size: 10px; font-weight: 850; }
+    .file-name { overflow: hidden; font-weight: 780; text-overflow: ellipsis; white-space: nowrap; }
+    .file-meta { margin-top: 2px; color: var(--muted); font-size: 12px; }
+    .text-button { padding: 5px 7px; color: var(--sea); font-weight: 730; }
+    .send-options { display: flex; align-items: flex-end; justify-content: space-between; gap: 12px; margin-top: 12px; }
+    .send-settings { min-width: 0; flex: 1; }
+    .mode-group { display: flex; flex-wrap: wrap; gap: 5px; }
+    .mode {
+      min-height: 27px;
+      padding: 4px 8px;
+      border: 1px solid var(--border);
+      border-radius: 4px;
+      background: white;
+      color: #4e5e65;
+      font-size: 12px;
+    }
+    .mode.active { border-color: var(--sea); background: var(--sea-soft); color: var(--sea-dark); font-weight: 760; }
+    .send-behavior { display: inline-flex; align-items: center; gap: 7px; margin-top: 8px; color: var(--muted); font-size: 12px; }
+    .keep-switch { position: relative; width: 38px; height: 22px; padding: 0; border: 0; border-radius: 999px; background: #aebbbc; }
+    .keep-switch::after { position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #fff; content: ""; transition: transform .15s; }
+    .keep-switch.on { background: var(--sea); }
+    .keep-switch.on::after { transform: translateX(16px); }
+    .backend-picker { display: none; grid-template-columns: auto minmax(170px, 260px) auto; align-items: center; gap: 7px; margin-top: 8px; color: var(--muted); font-size: 12px; }
+    .backend-picker.visible { display: grid; }
+    .backend-picker select { min-width: 0; min-height: 30px; padding: 4px 7px; border: 1px solid #bdcccd; border-radius: 4px; background: white; color: var(--ink); }
+    .backend-picker a { color: var(--sea); font-weight: 750; text-decoration: none; white-space: nowrap; }
+    .backend-picker a:hover { text-decoration: underline; }
+    .primary, .secondary, .danger {
+      min-height: 34px;
+      padding: 7px 11px;
+      border-radius: 4px;
+      font-weight: 760;
+      white-space: nowrap;
+    }
+    .primary { border: 1px solid var(--sea); background: var(--sea); color: white; }
+    .primary:hover { background: var(--sea-dark); }
+    .secondary { border: 1px solid var(--border); background: white; color: var(--ink); }
+    .secondary:hover { background: #f0f5f4; }
+    .danger { border: 1px solid #efb9ad; background: #fff7f4; color: var(--orange); }
+    .danger:hover { background: var(--orange-soft); }
+    .ticket-input {
+      display: block;
+      width: 100%;
+      height: 76px;
+      padding: 9px;
+      resize: none;
+      border: 1px solid #b9c8c9;
+      border-radius: 4px;
+      background: white;
+      color: #34464e;
+      font: 12px/1.45 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    .receive-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 11px; }
+    .destination { display: flex; align-items: center; gap: 7px; min-width: 0; color: var(--muted); font-size: 12px; }
+    .destination-path { overflow: hidden; color: var(--ink); font-weight: 780; text-overflow: ellipsis; white-space: nowrap; }
+    .destination-change { min-height: 32px; padding: 5px 10px; border: 1px solid var(--sea); border-radius: 4px; background: var(--sea-soft); color: var(--sea-dark); font-weight: 800; }
+    .destination-change:hover { background: #c5e6e0; }
+
+    .console { background: var(--surface); }
+    .console-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 13px 18px; border-bottom: 1px solid var(--border); }
+    .console-title { display: flex; align-items: baseline; gap: 8px; }
+    .console-title h2 { margin: 0; font-size: 16px; letter-spacing: 0; }
+    .console-title span { color: var(--muted); font-size: 12px; }
+    .console-tools { display: flex; align-items: center; gap: 7px; }
+    .search { width: 168px; min-height: 31px; padding: 5px 8px; border: 1px solid var(--border); border-radius: 4px; background: #fbfcfc; }
+    .tool-button { padding: 5px 7px; }
+    .console-body { display: grid; grid-template-columns: minmax(0, 1fr) 322px; min-height: 260px; }
+    .task-table { min-width: 0; }
+    .task-header, .task-row { display: grid; grid-template-columns: minmax(175px, 1.8fr) 78px 90px 88px minmax(150px, 1.1fr) 58px; gap: 11px; align-items: center; padding: 0 18px; }
+    .task-header { min-height: 30px; border-bottom: 1px solid var(--border); background: #f5f8f8; color: var(--muted); font-size: 10px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; }
+    .task-row { width: 100%; min-height: 58px; border: 0; border-bottom: 1px solid var(--border); background: white; color: var(--ink); text-align: left; }
+    .task-row:hover { background: #f7faf9; }
+    .task-row.selected { padding-left: 15px; border-left: 3px solid var(--sea); background: #eff8f6; }
+    .task-name { min-width: 0; overflow: hidden; font-weight: 780; text-overflow: ellipsis; white-space: nowrap; }
+    .task-name small { display: block; margin-top: 1px; overflow: hidden; color: var(--muted); font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
+    .tag { display: inline-flex; min-width: 67px; justify-content: center; padding: 3px 7px; border-radius: 999px; font-size: 12px; font-weight: 760; }
+    .tag.active { color: var(--sea-dark); background: var(--sea-soft); }
+    .tag.done { color: #54636a; background: #e8eeee; }
+    .tag.waiting { color: var(--yellow); background: var(--yellow-soft); }
+    .progress { display: grid; gap: 4px; color: var(--muted); font-size: 12px; }
+    .progress-bar { height: 6px; overflow: hidden; border-radius: 3px; background: #dfe8e8; }
+    .progress-bar b { display: block; width: 62%; height: 100%; background: var(--sea); }
+    .row-action { color: var(--sea); font-weight: 750; }
+
+    .inspector { padding: 15px 17px; border-left: 1px solid var(--border); background: #f8faf9; }
+    .inspector-header { display: flex; align-items: start; justify-content: space-between; gap: 8px; }
+    .inspector h2 { margin: 0; font-size: 17px; letter-spacing: 0; }
+    .inspector-subtitle { margin-top: 3px; color: var(--muted); font-size: 12px; }
+    .close { width: 26px; height: 26px; padding: 0; border: 0; border-radius: 4px; background: transparent; color: var(--muted); font-size: 19px; }
+    .close:hover { background: #e8eeee; }
+    .ticket { margin: 11px 0; padding: 8px; overflow: hidden; border: 1px solid #bfcccd; background: white; color: #42545c; font: 11px/1.35 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; text-overflow: ellipsis; white-space: nowrap; }
+    .detail-grid { display: grid; grid-template-columns: 80px 1fr; gap: 6px 9px; margin: 0; font-size: 12px; }
+    .detail-grid dt { color: var(--muted); }
+    .detail-grid dd { margin: 0; font-weight: 700; }
+    .inspector-actions { display: flex; gap: 7px; margin-top: 12px; }
+    .network-summary { display: grid; gap: 5px; margin-top: 13px; padding-top: 11px; border-top: 1px solid var(--border); font-size: 12px; }
+    .network-summary div { display: flex; justify-content: space-between; color: var(--muted); }
+    .network-summary strong { color: var(--ink); }
+    .draft-note {
+      position: fixed;
+      z-index: 5;
+      left: 18px;
+      bottom: 14px;
+      max-width: 330px;
+      padding: 8px 10px;
+      border-left: 3px solid var(--orange);
+      background: white;
+      box-shadow: 0 5px 18px rgba(28, 40, 45, .12);
+      color: #58666d;
+      font-size: 12px;
+    }
+    .draft-note strong { color: var(--orange); }
+
+    @media (min-width: 931px) {
+      .app { height: calc(100vh - 28px); display: flex; flex-direction: column; }
+      .console { display: flex; min-height: 0; flex: 1; flex-direction: column; }
+      .console-body { min-height: 0; flex: 1; }
+      .inspector { min-height: 100%; }
+    }
+
+    @media (max-width: 930px) {
+      .app { width: calc(100vw - 16px); margin: 8px auto; }
+      .action-deck, .console-body { grid-template-columns: 1fr; }
+      .console-body { min-height: auto; }
+      .inspector { border-top: 1px solid var(--border); border-left: 0; }
+      .task-table { overflow-x: auto; }
+      .task-header, .task-row { min-width: 720px; }
+    }
+    /* 自绘标题栏与统一层级阴影。 */
+    .app { border-radius: 12px; }
+    .topbar { height: 48px; gap: 14px; padding: 0 0 0 14px; border-radius: 11px 11px 0 0; background: #fbfcfc; -webkit-app-region: drag; }
+    .brand, .nav, .header-actions, .window-controls { -webkit-app-region: no-drag; }
+    .header-actions { align-items: center; }
+    .window-controls { display: flex; align-self: stretch; margin-left: 2px; }
+    .window-control { display: grid; width: 42px; place-items: center; border: 0; border-left: 1px solid var(--border); border-radius: 0; background: transparent; color: var(--muted); font-size: 17px; line-height: 1; }
+    .window-control:hover { background: #e8eeee; color: var(--ink); }
+    .window-control.close-window:hover { background: #c4523c; color: #fff; }
+    button, input, textarea, select { box-shadow: 0 2px 7px rgba(28, 40, 45, .12); transition: box-shadow .15s, transform .15s, background .15s; }
+    button:hover, input:hover, textarea:hover, select:hover { box-shadow: 0 4px 11px rgba(28, 40, 45, .16); }
+    .action-panel, .task-table, .inspector { box-shadow: 0 5px 14px rgba(28, 40, 45, .10); }
+    .send-behavior { margin: 0 0 8px; }
+    @media (max-width: 620px) {
+      .topbar { padding: 0 12px; }
+      .brand small, .nav, .header-action { display: none; }
+      .workbench { padding: 12px; }
+      .action-panel { padding: 13px; }
+      .send-options, .receive-footer, .console-header { align-items: start; flex-direction: column; }
+      .backend-picker { grid-template-columns: 1fr; width: 100%; }
+      .console-tools { width: 100%; }
+      .search { flex: 1; width: auto; }
+      .draft-note { right: 10px; bottom: 10px; left: 10px; max-width: none; }
+    }
+    .console,.console-header,.task-table,.task-row,.task-row:hover,.inspector{box-shadow:none}.window-controls .window-control,.window-controls .window-control:hover{box-shadow:none}
+  </style>
+</head>
+<body>
+  <main class="app" aria-label="ii 传输界面草稿">
+    <header class="topbar">
+      <div class="brand"><img src="../logo.svg" alt="ii"><span>ii</span><small>文件传输</small></div>
+      <nav class="nav" aria-label="主导航">
+        <a class="active" href="ii-gui-bc-prototype.html">传输</a>
+        <a href="ii-gui-storage-prototype.html">存储</a>
+        <a href="ii-gui-diagnostics-prototype.html">诊断</a>
+        <a href="ii-gui-settings-prototype.html">设置</a>
+      </nav>
+      <div class="header-actions"><span class="version-info" aria-label="版本信息"><span>GUI v0.0.0-dev</span><span>CLI v0.1.12</span></span><button class="header-action" type="button" data-demo="切换主题">系统主题</button><span class="status-dot" title="网络可用"></span><a class="github-link" href="https://github.com/zengyufei/ii" target="_blank" rel="noopener noreferrer" aria-label="打开 ii GitHub 仓库" title="GitHub"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15 22v-2a4.8 4.8 0 0 0-1-3.5c3.3-.4 6.8-1.6 6.8-7.3a5.7 5.7 0 0 0-1.5-4c.1-.4.7-1.9-.1-4a5.1 5.1 0 0 0-4 1.5 13.9 13.9 0 0 0-7.2 0A5.1 5.1 0 0 0 4 1.2c-.8 2.1-.2 3.6-.1 4a5.7 5.7 0 0 0-1.5 4c0 5.7 3.5 6.9 6.8 7.3a4.8 4.8 0 0 0-1 3.5v2"></path><path d="M9 18c-4.5 1.4-5-2-7-2"></path></svg></a></div><div class="window-controls" aria-label="窗口控制"><button class="window-control" type="button" title="最小化" aria-label="最小化窗口" data-demo="最小化窗口">&#8722;</button><button class="window-control" type="button" title="最大化" aria-label="最大化窗口" data-demo="最大化窗口">&#9633;</button><button class="window-control close-window" type="button" title="关闭" aria-label="关闭窗口" data-demo="关闭窗口">&times;</button></div>
+    </header>
+
+    <section class="workbench" aria-label="发送和接收操作台">
+      <p class="section-label">快速操作</p>
+      <div class="action-deck">
+        <section class="action-panel" aria-labelledby="send-heading">
+          <div class="panel-heading"><span class="panel-mark" aria-hidden="true">&#8599;</span><div><h1 id="send-heading">发送内容</h1><p>选择文件或目录，创建传输码后等待接收方。</p></div></div>
+          <div class="source-row"><span class="file-type">ZIP</span><div><div class="file-name">project-backup.zip</div><div class="file-meta">1.4 GB &middot; 已选择</div></div><button class="text-button" type="button" data-demo="更换文件">更换</button></div>
+          <div class="send-options"><div class="send-settings"><div class="send-behavior"><span>保持发送</span><button id="keep-send-switch" class="keep-switch" type="button" aria-label="保持发送"></button></div><div class="mode-group" aria-label="发送方式"><button class="mode" type="button" data-mode="局域网">仅局域网</button><button class="mode" type="button" data-mode="中继">指定中继</button><button class="mode" type="button" data-mode="S3">S3</button><button class="mode" type="button" data-mode="WebDAV">WebDAV</button></div><div id="backend-picker" class="backend-picker"><span id="backend-label">配置</span><select id="backend-profile" aria-label="后端配置"></select><a href="ii-gui-storage-prototype.html">管理配置</a></div></div><button class="primary" type="button" data-demo="创建传输码">创建传输码</button></div>
+        </section>
+
+        <section class="action-panel" aria-labelledby="receive-heading">
+          <div class="panel-heading"><span class="panel-mark" aria-hidden="true">&#8601;</span><div><h1 id="receive-heading">接收内容</h1><p>粘贴对方传输码，选择保存位置后开始接收。</p></div></div>
+          <textarea class="ticket-input" aria-label="传输码输入框" spellcheck="false">ii1k7v...demo-transfer-code</textarea>
+          <div class="receive-footer"><div class="destination"><span>保存到</span><span class="destination-path">~/下载</span><button class="destination-change" type="button" data-demo="更换保存位置">更换</button></div><button class="primary" type="button" data-demo="开始接收">开始接收</button></div>
+        </section>
+      </div>
+    </section>
+
+    <section class="console" aria-labelledby="console-heading">
+      <header class="console-header">
+        <div class="console-title"><h2 id="console-heading">传输队列</h2><span>3 个任务</span></div>
+        <div class="console-tools"><input class="search" type="search" aria-label="搜索任务" placeholder="搜索任务"><button class="tool-button" type="button" data-demo="清除已完成">清除已完成</button></div>
+      </header>
+      <div class="console-body">
+        <div class="task-table" aria-label="传输任务列表">
+          <div class="task-header"><span>名称</span><span>方向</span><span>方式</span><span>状态</span><span>进度</span><span>操作</span></div>
+          <button class="task-row selected" type="button" data-task="backup"><span class="task-name">project-backup.zip<small>1.4 GB &middot; 今天 12:37</small></span><span>发送</span><span>指定中继</span><span class="tag active">传输中</span><span class="progress"><span class="progress-bar"><b></b></span><span>62% &middot; 18.4 MB/s</span></span><span class="row-action">取消</span></button>
+          <button class="task-row" type="button" data-task="photos"><span class="task-name">photos/<small>824 MB &middot; 今天 12:41</small></span><span>接收</span><span>WebDAV</span><span class="tag done">已完成</span><span class="progress"><span class="progress-bar"><b style="width:100%"></b></span><span>已保存到下载</span></span><span class="row-action">打开</span></button>
+          <button class="task-row" type="button" data-task="archive"><span class="task-name">archive.tar.gz<small>4.8 GB &middot; 等待接收方</small></span><span>发送</span><span>局域网</span><span class="tag waiting">等待中</span><span class="progress"><span>传输码已复制</span></span><span class="row-action">查看</span></button>
+        </div>
+        <aside class="inspector" aria-label="当前任务详情">
+          <div class="inspector-header"><div><p class="section-label">当前任务</p><h2 id="detail-name">project-backup.zip</h2><div id="detail-subtitle" class="inspector-subtitle">发送中 &middot; 1.4 GB</div></div><button class="close" type="button" aria-label="关闭详情" data-demo="关闭详情">&times;</button></div>
+          <div id="detail-code" class="ticket">ii1k7v...demo-transfer-code</div>
+          <dl class="detail-grid"><dt>连接方式</dt><dd id="detail-method">指定中继 · 公司中继</dd><dt>当前进度</dt><dd id="detail-progress">62% &middot; 18.4 MB/s</dd><dt>开始时间</dt><dd id="detail-time">今天 12:37</dd><dt>目标位置</dt><dd id="detail-destination">远端设备</dd></dl>
+          <div class="inspector-actions"><button class="secondary" type="button" data-demo="复制传输码">复制传输码</button><button class="danger" type="button" data-demo="停止传输">停止</button></div>
+          <div class="network-summary"><div><span>网络路径</span><strong>已就绪</strong></div><div><span>记录来源</span><strong>SQLite 队列库</strong></div><div><span>传输码版本</span><strong>v6</strong></div></div>
+        </aside>
+      </div>
+    </section>
+  </main>
+
+  <aside class="draft-note" aria-live="polite"><strong>界面草稿</strong><br><span id="draft-state">上方直接发送或接收；下方持续展示队列和当前任务详情。不会访问文件、网络、剪贴板或配置。</span></aside>
+
+  <script>
+    (() => {
+      const tasks = {
+        backup: { name: 'project-backup.zip', subtitle: '发送中 · 1.4 GB', code: 'ii1k7v...demo-transfer-code', method: '指定中继 · 公司中继', progress: '62% · 18.4 MB/s', time: '今天 12:37', destination: '远端设备' },
+        photos: { name: 'photos/', subtitle: '已接收 · 824 MB', code: 'ii1k7v...received-webdav-code', method: 'WebDAV · 家庭 WebDAV', progress: '已完成', time: '今天 12:41', destination: '~/下载/photos' },
+        archive: { name: 'archive.tar.gz', subtitle: '等待中 · 4.8 GB', code: 'ii1k7v...local-transfer-code', method: '仅局域网', progress: '传输码已复制', time: '今天 12:44', destination: '等待接收方连接' }
+      };
+      const state = document.getElementById('draft-state');
+      const detail = {
+        name: document.getElementById('detail-name'), subtitle: document.getElementById('detail-subtitle'), code: document.getElementById('detail-code'),
+        method: document.getElementById('detail-method'), progress: document.getElementById('detail-progress'), time: document.getElementById('detail-time'), destination: document.getElementById('detail-destination')
+      };
+      function selectTask(id) {
+        const task = tasks[id];
+        if (!task) return;
+        document.querySelectorAll('[data-task]').forEach(row => row.classList.toggle('selected', row.dataset.task === id));
+        Object.entries(detail).forEach(([key, node]) => { node.textContent = task[key]; });
+        state.textContent = `已选中演示任务：${task.name}。此操作只更新页面内存状态。`;
+      }
+      document.querySelectorAll('[data-task]').forEach(row => row.addEventListener('click', () => selectTask(row.dataset.task)));
+      const backendProfiles = {
+        中继: { label: '中继配置', options: ['公司中继 · TLS', '开发中继 · TLS（信任自签）'] },
+        S3: { label: 'S3 配置', options: ['工作 R2', '归档 S3'] },
+        WebDAV: { label: 'WebDAV 配置', options: ['家庭 WebDAV'] }
+      };
+      const backendPicker = document.getElementById('backend-picker');
+      const backendLabel = document.getElementById('backend-label');
+      const backendProfile = document.getElementById('backend-profile');
+      function updateBackendPicker(mode) {
+        const source = backendProfiles[mode];
+        backendPicker.classList.toggle('visible', Boolean(source));
+        if (!source) return;
+        backendLabel.textContent = source.label;
+        backendProfile.replaceChildren(...source.options.map(name => new Option(name, name)));
+      }
+      document.querySelectorAll('[data-mode]').forEach(button => button.addEventListener('click', () => {
+        document.querySelectorAll('[data-mode]').forEach(item => item.classList.toggle('active', item === button));
+        updateBackendPicker(button.dataset.mode);
+        const profile = backendProfiles[button.dataset.mode]?.options[0];
+        state.textContent = profile ? `已选择 ${button.dataset.mode}：${profile}。配置名称来自“存储”页面草稿。` : `已选择发送方式：${button.dataset.mode}。此草稿不会创建真实传输。`;
+      }));
+      backendProfile.addEventListener('change', () => { state.textContent = `已选择配置：${backendProfile.value}。配置名称来自“存储”页面草稿。`; });
+      const keepSend = document.getElementById('keep-send-switch');
+      keepSend.addEventListener('click', () => { keepSend.classList.toggle('on'); state.textContent = `保持发送已${keepSend.classList.contains('on') ? '开启' : '关闭'}。此草稿不会创建真实传输。`; });
+      document.querySelectorAll('[data-demo]').forEach(button => button.addEventListener('click', () => {
+        state.textContent = `演示操作：${button.dataset.demo}。不会访问文件、网络、剪贴板或配置。`;
+      }));
+    })();
+  </script>
+</body>
+</html>

@@ -4,7 +4,19 @@ All notable changes to `ii` are documented here. The default Chinese version is 
 
 ## Unreleased
 
-Nothing yet.
+### Added
+
+- Added `ii send --ftp` and `ii send --sftp` for FTP and SFTP transfer backends supporting files, stdin, and folders.
+- Added FTP/SFTP profiles, portable tickets, receiver-side remote-object deletion, and `ii doctor` configuration checks.
+- Added the Slint-based `ii-gui` desktop client with sending, receiving, S3/WebDAV/TLS relay profile management, a transfer queue, and diagnostics.
+
+### Changed
+
+- Added Windows GUI executables, Linux AppImages, and macOS `.app.zip` artifacts to the release workflow.
+
+### Documentation
+
+- Added FTP and SFTP backend guides and synchronized the English README and full command manual.
 
 ## 0.1.12 - 2026-07-17
 

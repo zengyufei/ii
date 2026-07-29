@@ -11,11 +11,15 @@ const CONFIG_FILE_NAME: &str = "ii.toml";
 const DEFAULT_S3_PROFILE: &str = "default";
 const LEGACY_CLOUDFLARE_S3_PROFILE: &str = "cloudflare";
 const DEFAULT_WEBDAV_PROFILE: &str = "default";
+const DEFAULT_FTP_PROFILE: &str = "default";
+const DEFAULT_SFTP_PROFILE: &str = "default";
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct IiConfig {
     #[serde(default)]
     pub storage: StorageConfig,
+    #[serde(default)]
+    pub relay: BTreeMap<String, RelayProfile>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -28,6 +32,10 @@ pub struct StorageConfig {
     pub s3: BTreeMap<String, S3Profile>,
     #[serde(default)]
     pub webdav: BTreeMap<String, WebDavProfile>,
+    #[serde(default)]
+    pub ftp: BTreeMap<String, FtpProfile>,
+    #[serde(default)]
+    pub sftp: BTreeMap<String, SftpProfile>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -83,8 +91,82 @@ pub struct WebDavProfileSelection {
     pub save_after_success: bool,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FtpProfile {
+    pub url: String,
+    pub username: String,
+    pub password: String,
+    #[serde(default = "default_prefix")]
+    pub remote_dir: String,
+}
+
+#[derive(Debug, Clone)]
+pub struct FtpProfileSelection {
+    pub path: PathBuf,
+    pub config: IiConfig,
+    pub profile_name: String,
+    pub profile: FtpProfile,
+    pub save_after_success: bool,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum SftpAuth {
+    #[serde(rename = "password")]
+    Password,
+    #[serde(rename = "private-key")]
+    PrivateKey,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SftpProfile {
+    pub host: String,
+    #[serde(default = "default_sftp_port")]
+    pub port: u16,
+    pub username: String,
+    #[serde(default = "default_prefix")]
+    pub remote_dir: String,
+    #[serde(default = "default_sftp_auth")]
+    pub auth: SftpAuth,
+    #[serde(default)]
+    pub password: String,
+    #[serde(default)]
+    pub private_key_path: Option<PathBuf>,
+    #[serde(default)]
+    pub private_key_passphrase: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SftpProfileSelection {
+    pub path: PathBuf,
+    pub config: IiConfig,
+    pub profile_name: String,
+    pub profile: SftpProfile,
+    pub save_after_success: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct RelayProfile {
+    pub url: String,
+    #[serde(default)]
+    pub accept_self_signed: bool,
+}
+
+impl RelayProfile {
+    pub fn validate(&self) -> Result<()> {
+        let url = url::Url::parse(self.url.trim()).context("parse relay URL")?;
+        if url.scheme() != "https" || url.host_str().is_none() {
+            bail!("relay URL must be https://host[:port]");
+        }
+        Ok(())
+    }
+}
+
 impl S3Profile {
-    fn empty_cloudflare() -> Self {
+    pub fn empty_cloudflare() -> Self {
+        Self::new_empty_cloudflare()
+    }
+
+    fn new_empty_cloudflare() -> Self {
         Self {
             provider: "cloudflare-r2".to_string(),
             account_id: None,
@@ -105,13 +187,43 @@ impl S3Profile {
 }
 
 impl WebDavProfile {
-    fn empty() -> Self {
+    pub fn empty() -> Self {
+        Self::new_empty()
+    }
+
+    fn new_empty() -> Self {
         Self {
             url: String::new(),
             username: String::new(),
             password: String::new(),
             remote_dir: default_prefix(),
             auth: default_webdav_auth(),
+        }
+    }
+}
+
+impl FtpProfile {
+    pub fn empty() -> Self {
+        Self {
+            url: String::new(),
+            username: String::new(),
+            password: String::new(),
+            remote_dir: default_prefix(),
+        }
+    }
+}
+
+impl SftpProfile {
+    pub fn empty() -> Self {
+        Self {
+            host: String::new(),
+            port: default_sftp_port(),
+            username: String::new(),
+            remote_dir: default_prefix(),
+            auth: default_sftp_auth(),
+            password: String::new(),
+            private_key_path: None,
+            private_key_passphrase: None,
         }
     }
 }
@@ -288,7 +400,8 @@ fn load_or_prompt_webdav_profile_from_path(
         changed = true;
     }
 
-    validate_webdav_profile(&profile, &path)?;
+    validate_webdav_profile(&profile)
+        .with_context(|| format!("WebDAV config {}", path.display()))?;
     config
         .storage
         .webdav
@@ -317,6 +430,124 @@ pub fn build_webdav_client(profile: &WebDavProfile) -> Result<reqwest_dav::Clien
         .set_auth(auth)
         .build()
         .context("create WebDAV client")
+}
+
+pub fn load_or_prompt_ftp_profile() -> Result<FtpProfileSelection> {
+    let path = default_config_path()?;
+    load_or_prompt_ftp_profile_from_path(path, DEFAULT_FTP_PROFILE)
+}
+
+pub fn load_or_prompt_ftp_profile_named(profile_name: &str) -> Result<FtpProfileSelection> {
+    let path = default_config_path()?;
+    load_or_prompt_ftp_profile_from_path(path, profile_name)
+}
+
+fn load_or_prompt_ftp_profile_from_path(
+    path: PathBuf,
+    profile_name: &str,
+) -> Result<FtpProfileSelection> {
+    let mut config = load_config(&path)?;
+    let mut profile = config
+        .storage
+        .ftp
+        .get(profile_name)
+        .cloned()
+        .unwrap_or_else(FtpProfile::empty);
+    let existed = config.storage.ftp.contains_key(profile_name);
+    let mut changed = false;
+    if profile.remote_dir.trim().is_empty() {
+        profile.remote_dir = default_prefix();
+        changed = true;
+    }
+
+    let missing = missing_ftp_fields(&profile);
+    if !missing.is_empty() {
+        if !std::io::stdin().is_terminal() {
+            bail!(
+                "FTP config is missing {}. Run `ii send <file> --ftp` or `ii recv <ticket>` from an interactive terminal once, or edit {} manually.",
+                missing.join(", "),
+                path.display()
+            );
+        }
+        println!("ii: FTP is not configured.");
+        println!();
+        prompt_missing_ftp_fields(&mut profile)?;
+        changed = true;
+    }
+
+    validate_ftp_profile(&profile).with_context(|| format!("FTP config {}", path.display()))?;
+    config
+        .storage
+        .ftp
+        .insert(profile_name.to_string(), profile.clone());
+    Ok(FtpProfileSelection {
+        path,
+        config,
+        profile_name: profile_name.to_string(),
+        profile,
+        save_after_success: changed || !existed,
+    })
+}
+
+pub fn load_or_prompt_sftp_profile() -> Result<SftpProfileSelection> {
+    let path = default_config_path()?;
+    load_or_prompt_sftp_profile_from_path(path, DEFAULT_SFTP_PROFILE)
+}
+
+pub fn load_or_prompt_sftp_profile_named(profile_name: &str) -> Result<SftpProfileSelection> {
+    let path = default_config_path()?;
+    load_or_prompt_sftp_profile_from_path(path, profile_name)
+}
+
+fn load_or_prompt_sftp_profile_from_path(
+    path: PathBuf,
+    profile_name: &str,
+) -> Result<SftpProfileSelection> {
+    let mut config = load_config(&path)?;
+    let mut profile = config
+        .storage
+        .sftp
+        .get(profile_name)
+        .cloned()
+        .unwrap_or_else(SftpProfile::empty);
+    let existed = config.storage.sftp.contains_key(profile_name);
+    let mut changed = false;
+    if profile.port == 0 {
+        profile.port = default_sftp_port();
+        changed = true;
+    }
+    if profile.remote_dir.trim().is_empty() {
+        profile.remote_dir = default_prefix();
+        changed = true;
+    }
+
+    let missing = missing_sftp_fields(&profile);
+    if !missing.is_empty() {
+        if !std::io::stdin().is_terminal() {
+            bail!(
+                "SFTP config is missing {}. Run `ii send <file> --sftp` or `ii recv <ticket>` from an interactive terminal once, or edit {} manually.",
+                missing.join(", "),
+                path.display()
+            );
+        }
+        println!("ii: SFTP is not configured.");
+        println!();
+        prompt_missing_sftp_fields(&mut profile, !existed)?;
+        changed = true;
+    }
+
+    validate_sftp_profile(&profile).with_context(|| format!("SFTP config {}", path.display()))?;
+    config
+        .storage
+        .sftp
+        .insert(profile_name.to_string(), profile.clone());
+    Ok(SftpProfileSelection {
+        path,
+        config,
+        profile_name: profile_name.to_string(),
+        profile,
+        save_after_success: changed || !existed,
+    })
 }
 
 pub fn build_bucket(profile: &S3Profile) -> Result<Box<s3::Bucket>> {
@@ -436,6 +667,43 @@ fn missing_webdav_fields(profile: &WebDavProfile) -> Vec<&'static str> {
     missing
 }
 
+fn missing_ftp_fields(profile: &FtpProfile) -> Vec<&'static str> {
+    let mut missing = Vec::new();
+    if profile.url.trim().is_empty() {
+        missing.push("URL");
+    }
+    if profile.username.trim().is_empty() {
+        missing.push("Username");
+    }
+    if profile.password.trim().is_empty() {
+        missing.push("Password");
+    }
+    missing
+}
+
+fn missing_sftp_fields(profile: &SftpProfile) -> Vec<&'static str> {
+    let mut missing = Vec::new();
+    if profile.host.trim().is_empty() {
+        missing.push("Host");
+    }
+    if profile.username.trim().is_empty() {
+        missing.push("Username");
+    }
+    match profile.auth {
+        SftpAuth::Password if profile.password.trim().is_empty() => missing.push("Password"),
+        SftpAuth::PrivateKey
+            if profile
+                .private_key_path
+                .as_deref()
+                .is_none_or(|path| path.as_os_str().is_empty()) =>
+        {
+            missing.push("Private key path")
+        }
+        _ => {}
+    }
+    missing
+}
+
 fn prompt_missing_webdav_fields(profile: &mut WebDavProfile) -> Result<()> {
     if profile.url.trim().is_empty() {
         profile.url = prompt_line("URL: ")?;
@@ -445,6 +713,52 @@ fn prompt_missing_webdav_fields(profile: &mut WebDavProfile) -> Result<()> {
     }
     if profile.password.trim().is_empty() {
         profile.password = prompt_line("Password: ")?;
+    }
+    Ok(())
+}
+
+fn prompt_missing_ftp_fields(profile: &mut FtpProfile) -> Result<()> {
+    if profile.url.trim().is_empty() {
+        profile.url = prompt_line("FTP URL (ftp://host[:port]): ")?;
+    }
+    if profile.username.trim().is_empty() {
+        profile.username = prompt_line("Username: ")?;
+    }
+    if profile.password.trim().is_empty() {
+        profile.password = prompt_line("Password: ")?;
+    }
+    Ok(())
+}
+
+fn prompt_missing_sftp_fields(profile: &mut SftpProfile, new_profile: bool) -> Result<()> {
+    if profile.host.trim().is_empty() {
+        profile.host = prompt_line("SFTP host: ")?;
+    }
+    if profile.username.trim().is_empty() {
+        profile.username = prompt_line("Username: ")?;
+    }
+    if new_profile {
+        profile.auth = match prompt_line("Authentication (password/private-key): ")?.as_str() {
+            "password" => SftpAuth::Password,
+            "private-key" => SftpAuth::PrivateKey,
+            other => bail!("unsupported SFTP authentication {other}"),
+        };
+    }
+    match profile.auth {
+        SftpAuth::Password if profile.password.trim().is_empty() => {
+            profile.password = prompt_line("Password: ")?;
+        }
+        SftpAuth::PrivateKey
+            if profile
+                .private_key_path
+                .as_deref()
+                .is_none_or(|path| path.as_os_str().is_empty()) =>
+        {
+            profile.private_key_path = Some(PathBuf::from(prompt_line("Private key path: ")?));
+            let passphrase = prompt_optional_line("Private key passphrase (optional): ")?;
+            profile.private_key_passphrase = (!passphrase.is_empty()).then_some(passphrase);
+        }
+        _ => {}
     }
     Ok(())
 }
@@ -466,7 +780,17 @@ fn prompt_line(prompt: &str) -> Result<String> {
     Ok(value)
 }
 
-fn validate_required_profile_fields(profile: &S3Profile, path: &Path) -> Result<()> {
+fn prompt_optional_line(prompt: &str) -> Result<String> {
+    print!("{prompt}");
+    std::io::stdout().flush().context("flush prompt")?;
+    let mut input = String::new();
+    let stdin = std::io::stdin();
+    let mut locked = stdin.lock();
+    locked.read_line(&mut input).context("read prompt")?;
+    Ok(input.trim().to_string())
+}
+
+pub fn validate_s3_profile(profile: &S3Profile) -> Result<()> {
     let mut missing = Vec::new();
     if profile.endpoint.trim().is_empty() {
         missing.push("endpoint");
@@ -481,16 +805,20 @@ fn validate_required_profile_fields(profile: &S3Profile, path: &Path) -> Result<
         missing.push("secret_access_key");
     }
     if !missing.is_empty() {
-        bail!(
-            "S3 config {} is missing {}",
-            path.display(),
-            missing.join(", ")
-        );
+        bail!("S3 profile is missing {}", missing.join(", "));
+    }
+    let url = url::Url::parse(profile.endpoint.trim()).context("parse S3 endpoint")?;
+    if url.scheme() != "http" && url.scheme() != "https" {
+        bail!("S3 endpoint must start with http:// or https://");
     }
     Ok(())
 }
 
-fn validate_webdav_profile(profile: &WebDavProfile, path: &Path) -> Result<()> {
+fn validate_required_profile_fields(profile: &S3Profile, path: &Path) -> Result<()> {
+    validate_s3_profile(profile).with_context(|| format!("S3 config {}", path.display()))
+}
+
+pub fn validate_webdav_profile(profile: &WebDavProfile) -> Result<()> {
     let mut missing = Vec::new();
     if profile.url.trim().is_empty() {
         missing.push("url");
@@ -502,16 +830,98 @@ fn validate_webdav_profile(profile: &WebDavProfile, path: &Path) -> Result<()> {
         missing.push("password");
     }
     if !missing.is_empty() {
-        bail!(
-            "WebDAV config {} is missing {}",
-            path.display(),
-            missing.join(", ")
-        );
+        bail!("WebDAV profile is missing {}", missing.join(", "));
     }
     let url = url::Url::parse(profile.url.trim()).context("parse WebDAV URL")?;
     if url.scheme() != "http" && url.scheme() != "https" {
         bail!("WebDAV URL must start with http:// or https://");
     }
+    Ok(())
+}
+
+pub fn validate_ftp_profile(profile: &FtpProfile) -> Result<()> {
+    let missing = missing_ftp_fields(profile);
+    if !missing.is_empty() {
+        bail!("FTP profile is missing {}", missing.join(", "));
+    }
+    let url = url::Url::parse(profile.url.trim()).context("parse FTP URL")?;
+    if url.scheme() != "ftp" || url.host_str().is_none() {
+        bail!("FTP URL must start with ftp://host[:port]");
+    }
+    Ok(())
+}
+
+pub fn validate_sftp_profile(profile: &SftpProfile) -> Result<()> {
+    let missing = missing_sftp_fields(profile);
+    if !missing.is_empty() {
+        bail!("SFTP profile is missing {}", missing.join(", "));
+    }
+    if profile.port == 0 {
+        bail!("SFTP port must be between 1 and 65535");
+    }
+    if profile.host.contains('/')
+        || profile.host.contains("://")
+        || profile.host.contains(char::is_whitespace)
+    {
+        bail!("SFTP host must be a host name or IP address without a scheme or path");
+    }
+    if profile.auth == SftpAuth::PrivateKey {
+        let key = load_sftp_private_key(profile)?;
+        russh::keys::decode_secret_key(&key, profile.private_key_passphrase.as_deref())
+            .context("parse SFTP private key")?;
+    }
+    Ok(())
+}
+
+pub fn load_sftp_private_key(profile: &SftpProfile) -> Result<String> {
+    let path = profile
+        .private_key_path
+        .as_ref()
+        .filter(|path| !path.as_os_str().is_empty())
+        .context("SFTP private_key_path is missing")?;
+    std::fs::read_to_string(path)
+        .with_context(|| format!("read SFTP private key {}", path.display()))
+}
+
+pub fn save_portable_sftp_private_key(profile_name: &str, private_key: &str) -> Result<PathBuf> {
+    let config_path = default_config_path()?;
+    let config_dir = config_path.parent().context("find ii config directory")?;
+    let key_dir = config_dir.join("ii-keys");
+    std::fs::create_dir_all(&key_dir)
+        .with_context(|| format!("create SFTP key directory {}", key_dir.display()))?;
+    let key_path = key_dir.join(format!("{}.key", safe_profile_component(profile_name)));
+    std::fs::write(&key_path, private_key)
+        .with_context(|| format!("write SFTP private key {}", key_path.display()))?;
+    set_private_key_permissions(&key_path)?;
+    Ok(key_path)
+}
+
+fn safe_profile_component(name: &str) -> String {
+    let cleaned = name
+        .chars()
+        .map(|ch| match ch {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            ch if ch.is_control() => '_',
+            ch => ch,
+        })
+        .collect::<String>();
+    if cleaned.trim().is_empty() {
+        "sftp".to_string()
+    } else {
+        cleaned
+    }
+}
+
+#[cfg(unix)]
+fn set_private_key_permissions(path: &Path) -> Result<()> {
+    use std::os::unix::fs::PermissionsExt;
+
+    std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+        .with_context(|| format!("restrict SFTP private key {}", path.display()))
+}
+
+#[cfg(not(unix))]
+fn set_private_key_permissions(_path: &Path) -> Result<()> {
     Ok(())
 }
 
@@ -552,6 +962,14 @@ fn default_path_style() -> bool {
 
 fn default_webdav_auth() -> WebDavAuth {
     WebDavAuth::Basic
+}
+
+fn default_sftp_auth() -> SftpAuth {
+    SftpAuth::Password
+}
+
+fn default_sftp_port() -> u16 {
+    22
 }
 
 #[cfg(test)]
@@ -602,6 +1020,36 @@ mod tests {
         let profile = WebDavProfile::empty();
         assert_eq!(profile.remote_dir, "ii/");
         assert_eq!(profile.auth, WebDavAuth::Basic);
+    }
+
+    #[test]
+    fn relay_profile_round_trips_and_retains_self_signed_policy() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ii.toml");
+        let mut config = IiConfig::default();
+        config.relay.insert(
+            "实验中继".into(),
+            RelayProfile {
+                url: "https://relay.example.com".into(),
+                accept_self_signed: true,
+            },
+        );
+
+        save_config(&path, &config).unwrap();
+        let loaded = load_config(&path).unwrap();
+        let relay = loaded.relay.get("实验中继").unwrap();
+        assert_eq!(relay.url, "https://relay.example.com");
+        assert!(relay.accept_self_signed);
+        relay.validate().unwrap();
+    }
+
+    #[test]
+    fn relay_profile_rejects_non_https_url() {
+        let relay = RelayProfile {
+            url: "http://relay.example.com".into(),
+            accept_self_signed: false,
+        };
+        assert!(relay.validate().is_err());
     }
 
     #[test]
@@ -718,6 +1166,72 @@ mod tests {
 
         assert_eq!(selection.profile.url, "https://dav-work.example.com");
         assert!(!selection.save_after_success);
+    }
+
+    #[test]
+    fn ftp_profile_defaults_and_validation_are_protocol_specific() {
+        let profile = FtpProfile::empty();
+        assert_eq!(profile.remote_dir, "ii/");
+        assert!(validate_ftp_profile(&profile).is_err());
+
+        let valid = FtpProfile {
+            url: "ftp://ftp.example.com:2121".to_string(),
+            username: "user".to_string(),
+            password: "pass".to_string(),
+            remote_dir: "incoming/".to_string(),
+        };
+        validate_ftp_profile(&valid).unwrap();
+        assert!(
+            validate_ftp_profile(&FtpProfile {
+                url: "https://ftp.example.com".to_string(),
+                ..valid
+            })
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn sftp_profiles_support_password_and_reject_unreadable_private_keys() {
+        let password = SftpProfile {
+            host: "sftp.example.com".to_string(),
+            port: 22,
+            username: "user".to_string(),
+            remote_dir: "ii/".to_string(),
+            auth: SftpAuth::Password,
+            password: "pass".to_string(),
+            private_key_path: None,
+            private_key_passphrase: None,
+        };
+        validate_sftp_profile(&password).unwrap();
+
+        let private_key = SftpProfile {
+            auth: SftpAuth::PrivateKey,
+            password: String::new(),
+            private_key_path: Some(PathBuf::from("missing-private-key")),
+            private_key_passphrase: None,
+            ..password
+        };
+        assert!(validate_sftp_profile(&private_key).is_err());
+    }
+
+    #[test]
+    fn sftp_private_key_auth_serializes_as_private_key() {
+        let mut config = IiConfig::default();
+        config.storage.sftp.insert(
+            "server".to_string(),
+            SftpProfile {
+                host: "sftp.example.com".to_string(),
+                port: 22,
+                username: "user".to_string(),
+                remote_dir: "ii/".to_string(),
+                auth: SftpAuth::PrivateKey,
+                password: String::new(),
+                private_key_path: Some(PathBuf::from("id_ed25519")),
+                private_key_passphrase: None,
+            },
+        );
+        let serialized = toml::to_string(&config).unwrap();
+        assert!(serialized.contains("auth = \"private-key\""));
     }
 
     fn complete_s3_profile(bucket: &str) -> S3Profile {

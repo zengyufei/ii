@@ -1,9 +1,26 @@
-[package]
-name = "ii"
+[workspace]
+members = ["gui"]
+resolver = "3"
+
+[workspace.package]
 version = "0.1.12"
 edition = "2024"
 rust-version = "1.91"
 license = "MIT"
+
+[workspace.lints.rust]
+missing_debug_implementations = "warn"
+unexpected_cfgs = { level = "warn", check-cfg = ["cfg(iroh_docsrs)", "cfg(iroh_loom)", "cfg(skip_patchbay)"] }
+
+[workspace.lints.clippy]
+unused-async = "warn"
+
+[package]
+name = "ii"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
 
 [dependencies]
 anyhow = "1"
@@ -17,8 +34,11 @@ postcard = { version = "1", features = ["use-std"] }
 rustls = { version = "0.23.33", default-features = false, features = ["ring"] }
 s3 = { package = "rust-s3", path = "vendor/rust-s3", default-features = false, features = ["sync-rustls-tls"] }
 reqwest_dav = { version = "0.3.3", default-features = false, features = ["rustls-tls-no-provider"] }
+russh = { version = "0.61.0", default-features = false, features = ["ring", "rsa"] }
+russh-sftp = "2.3.0"
 rcgen = { version = "0.14", default-features = false, features = ["crypto", "pem", "ring"] }
 serde = { version = "1", features = ["derive"] }
+suppaftp = { version = "10.0.1", default-features = false, features = ["tokio"] }
 tar = { version = "0.4", default-features = false }
 tempfile = "3"
 tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "net", "rt-multi-thread", "signal", "time"] }
@@ -27,6 +47,11 @@ toml = "1.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["ansi", "env-filter", "fmt", "std"] }
 url = { version = "2.5", features = ["serde"] }
+
+[dev-dependencies]
+libunftp = { version = "0.23.0", default-features = false, features = ["ring"] }
+rand = "0.10"
+unftp-sbe-fs = "0.4.0"
 
 [build-dependencies]
 winresource = "0.1"

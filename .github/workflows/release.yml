@@ -9,8 +9,8 @@ permissions:
   contents: write
 
 jobs:
-  build:
-    name: Build ${{ matrix.name }}
+  build-cli:
+    name: CLI ${{ matrix.name }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -25,17 +25,13 @@ jobs:
             artifact: ii-linux-x86_64
             binary: target/x86_64-unknown-linux-musl/release/ii
           - name: macos-aarch64
-            os: macos-latest
+            os: macos-14
             artifact: ii-macos-aarch64
             binary: target/release/ii
 
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Install Rust
-        uses: dtolnay/rust-toolchain@stable
-
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
       - name: Install Linux musl toolchain
         if: runner.os == 'Linux'
         shell: bash
@@ -43,70 +39,171 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y musl-tools
           rustup target add x86_64-unknown-linux-musl
-
-      - name: Cache cargo
-        uses: Swatinem/rust-cache@v2
-
+      - uses: Swatinem/rust-cache@v2
       - name: Test
-        run: cargo test --locked
-
+        run: cargo test -p ii --locked
       - name: Build Linux static release
         if: runner.os == 'Linux'
         shell: bash
         env:
           CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER: musl-gcc
           CC_x86_64_unknown_linux_musl: musl-gcc
-        run: cargo build --release --locked --target x86_64-unknown-linux-musl
-
-      - name: Verify Linux binary is statically linked
+        run: cargo build -p ii --release --locked --target x86_64-unknown-linux-musl
+      - name: Verify Linux binary is static
         if: runner.os == 'Linux'
         shell: bash
         run: file "${{ matrix.binary }}" | grep -Eq 'statically linked|static-pie linked'
-
       - name: Build release
         if: runner.os != 'Linux'
-        run: cargo build --release --locked
-
-      - name: Compress Windows binary with bundled UPX
+        run: cargo build -p ii --release --locked
+      - name: Compress Windows binary
         if: runner.os == 'Windows'
         shell: pwsh
-        run: |
-          .\upx-5.1.0-win64\upx.exe --best --lzma "${{ matrix.binary }}"
-
-      - name: Install UPX on Linux
+        run: .\upx-5.1.0-win64\upx.exe --best --lzma "${{ matrix.binary }}"
+      - name: Install UPX
         if: runner.os == 'Linux'
         shell: bash
         run: |
           sudo apt-get update
           sudo apt-get install -y upx-ucl || sudo apt-get install -y upx
-
-      - name: Compress Linux ELF with UPX
+      - name: Compress Linux binary
         if: runner.os == 'Linux'
         shell: bash
-        run: |
-          upx --best --lzma "${{ matrix.binary }}"
+        run: upx --best --lzma "${{ matrix.binary }}"
+      - name: Prepare artifact
+        shell: bash
+        run: cp "${{ matrix.binary }}" "${{ matrix.artifact }}"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: cli-${{ matrix.name }}
+          path: ${{ matrix.artifact }}
 
-      - name: Prepare Windows artifact
-        if: runner.os == 'Windows'
+  build-gui-windows:
+    name: GUI windows-x86_64
+    runs-on: windows-latest
+    outputs:
+      unpacked_bytes: ${{ steps.size.outputs.unpacked_bytes }}
+      packed_bytes: ${{ steps.size.outputs.packed_bytes }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test GUI
+        run: cargo test -p ii-gui --locked
+      - name: Build GUI
+        run: cargo build -p ii-gui --release --locked
+      - name: Compress and verify GUI
+        id: size
         shell: pwsh
         run: |
-          Copy-Item "${{ matrix.binary }}" "${{ matrix.artifact }}"
+          $source = 'target/release/ii-gui.exe'
+          $before = (Get-Item $source).Length
+          .\upx-5.1.0-win64\upx.exe --best --lzma $source
+          .\upx-5.1.0-win64\upx.exe -t $source
+          $after = (Get-Item $source).Length
+          "ii-gui Windows: $before -> $after bytes" | Out-File -Append -FilePath $env:GITHUB_STEP_SUMMARY
+          "unpacked_bytes=$before" | Out-File -Append -FilePath $env:GITHUB_OUTPUT
+          "packed_bytes=$after" | Out-File -Append -FilePath $env:GITHUB_OUTPUT
+          Copy-Item $source 'ii-gui-windows-x86_64.exe'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gui-windows-x86_64
+          path: ii-gui-windows-x86_64.exe
 
-      - name: Prepare Unix artifact
-        if: runner.os != 'Windows'
+  build-gui-linux:
+    name: GUI linux-x86_64
+    runs-on: ubuntu-latest
+    outputs:
+      unpacked_bytes: ${{ steps.package.outputs.unpacked_bytes }}
+      packed_bytes: ${{ steps.package.outputs.packed_bytes }}
+      artifact_bytes: ${{ steps.package.outputs.artifact_bytes }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Install AppImage build tools
         shell: bash
         run: |
-          cp "${{ matrix.binary }}" "${{ matrix.artifact }}"
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
+          sudo apt-get update
+          sudo apt-get install -y wget
+          wget -q https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-x86_64.AppImage -O appimagetool
+          chmod +x appimagetool
+          wget -q https://github.com/upx/upx/releases/download/v5.0.2/upx-5.0.2-amd64_linux.tar.xz -O upx.tar.xz
+          tar -xf upx.tar.xz
+      - name: Test GUI
+        run: cargo test -p ii-gui --locked
+      - name: Build GUI
+        run: cargo build -p ii-gui --release --locked
+      - name: Package AppImage
+        id: package
+        shell: bash
+        run: |
+          set -eux
+          UPX="$(find . -type f -path '*upx*/upx' -print -quit)"
+          unpacked_bytes=$(stat -c '%s' target/release/ii-gui)
+          "$UPX" --best --lzma target/release/ii-gui
+          "$UPX" -t target/release/ii-gui
+          packed_bytes=$(stat -c '%s' target/release/ii-gui)
+          mkdir -p AppDir/usr/bin AppDir/usr/share/applications AppDir/usr/share/icons/hicolor/256x256/apps
+          cp target/release/ii-gui AppDir/usr/bin/ii-gui
+          cp gui/assets/ii-gui.desktop AppDir/usr/share/applications/ii-gui.desktop
+          cp gui/assets/ii-gui.desktop AppDir/ii-gui.desktop
+          cp gui/assets/AppRun AppDir/AppRun
+          chmod +x AppDir/AppRun
+          cp gui/assets/ii-gui.png AppDir/usr/share/icons/hicolor/256x256/apps/ii-gui.png
+          cp AppDir/usr/share/icons/hicolor/256x256/apps/ii-gui.png AppDir/ii-gui.png
+          ARCH=x86_64 ./appimagetool --appimage-extract-and-run AppDir ii-gui-linux-x86_64.AppImage
+          test -x ii-gui-linux-x86_64.AppImage
+          test -s ii-gui-linux-x86_64.AppImage
+          artifact_bytes=$(stat -c '%s' ii-gui-linux-x86_64.AppImage)
+          printf 'unpacked_bytes=%s\npacked_bytes=%s\nartifact_bytes=%s\n' "$unpacked_bytes" "$packed_bytes" "$artifact_bytes" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.name }}
-          path: ${{ matrix.artifact }}
+          name: gui-linux-x86_64
+          path: ii-gui-linux-x86_64.AppImage
+
+  build-gui-macos:
+    name: GUI macos-aarch64
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Test GUI
+        run: cargo test -p ii-gui --locked
+      - name: Build GUI
+        run: cargo build -p ii-gui --release --locked
+      - name: Package unsigned app
+        shell: bash
+        run: |
+          set -eux
+          APP='ii.app'
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources/ii-gui.iconset"
+          cp target/release/ii-gui "$APP/Contents/MacOS/ii-gui"
+          chmod +x "$APP/Contents/MacOS/ii-gui"
+          sed "s/__VERSION__/${GITHUB_REF_NAME#v}/g" gui/assets/Info.plist > "$APP/Contents/Info.plist"
+          for size in 16 32 128 256 512; do
+            sips -s format png -z "$size" "$size" gui/assets/ii-gui.png --out "$APP/Contents/Resources/ii-gui.iconset/icon_${size}x${size}.png"
+          done
+          sips -s format png -z 32 32 gui/assets/ii-gui.png --out "$APP/Contents/Resources/ii-gui.iconset/icon_16x16@2x.png"
+          sips -s format png -z 64 64 gui/assets/ii-gui.png --out "$APP/Contents/Resources/ii-gui.iconset/icon_32x32@2x.png"
+          sips -s format png -z 256 256 gui/assets/ii-gui.png --out "$APP/Contents/Resources/ii-gui.iconset/icon_128x128@2x.png"
+          sips -s format png -z 512 512 gui/assets/ii-gui.png --out "$APP/Contents/Resources/ii-gui.iconset/icon_256x256@2x.png"
+          sips -s format png -z 1024 1024 gui/assets/ii-gui.png --out "$APP/Contents/Resources/ii-gui.iconset/icon_512x512@2x.png"
+          iconutil -c icns "$APP/Contents/Resources/ii-gui.iconset" -o "$APP/Contents/Resources/ii-gui.icns"
+          rm -rf "$APP/Contents/Resources/ii-gui.iconset"
+          test -f "$APP/Contents/Info.plist"
+          test -x "$APP/Contents/MacOS/ii-gui"
+          test -s "$APP/Contents/Resources/ii-gui.icns"
+          ditto -c -k --sequesterRsrc --keepParent "$APP" ii-gui-macos-aarch64.app.zip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: gui-macos-aarch64
+          path: ii-gui-macos-aarch64.app.zip
 
   release:
     name: Publish GitHub Release
-    needs: build
+    needs: [build-cli, build-gui-windows, build-gui-linux, build-gui-macos]
     runs-on: ubuntu-latest
     steps:
       - name: Download artifacts
@@ -114,7 +211,30 @@ jobs:
         with:
           path: artifacts
           merge-multiple: true
-
+      - name: Summarize release artifacts
+        shell: bash
+        run: |
+          {
+            echo '## Release artifacts'
+            echo
+            echo '| Artifact | Bytes |'
+            echo '| --- | ---: |'
+            for artifact in artifacts/*; do
+              echo "| $(basename "$artifact") | $(stat -c '%s' "$artifact") |"
+            done
+            echo
+            echo '## GUI compression'
+            echo
+            echo '| Target | Unpacked bytes | UPX bytes | Saved | Final artifact bytes |'
+            echo '| --- | ---: | ---: | ---: | ---: |'
+            windows_unpacked='${{ needs.build-gui-windows.outputs.unpacked_bytes }}'
+            windows_packed='${{ needs.build-gui-windows.outputs.packed_bytes }}'
+            linux_unpacked='${{ needs.build-gui-linux.outputs.unpacked_bytes }}'
+            linux_packed='${{ needs.build-gui-linux.outputs.packed_bytes }}'
+            linux_artifact='${{ needs.build-gui-linux.outputs.artifact_bytes }}'
+            echo "| Windows x86_64 | $windows_unpacked | $windows_packed | $((windows_unpacked - windows_packed)) | $windows_packed |"
+            echo "| Linux x86_64 | $linux_unpacked | $linux_packed | $((linux_unpacked - linux_packed)) | $linux_artifact |"
+          } >> "$GITHUB_STEP_SUMMARY"
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:

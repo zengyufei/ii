@@ -1,13 +1,21 @@
 use crate::{
     cli::{RecvArgs, SendArgs},
     storage,
-    ticket::{PayloadKind, ResumeRequest, Ticket, WebDavPortableCredentials},
+    ticket::{
+        FtpPortableCredentials, PayloadKind, ResumeRequest, SftpPortableAuth,
+        SftpPortableCredentials, Ticket, WebDavPortableCredentials,
+    },
 };
 use anyhow::{Context, Result, bail};
 use futures_util::TryStreamExt;
 use iroh::{Endpoint, RelayMap, RelayMode, SecretKey, TransportAddr, endpoint::presets};
 use iroh_relay::tls::CaTlsConfig;
 use reqwest_dav::Depth;
+use russh::{
+    client::{self as ssh_client, Handler as SshClientHandler},
+    keys::{HashAlg, PrivateKeyWithHashAlg, decode_secret_key},
+};
+use russh_sftp::{client::SftpSession, protocol::OpenFlags};
 use rustls::{
     DigitallySignedStruct, SignatureScheme,
     client::danger::{HandshakeSignatureValid, ServerCertVerified, ServerCertVerifier},
@@ -25,6 +33,7 @@ use std::{
     },
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
+use suppaftp::tokio::AsyncFtpStream;
 use tempfile::NamedTempFile;
 use tokio::{
     fs,
@@ -35,6 +44,14 @@ use tokio_util::io::ReaderStream;
 const ALPN: &[u8] = b"ii/file/1";
 const DEFAULT_CONNECT_FAST_PATH_TIMEOUT: Duration = Duration::from_secs(3);
 static NEXT_OBJECT_ID: AtomicU64 = AtomicU64::new(0);
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum TransferEvent {
+    Started,
+    TicketReady(String),
+    Completed,
+    Failed(String),
+}
 
 #[derive(Debug, Clone)]
 enum EndpointPolicy {
@@ -381,18 +398,58 @@ fn finalize_md5(ctx: md5::Md5) -> [u8; 16] {
 }
 
 pub async fn send(args: SendArgs) -> Result<()> {
-    let show_progress = should_show_progress(false);
-    if args.delete_after_recv && !args.s3 && !args.webdav {
-        bail!("-d requires --s3 or --webdav");
+    let copy = args.copy;
+    let output = args.output.clone();
+    send_inner(args, move |ticket| {
+        print_ticket(ticket, copy, output.clone())
+    })
+    .await
+}
+
+pub async fn send_with_events(
+    args: SendArgs,
+    events: std::sync::mpsc::Sender<TransferEvent>,
+) -> Result<()> {
+    let _ = events.send(TransferEvent::Started);
+    let ticket_events = events.clone();
+    let result = send_inner(args, move |ticket| {
+        let _ = ticket_events.send(TransferEvent::TicketReady(ticket.to_string()));
+        Ok(())
+    })
+    .await;
+    match &result {
+        Ok(()) => {
+            let _ = events.send(TransferEvent::Completed);
+        }
+        Err(err) => {
+            let _ = events.send(TransferEvent::Failed(format!("{err:#}")));
+        }
     }
-    if args.profile.is_some() && !args.s3 && !args.webdav {
-        bail!("--profile requires --s3 or --webdav");
+    result
+}
+
+async fn send_inner<F>(args: SendArgs, ticket_ready: F) -> Result<()>
+where
+    F: Fn(&str) -> Result<()> + Send + Sync,
+{
+    let show_progress = should_show_progress(false);
+    if args.delete_after_recv && !args.s3 && !args.webdav && !args.ftp && !args.sftp {
+        bail!("-d requires --s3, --webdav, --ftp or --sftp");
+    }
+    if args.profile.is_some() && !args.s3 && !args.webdav && !args.ftp && !args.sftp {
+        bail!("--profile requires --s3, --webdav, --ftp or --sftp");
     }
     if args.s3 {
-        return send_s3(args, show_progress).await;
+        return send_s3(args, show_progress, &ticket_ready).await;
     }
     if args.webdav {
-        return send_webdav(args, show_progress).await;
+        return send_webdav(args, show_progress, &ticket_ready).await;
+    }
+    if args.ftp {
+        return send_ftp(args, show_progress, &ticket_ready).await;
+    }
+    if args.sftp {
+        return send_sftp(args, show_progress, &ticket_ready).await;
     }
 
     let source = Source::open(args.path.clone(), args.name.clone()).await?;
@@ -433,7 +490,7 @@ pub async fn send(args: SendArgs) -> Result<()> {
         ),
     };
     let ticket_str = ticket.encode()?;
-    print_ticket(&ticket_str, args.copy, args.output.clone())?;
+    ticket_ready(&ticket_str)?;
 
     let mut accepted = 0usize;
     loop {
@@ -478,7 +535,10 @@ pub async fn send(args: SendArgs) -> Result<()> {
     Ok(())
 }
 
-async fn send_s3(args: SendArgs, show_progress: bool) -> Result<()> {
+async fn send_s3<F>(args: SendArgs, show_progress: bool, ticket_ready: &F) -> Result<()>
+where
+    F: Fn(&str) -> Result<()> + Send + Sync,
+{
     let selection = match args.profile.as_deref() {
         Some(profile) => storage::load_or_prompt_s3_profile_named(profile)?,
         None => storage::load_or_prompt_s3_profile()?,
@@ -504,7 +564,7 @@ async fn send_s3(args: SendArgs, show_progress: bool) -> Result<()> {
         source.content_md5(),
     );
     let ticket_str = ticket.encode()?;
-    print_ticket(&ticket_str, args.copy, args.output.clone())?;
+    ticket_ready(&ticket_str)?;
     Ok(())
 }
 
@@ -574,7 +634,10 @@ fn s3_object_exists(bucket: &s3::Bucket, object_path: &str) -> Result<bool> {
     }
 }
 
-async fn send_webdav(args: SendArgs, show_progress: bool) -> Result<()> {
+async fn send_webdav<F>(args: SendArgs, show_progress: bool, ticket_ready: &F) -> Result<()>
+where
+    F: Fn(&str) -> Result<()> + Send + Sync,
+{
     let selection = match args.profile.as_deref() {
         Some(profile) => storage::load_or_prompt_webdav_profile_named(profile)?,
         None => storage::load_or_prompt_webdav_profile()?,
@@ -606,7 +669,7 @@ async fn send_webdav(args: SendArgs, show_progress: bool) -> Result<()> {
         source.content_md5(),
     );
     let ticket_str = ticket.encode()?;
-    print_ticket(&ticket_str, args.copy, args.output.clone())?;
+    ticket_ready(&ticket_str)?;
     Ok(())
 }
 
@@ -715,6 +778,325 @@ fn webdav_auth_name(auth: &storage::WebDavAuth) -> &'static str {
     }
 }
 
+async fn send_ftp<F>(args: SendArgs, show_progress: bool, ticket_ready: &F) -> Result<()>
+where
+    F: Fn(&str) -> Result<()> + Send + Sync,
+{
+    let selection = match args.profile.as_deref() {
+        Some(profile) => storage::load_or_prompt_ftp_profile_named(profile)?,
+        None => storage::load_or_prompt_ftp_profile()?,
+    };
+    let source = Source::open(args.path.clone(), args.name.clone()).await?;
+    let upload = upload_to_ftp(&source, &selection.profile, show_progress).await?;
+    if selection.save_after_success {
+        storage::save_config(&selection.path, &selection.config)?;
+    }
+    let portable = if args.portable_webdav {
+        eprintln!("ii send: warning: portable FTP ticket includes URL, username, and password");
+        Some(FtpPortableCredentials {
+            url: selection.profile.url.clone(),
+            username: selection.profile.username.clone(),
+            password: selection.profile.password.clone(),
+            remote_dir: selection.profile.remote_dir.clone(),
+        })
+    } else {
+        None
+    };
+    let ticket = Ticket::ftp(
+        selection.profile_name,
+        upload.object_key,
+        args.delete_after_recv,
+        portable,
+        source.name().to_string(),
+        source.kind(),
+        source.size(),
+        source.content_md5(),
+    );
+    ticket_ready(&ticket.encode()?)
+}
+
+struct FtpUploadResult {
+    object_key: String,
+}
+
+async fn upload_to_ftp(
+    source: &Source,
+    profile: &storage::FtpProfile,
+    show_progress: bool,
+) -> Result<FtpUploadResult> {
+    let object_key = remote_object_key(&profile.remote_dir, source);
+    let mut client = ftp_connect(profile).await?;
+    let filename = ftp_enter_object_parent(&mut client, &object_key, true).await?;
+    if client.size(&filename).await.is_ok() {
+        client.quit().await.ok();
+        return Ok(FtpUploadResult { object_key });
+    }
+
+    let mut source_file = source.open_file().await?;
+    let mut stream = client
+        .put_with_stream(&filename)
+        .await
+        .with_context(|| format!("upload FTP object {object_key}"))?;
+    let mut progress = TransferProgress::new("ii send", show_progress, source.size(), 0);
+    copy_with_progress(&mut source_file, &mut stream, &mut progress)
+        .await
+        .with_context(|| format!("upload FTP object {object_key}"))?;
+    stream.flush().await.context("flush FTP upload")?;
+    progress.finish();
+    client
+        .finalize_put_stream(stream)
+        .await
+        .with_context(|| format!("finish FTP upload {object_key}"))?;
+    client.quit().await.ok();
+    Ok(FtpUploadResult { object_key })
+}
+
+async fn ftp_connect(profile: &storage::FtpProfile) -> Result<AsyncFtpStream> {
+    storage::validate_ftp_profile(profile)?;
+    let url = url::Url::parse(profile.url.trim()).context("parse FTP URL")?;
+    let host = url.host_str().context("FTP URL is missing host")?;
+    let port = url.port().unwrap_or(21);
+    let mut client = AsyncFtpStream::connect((host, port))
+        .await
+        .with_context(|| format!("connect FTP {host}:{port}"))?;
+    client
+        .login(&profile.username, &profile.password)
+        .await
+        .context("authenticate FTP")?;
+    Ok(client)
+}
+
+fn remote_object_key(remote_dir: &str, source: &Source) -> String {
+    match source.content_md5() {
+        Some(content_md5) => storage::content_addressed_object_key(remote_dir, content_md5),
+        None => storage::normalized_object_key(remote_dir, &unique_object_id(), source.name()),
+    }
+}
+
+fn remote_path_parts(path: &str) -> Result<Vec<&str>> {
+    let parts = path
+        .trim_matches('/')
+        .split('/')
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>();
+    if parts.is_empty() || parts.iter().any(|part| *part == "." || *part == "..") {
+        bail!("invalid remote object path {path}");
+    }
+    Ok(parts)
+}
+
+async fn ftp_enter_object_parent(
+    client: &mut AsyncFtpStream,
+    object_key: &str,
+    create: bool,
+) -> Result<String> {
+    let parts = remote_path_parts(object_key)?;
+    client.cwd("/").await.context("enter FTP login root")?;
+    for part in parts.iter().take(parts.len().saturating_sub(1)) {
+        if client.cwd(part).await.is_ok() {
+            continue;
+        }
+        if !create {
+            bail!("FTP remote directory is missing {part}");
+        }
+        client
+            .mkdir(part)
+            .await
+            .with_context(|| format!("create FTP directory {part}"))?;
+        client
+            .cwd(part)
+            .await
+            .with_context(|| format!("enter FTP directory {part}"))?;
+    }
+    Ok(parts
+        .last()
+        .expect("remote object has a file name")
+        .to_string())
+}
+
+async fn send_sftp<F>(args: SendArgs, show_progress: bool, ticket_ready: &F) -> Result<()>
+where
+    F: Fn(&str) -> Result<()> + Send + Sync,
+{
+    let selection = match args.profile.as_deref() {
+        Some(profile) => storage::load_or_prompt_sftp_profile_named(profile)?,
+        None => storage::load_or_prompt_sftp_profile()?,
+    };
+    let source = Source::open(args.path.clone(), args.name.clone()).await?;
+    let upload = upload_to_sftp(&source, &selection.profile, show_progress).await?;
+    if selection.save_after_success {
+        storage::save_config(&selection.path, &selection.config)?;
+    }
+    let portable = if args.portable_webdav {
+        eprintln!("ii send: warning: portable SFTP ticket includes credentials or a private key");
+        Some(sftp_portable_credentials(&selection.profile)?)
+    } else {
+        None
+    };
+    let ticket = Ticket::sftp(
+        selection.profile_name,
+        upload.object_key,
+        args.delete_after_recv,
+        portable,
+        source.name().to_string(),
+        source.kind(),
+        source.size(),
+        source.content_md5(),
+    );
+    ticket_ready(&ticket.encode()?)
+}
+
+struct SftpUploadResult {
+    object_key: String,
+}
+
+struct AcceptAnySftpHost;
+
+impl SshClientHandler for AcceptAnySftpHost {
+    type Error = anyhow::Error;
+
+    async fn check_server_key(
+        &mut self,
+        server_public_key: &russh::keys::PublicKey,
+    ) -> Result<bool, Self::Error> {
+        eprintln!(
+            "ii sftp: accepting SSH host key {}",
+            server_public_key.fingerprint(HashAlg::Sha256)
+        );
+        Ok(true)
+    }
+}
+
+struct SftpConnection {
+    _handle: ssh_client::Handle<AcceptAnySftpHost>,
+    client: SftpSession,
+}
+
+async fn sftp_connect(profile: &storage::SftpProfile) -> Result<SftpConnection> {
+    storage::validate_sftp_profile(profile)?;
+    let config = ssh_client::Config::default();
+    let mut handle = ssh_client::connect(
+        Arc::new(config),
+        (profile.host.as_str(), profile.port),
+        AcceptAnySftpHost,
+    )
+    .await
+    .with_context(|| format!("connect SFTP {}:{}", profile.host, profile.port))?;
+    let auth = match profile.auth {
+        storage::SftpAuth::Password => handle
+            .authenticate_password(&profile.username, &profile.password)
+            .await
+            .context("authenticate SFTP password")?,
+        storage::SftpAuth::PrivateKey => {
+            let private_key = decode_secret_key(
+                &storage::load_sftp_private_key(profile)?,
+                profile.private_key_passphrase.as_deref(),
+            )
+            .context("parse SFTP private key")?;
+            let hash_alg = handle
+                .best_supported_rsa_hash()
+                .await
+                .context("negotiate SFTP RSA signature")?
+                .flatten();
+            handle
+                .authenticate_publickey(
+                    &profile.username,
+                    PrivateKeyWithHashAlg::new(Arc::new(private_key), hash_alg),
+                )
+                .await
+                .context("authenticate SFTP private key")?
+        }
+    };
+    if !auth.success() {
+        bail!("SFTP authentication was rejected");
+    }
+    let channel = handle
+        .channel_open_session()
+        .await
+        .context("open SFTP session channel")?;
+    channel
+        .request_subsystem(true, "sftp")
+        .await
+        .context("start SFTP subsystem")?;
+    let client = SftpSession::new(channel.into_stream())
+        .await
+        .context("start SFTP client")?;
+    Ok(SftpConnection {
+        _handle: handle,
+        client,
+    })
+}
+
+async fn ensure_sftp_parent_dirs(client: &SftpSession, object_key: &str) -> Result<()> {
+    let parts = remote_path_parts(object_key)?;
+    let mut current = String::new();
+    for part in parts.iter().take(parts.len().saturating_sub(1)) {
+        if !current.is_empty() {
+            current.push('/');
+        }
+        current.push_str(part);
+        if client.try_exists(&current).await? {
+            continue;
+        }
+        client
+            .create_dir(&current)
+            .await
+            .with_context(|| format!("create SFTP directory {current}"))?;
+    }
+    Ok(())
+}
+
+async fn upload_to_sftp(
+    source: &Source,
+    profile: &storage::SftpProfile,
+    show_progress: bool,
+) -> Result<SftpUploadResult> {
+    let object_key = remote_object_key(&profile.remote_dir, source);
+    let connection = sftp_connect(profile).await?;
+    ensure_sftp_parent_dirs(&connection.client, &object_key).await?;
+    if connection.client.try_exists(&object_key).await? {
+        connection.client.close().await.ok();
+        return Ok(SftpUploadResult { object_key });
+    }
+    let mut source_file = source.open_file().await?;
+    let mut remote = connection
+        .client
+        .open_with_flags(
+            object_key.clone(),
+            OpenFlags::CREATE | OpenFlags::TRUNCATE | OpenFlags::WRITE,
+        )
+        .await
+        .with_context(|| format!("open SFTP object {object_key}"))?;
+    let mut progress = TransferProgress::new("ii send", show_progress, source.size(), 0);
+    copy_with_progress(&mut source_file, &mut remote, &mut progress)
+        .await
+        .with_context(|| format!("upload SFTP object {object_key}"))?;
+    remote.flush().await.context("flush SFTP upload")?;
+    remote.shutdown().await.context("finish SFTP upload")?;
+    progress.finish();
+    connection.client.close().await.ok();
+    Ok(SftpUploadResult { object_key })
+}
+
+fn sftp_portable_credentials(profile: &storage::SftpProfile) -> Result<SftpPortableCredentials> {
+    let auth = match profile.auth {
+        storage::SftpAuth::Password => SftpPortableAuth::Password {
+            password: profile.password.clone(),
+        },
+        storage::SftpAuth::PrivateKey => SftpPortableAuth::PrivateKey {
+            private_key: storage::load_sftp_private_key(profile)?,
+            private_key_passphrase: profile.private_key_passphrase.clone(),
+        },
+    };
+    Ok(SftpPortableCredentials {
+        host: profile.host.clone(),
+        port: profile.port,
+        username: profile.username.clone(),
+        remote_dir: profile.remote_dir.clone(),
+        auth,
+    })
+}
+
 pub async fn recv(args: RecvArgs) -> Result<()> {
     let mut trace = RecvTrace::new(args.trace);
     let show_progress = should_show_progress(args.trace);
@@ -762,6 +1144,12 @@ pub async fn recv(args: RecvArgs) -> Result<()> {
                 if let Some(webdav) = ticket.webdav_route() {
                     try_delete_webdav_for_ticket(webdav.clone(), &mut trace).await;
                 }
+                if let Some(ftp) = ticket.ftp_route() {
+                    try_delete_ftp_for_ticket(ftp.clone(), &mut trace).await;
+                }
+                if let Some(sftp) = ticket.sftp_route() {
+                    try_delete_sftp_for_ticket(sftp.clone(), &mut trace).await;
+                }
                 return Ok(());
             }
             Some((path, plan))
@@ -774,6 +1162,12 @@ pub async fn recv(args: RecvArgs) -> Result<()> {
     }
     if ticket.webdav_route().is_some() {
         return recv_webdav(args, ticket, out_dir, file_target, trace, show_progress).await;
+    }
+    if ticket.ftp_route().is_some() {
+        return recv_ftp(args, ticket, out_dir, file_target, trace, show_progress).await;
+    }
+    if ticket.sftp_route().is_some() {
+        return recv_sftp(args, ticket, out_dir, file_target, trace, show_progress).await;
     }
 
     let relay_only = ticket.is_relay_only();
@@ -877,6 +1271,23 @@ pub async fn recv(args: RecvArgs) -> Result<()> {
     endpoint.close().await;
     trace.finish(bytes_written);
     Ok(())
+}
+
+pub async fn recv_with_events(
+    args: RecvArgs,
+    events: std::sync::mpsc::Sender<TransferEvent>,
+) -> Result<()> {
+    let _ = events.send(TransferEvent::Started);
+    let result = recv(args).await;
+    match &result {
+        Ok(()) => {
+            let _ = events.send(TransferEvent::Completed);
+        }
+        Err(err) => {
+            let _ = events.send(TransferEvent::Failed(format!("{err:#}")));
+        }
+    }
+    result
 }
 
 async fn recv_s3(
@@ -1058,6 +1469,664 @@ async fn try_delete_webdav_for_ticket(webdav: crate::ticket::WebDavTicket, trace
     .await;
     if let Err(err) = result {
         trace.info(format_args!("webdav delete skipped: {err:#}"));
+    }
+}
+
+async fn recv_ftp(
+    args: RecvArgs,
+    ticket: Ticket,
+    out_dir: PathBuf,
+    file_target: Option<(PathBuf, FilePlan)>,
+    mut trace: RecvTrace,
+    show_progress: bool,
+) -> Result<()> {
+    let ftp = ticket
+        .ftp_route()
+        .context("ftp ticket missing route")?
+        .clone();
+    trace.info(format_args!("using FTP object {}", ftp.object_key));
+    let (profile, save_after_success) = match &ftp.portable {
+        Some(portable) => {
+            let profile = ftp_profile_from_portable(portable)?;
+            let save = portable_ftp_config(&ftp.profile, &profile)?;
+            (profile, Some(save))
+        }
+        None => {
+            let selection = storage::load_or_prompt_ftp_profile_named(&ftp.profile)?;
+            let save = selection
+                .save_after_success
+                .then_some((selection.path.clone(), selection.config.clone()));
+            (selection.profile, save)
+        }
+    };
+    let mut client = ftp_connect(&profile).await?;
+    let bytes_written = match ticket.kind() {
+        PayloadKind::File | PayloadKind::Stdin => {
+            if args.stdout {
+                download_ftp_to_stdout(
+                    &mut client,
+                    &ftp.object_key,
+                    ticket.size(),
+                    show_progress,
+                    &mut trace,
+                )
+                .await?
+            } else {
+                let (path, plan) = file_target.expect("file target exists");
+                let resume_from = match plan {
+                    FilePlan::Download { resume_from } => resume_from,
+                    FilePlan::Skip => 0,
+                };
+                download_ftp_to_file(
+                    &mut client,
+                    &ftp.object_key,
+                    path,
+                    resume_from,
+                    ticket.size(),
+                    show_progress,
+                    &mut trace,
+                )
+                .await?
+            }
+        }
+        PayloadKind::Dir => {
+            if args.stdout {
+                bail!("--stdout is not supported for directory tickets");
+            }
+            download_ftp_tar(
+                &mut client,
+                &ftp.object_key,
+                out_dir,
+                ticket.size(),
+                show_progress,
+                &mut trace,
+            )
+            .await?
+        }
+    };
+    if let Some((path, config)) = save_after_success {
+        storage::save_config(&path, &config)?;
+    }
+    trace.step("receive payload");
+    trace.info(format_args!("received {} bytes", bytes_written));
+    try_delete_ftp(
+        &mut client,
+        &ftp.object_key,
+        ftp.delete_after_recv,
+        &mut trace,
+    )
+    .await;
+    client.quit().await.ok();
+    trace.finish(bytes_written);
+    Ok(())
+}
+
+fn ftp_profile_from_portable(portable: &FtpPortableCredentials) -> Result<storage::FtpProfile> {
+    let profile = storage::FtpProfile {
+        url: portable.url.clone(),
+        username: portable.username.clone(),
+        password: portable.password.clone(),
+        remote_dir: portable.remote_dir.clone(),
+    };
+    storage::validate_ftp_profile(&profile)?;
+    Ok(profile)
+}
+
+fn portable_ftp_config(
+    profile_name: &str,
+    profile: &storage::FtpProfile,
+) -> Result<(PathBuf, storage::IiConfig)> {
+    let path = storage::default_config_path()?;
+    let mut config = storage::load_config(&path)?;
+    config
+        .storage
+        .ftp
+        .insert(profile_name.to_string(), profile.clone());
+    Ok((path, config))
+}
+
+async fn try_delete_ftp_for_ticket(ftp: crate::ticket::FtpTicket, trace: &mut RecvTrace) {
+    if !ftp.delete_after_recv {
+        return;
+    }
+    let result = async {
+        let (profile, save_after_success) = match &ftp.portable {
+            Some(portable) => {
+                let profile = ftp_profile_from_portable(portable)?;
+                let save = portable_ftp_config(&ftp.profile, &profile)?;
+                (profile, Some(save))
+            }
+            None => {
+                let selection = storage::load_or_prompt_ftp_profile_named(&ftp.profile)?;
+                let save = selection
+                    .save_after_success
+                    .then_some((selection.path.clone(), selection.config.clone()));
+                (selection.profile, save)
+            }
+        };
+        let mut client = ftp_connect(&profile).await?;
+        try_delete_ftp(&mut client, &ftp.object_key, true, trace).await;
+        client.quit().await.ok();
+        if let Some((path, config)) = save_after_success {
+            storage::save_config(&path, &config)?;
+        }
+        Ok::<(), anyhow::Error>(())
+    }
+    .await;
+    if let Err(err) = result {
+        trace.info(format_args!("ftp delete skipped: {err:#}"));
+    }
+}
+
+async fn download_ftp_to_file(
+    client: &mut AsyncFtpStream,
+    object_key: &str,
+    path: PathBuf,
+    resume_from: u64,
+    total_size: Option<u64>,
+    show_progress: bool,
+    trace: &mut RecvTrace,
+) -> Result<u64> {
+    trace.info(format_args!("download ftp file to {}", path.display()));
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).await.ok();
+    }
+    let filename = ftp_enter_object_parent(client, object_key, false).await?;
+    let mut append = false;
+    if let Ok(offset) = usize::try_from(resume_from)
+        && offset > 0
+        && client.resume_transfer(offset).await.is_ok()
+    {
+        append = true;
+    }
+    let mut response = client
+        .retr_as_stream(&filename)
+        .await
+        .with_context(|| format!("download FTP object {object_key}"))?;
+    let mut file = if append {
+        fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .await
+            .with_context(|| format!("open destination {}", path.display()))?
+    } else {
+        fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&path)
+            .await
+            .with_context(|| format!("open destination {}", path.display()))?
+    };
+    let completed = if append { resume_from } else { 0 };
+    let mut progress = TransferProgress::new("ii recv", show_progress, total_size, completed);
+    let bytes = copy_with_progress(&mut response, &mut file, &mut progress)
+        .await
+        .with_context(|| format!("write destination {}", path.display()))?;
+    progress.finish();
+    file.flush()
+        .await
+        .with_context(|| format!("flush destination {}", path.display()))?;
+    client
+        .finalize_retr_stream(response)
+        .await
+        .with_context(|| format!("finish FTP download {object_key}"))?;
+    Ok(bytes)
+}
+
+async fn download_ftp_to_stdout(
+    client: &mut AsyncFtpStream,
+    object_key: &str,
+    total_size: Option<u64>,
+    show_progress: bool,
+    trace: &mut RecvTrace,
+) -> Result<u64> {
+    trace.info("download ftp file to stdout");
+    let filename = ftp_enter_object_parent(client, object_key, false).await?;
+    let mut response = client
+        .retr_as_stream(&filename)
+        .await
+        .with_context(|| format!("download FTP object {object_key}"))?;
+    let mut stdout = io::stdout();
+    let mut progress = TransferProgress::new("ii recv", show_progress, total_size, 0);
+    let bytes = copy_with_progress(&mut response, &mut stdout, &mut progress)
+        .await
+        .context("write stdout")?;
+    progress.finish();
+    stdout.flush().await.ok();
+    client
+        .finalize_retr_stream(response)
+        .await
+        .with_context(|| format!("finish FTP download {object_key}"))?;
+    Ok(bytes)
+}
+
+async fn download_ftp_tar(
+    client: &mut AsyncFtpStream,
+    object_key: &str,
+    out_dir: PathBuf,
+    total_size: Option<u64>,
+    show_progress: bool,
+    trace: &mut RecvTrace,
+) -> Result<u64> {
+    trace.info(format_args!("download ftp tar to {}", out_dir.display()));
+    fs::create_dir_all(&out_dir)
+        .await
+        .with_context(|| format!("create output dir {}", out_dir.display()))?;
+    let filename = ftp_enter_object_parent(client, object_key, false).await?;
+    let mut response = client
+        .retr_as_stream(&filename)
+        .await
+        .with_context(|| format!("download FTP object {object_key}"))?;
+    let temp = NamedTempFile::new().context("create temp tar")?;
+    let temp_path = temp.path().to_path_buf();
+    let mut file = fs::File::from_std(temp.reopen().context("reopen temp tar")?);
+    let mut progress = TransferProgress::new("ii recv", show_progress, total_size, 0);
+    let bytes = copy_with_progress(&mut response, &mut file, &mut progress)
+        .await
+        .context("buffer ftp tar")?;
+    progress.finish();
+    file.flush().await.context("flush temp tar")?;
+    client
+        .finalize_retr_stream(response)
+        .await
+        .with_context(|| format!("finish FTP download {object_key}"))?;
+    let extract_path = out_dir.clone();
+    tokio::task::spawn_blocking(move || -> Result<()> {
+        let file = std::fs::File::open(&temp_path).context("open tar")?;
+        let mut archive = tar::Archive::new(file);
+        archive.unpack(&extract_path).context("unpack tar")?;
+        Ok(())
+    })
+    .await
+    .context("extract ftp tar task")??;
+    Ok(bytes)
+}
+
+async fn try_delete_ftp(
+    client: &mut AsyncFtpStream,
+    object_key: &str,
+    delete_after_recv: bool,
+    trace: &mut RecvTrace,
+) {
+    if !delete_after_recv {
+        return;
+    }
+    let result = async {
+        let filename = ftp_enter_object_parent(client, object_key, false).await?;
+        client
+            .rm(&filename)
+            .await
+            .with_context(|| format!("delete FTP object {object_key}"))?;
+        Ok::<(), anyhow::Error>(())
+    }
+    .await;
+    match result {
+        Ok(()) => trace.info("ftp delete requested after receive"),
+        Err(err) => trace.info(format_args!("ftp delete ignored: {err:#}")),
+    }
+}
+
+struct PortableSftpProfile {
+    profile: storage::SftpProfile,
+    _private_key: Option<NamedTempFile>,
+    private_key_material: Option<String>,
+}
+
+async fn recv_sftp(
+    args: RecvArgs,
+    ticket: Ticket,
+    out_dir: PathBuf,
+    file_target: Option<(PathBuf, FilePlan)>,
+    mut trace: RecvTrace,
+    show_progress: bool,
+) -> Result<()> {
+    let sftp = ticket
+        .sftp_route()
+        .context("sftp ticket missing route")?
+        .clone();
+    trace.info(format_args!("using SFTP object {}", sftp.object_key));
+    let mut portable_state = None;
+    let (profile, save_after_success) = match &sftp.portable {
+        Some(portable) => {
+            let state = sftp_profile_from_portable(portable)?;
+            let profile = state.profile.clone();
+            portable_state = Some(state);
+            (profile, None)
+        }
+        None => {
+            let selection = storage::load_or_prompt_sftp_profile_named(&sftp.profile)?;
+            let save = selection
+                .save_after_success
+                .then_some((selection.path.clone(), selection.config.clone()));
+            (selection.profile, save)
+        }
+    };
+    let connection = sftp_connect(&profile).await?;
+    let bytes_written = match ticket.kind() {
+        PayloadKind::File | PayloadKind::Stdin => {
+            if args.stdout {
+                download_sftp_to_stdout(
+                    &connection.client,
+                    &sftp.object_key,
+                    ticket.size(),
+                    show_progress,
+                    &mut trace,
+                )
+                .await?
+            } else {
+                let (path, plan) = file_target.expect("file target exists");
+                let resume_from = match plan {
+                    FilePlan::Download { resume_from } => resume_from,
+                    FilePlan::Skip => 0,
+                };
+                download_sftp_to_file(
+                    &connection.client,
+                    &sftp.object_key,
+                    path,
+                    resume_from,
+                    ticket.size(),
+                    show_progress,
+                    &mut trace,
+                )
+                .await?
+            }
+        }
+        PayloadKind::Dir => {
+            if args.stdout {
+                bail!("--stdout is not supported for directory tickets");
+            }
+            download_sftp_tar(
+                &connection.client,
+                &sftp.object_key,
+                out_dir,
+                ticket.size(),
+                show_progress,
+                &mut trace,
+            )
+            .await?
+        }
+    };
+    if let Some(state) = portable_state.as_ref() {
+        let (path, config) = portable_sftp_config(
+            &sftp.profile,
+            &state.profile,
+            state.private_key_material.as_deref(),
+        )?;
+        storage::save_config(&path, &config)?;
+    }
+    if let Some((path, config)) = save_after_success {
+        storage::save_config(&path, &config)?;
+    }
+    trace.step("receive payload");
+    trace.info(format_args!("received {} bytes", bytes_written));
+    try_delete_sftp(
+        &connection.client,
+        &sftp.object_key,
+        sftp.delete_after_recv,
+        &mut trace,
+    )
+    .await;
+    connection.client.close().await.ok();
+    trace.finish(bytes_written);
+    Ok(())
+}
+
+fn sftp_profile_from_portable(portable: &SftpPortableCredentials) -> Result<PortableSftpProfile> {
+    let (
+        auth,
+        password,
+        private_key_path,
+        private_key_passphrase,
+        private_key,
+        private_key_material,
+    ) = match &portable.auth {
+        SftpPortableAuth::Password { password } => (
+            storage::SftpAuth::Password,
+            password.clone(),
+            None,
+            None,
+            None,
+            None,
+        ),
+        SftpPortableAuth::PrivateKey {
+            private_key,
+            private_key_passphrase,
+        } => {
+            let mut temp = NamedTempFile::new().context("create temporary SFTP private key")?;
+            temp.write_all(private_key.as_bytes())
+                .context("write temporary SFTP private key")?;
+            let path = temp.path().to_path_buf();
+            (
+                storage::SftpAuth::PrivateKey,
+                String::new(),
+                Some(path),
+                private_key_passphrase.clone(),
+                Some(temp),
+                Some(private_key.clone()),
+            )
+        }
+    };
+    let profile = storage::SftpProfile {
+        host: portable.host.clone(),
+        port: portable.port,
+        username: portable.username.clone(),
+        remote_dir: portable.remote_dir.clone(),
+        auth,
+        password,
+        private_key_path,
+        private_key_passphrase,
+    };
+    storage::validate_sftp_profile(&profile)?;
+    Ok(PortableSftpProfile {
+        profile,
+        _private_key: private_key,
+        private_key_material,
+    })
+}
+
+fn portable_sftp_config(
+    profile_name: &str,
+    profile: &storage::SftpProfile,
+    private_key_material: Option<&str>,
+) -> Result<(PathBuf, storage::IiConfig)> {
+    let path = storage::default_config_path()?;
+    let mut config = storage::load_config(&path)?;
+    let mut persisted = profile.clone();
+    if let Some(private_key) = private_key_material {
+        persisted.private_key_path = Some(storage::save_portable_sftp_private_key(
+            profile_name,
+            private_key,
+        )?);
+    }
+    config
+        .storage
+        .sftp
+        .insert(profile_name.to_string(), persisted);
+    Ok((path, config))
+}
+
+async fn try_delete_sftp_for_ticket(sftp: crate::ticket::SftpTicket, trace: &mut RecvTrace) {
+    if !sftp.delete_after_recv {
+        return;
+    }
+    let result = async {
+        let mut portable_state = None;
+        let (profile, save_after_success) = match &sftp.portable {
+            Some(portable) => {
+                let state = sftp_profile_from_portable(portable)?;
+                let profile = state.profile.clone();
+                portable_state = Some(state);
+                (profile, None)
+            }
+            None => {
+                let selection = storage::load_or_prompt_sftp_profile_named(&sftp.profile)?;
+                let save = selection
+                    .save_after_success
+                    .then_some((selection.path.clone(), selection.config.clone()));
+                (selection.profile, save)
+            }
+        };
+        let connection = sftp_connect(&profile).await?;
+        try_delete_sftp(&connection.client, &sftp.object_key, true, trace).await;
+        connection.client.close().await.ok();
+        if let Some(state) = portable_state.as_ref() {
+            let (path, config) = portable_sftp_config(
+                &sftp.profile,
+                &state.profile,
+                state.private_key_material.as_deref(),
+            )?;
+            storage::save_config(&path, &config)?;
+        }
+        if let Some((path, config)) = save_after_success {
+            storage::save_config(&path, &config)?;
+        }
+        Ok::<(), anyhow::Error>(())
+    }
+    .await;
+    if let Err(err) = result {
+        trace.info(format_args!("sftp delete skipped: {err:#}"));
+    }
+}
+
+async fn download_sftp_to_file(
+    client: &SftpSession,
+    object_key: &str,
+    path: PathBuf,
+    resume_from: u64,
+    total_size: Option<u64>,
+    show_progress: bool,
+    trace: &mut RecvTrace,
+) -> Result<u64> {
+    trace.info(format_args!("download sftp file to {}", path.display()));
+    remote_path_parts(object_key)?;
+    if let Some(parent) = path.parent() {
+        fs::create_dir_all(parent).await.ok();
+    }
+    let mut remote = client
+        .open(object_key)
+        .await
+        .with_context(|| format!("open SFTP object {object_key}"))?;
+    let mut append = resume_from > 0;
+    if append
+        && remote
+            .seek(std::io::SeekFrom::Start(resume_from))
+            .await
+            .is_err()
+    {
+        append = false;
+    }
+    let mut file = if append {
+        fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .await
+            .with_context(|| format!("open destination {}", path.display()))?
+    } else {
+        fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .truncate(true)
+            .open(&path)
+            .await
+            .with_context(|| format!("open destination {}", path.display()))?
+    };
+    let completed = if append { resume_from } else { 0 };
+    let mut progress = TransferProgress::new("ii recv", show_progress, total_size, completed);
+    let bytes = copy_with_progress(&mut remote, &mut file, &mut progress)
+        .await
+        .with_context(|| format!("write destination {}", path.display()))?;
+    progress.finish();
+    file.flush()
+        .await
+        .with_context(|| format!("flush destination {}", path.display()))?;
+    Ok(bytes)
+}
+
+async fn download_sftp_to_stdout(
+    client: &SftpSession,
+    object_key: &str,
+    total_size: Option<u64>,
+    show_progress: bool,
+    trace: &mut RecvTrace,
+) -> Result<u64> {
+    trace.info("download sftp file to stdout");
+    remote_path_parts(object_key)?;
+    let mut remote = client
+        .open(object_key)
+        .await
+        .with_context(|| format!("open SFTP object {object_key}"))?;
+    let mut stdout = io::stdout();
+    let mut progress = TransferProgress::new("ii recv", show_progress, total_size, 0);
+    let bytes = copy_with_progress(&mut remote, &mut stdout, &mut progress)
+        .await
+        .context("write stdout")?;
+    progress.finish();
+    stdout.flush().await.ok();
+    Ok(bytes)
+}
+
+async fn download_sftp_tar(
+    client: &SftpSession,
+    object_key: &str,
+    out_dir: PathBuf,
+    total_size: Option<u64>,
+    show_progress: bool,
+    trace: &mut RecvTrace,
+) -> Result<u64> {
+    trace.info(format_args!("download sftp tar to {}", out_dir.display()));
+    remote_path_parts(object_key)?;
+    fs::create_dir_all(&out_dir)
+        .await
+        .with_context(|| format!("create output dir {}", out_dir.display()))?;
+    let mut remote = client
+        .open(object_key)
+        .await
+        .with_context(|| format!("open SFTP object {object_key}"))?;
+    let temp = NamedTempFile::new().context("create temp tar")?;
+    let temp_path = temp.path().to_path_buf();
+    let mut file = fs::File::from_std(temp.reopen().context("reopen temp tar")?);
+    let mut progress = TransferProgress::new("ii recv", show_progress, total_size, 0);
+    let bytes = copy_with_progress(&mut remote, &mut file, &mut progress)
+        .await
+        .context("buffer sftp tar")?;
+    progress.finish();
+    file.flush().await.context("flush temp tar")?;
+    let extract_path = out_dir.clone();
+    tokio::task::spawn_blocking(move || -> Result<()> {
+        let file = std::fs::File::open(&temp_path).context("open tar")?;
+        let mut archive = tar::Archive::new(file);
+        archive.unpack(&extract_path).context("unpack tar")?;
+        Ok(())
+    })
+    .await
+    .context("extract sftp tar task")??;
+    Ok(bytes)
+}
+
+async fn try_delete_sftp(
+    client: &SftpSession,
+    object_key: &str,
+    delete_after_recv: bool,
+    trace: &mut RecvTrace,
+) {
+    if !delete_after_recv {
+        return;
+    }
+    let result = async {
+        remote_path_parts(object_key)?;
+        client
+            .remove_file(object_key)
+            .await
+            .with_context(|| format!("delete SFTP object {object_key}"))?;
+        Ok::<(), anyhow::Error>(())
+    }
+    .await;
+    match result {
+        Ok(()) => trace.info("sftp delete requested after receive"),
+        Err(err) => trace.info(format_args!("sftp delete ignored: {err:#}")),
     }
 }
 
@@ -2034,7 +3103,16 @@ where
 mod tests {
     use super::*;
     use iroh::{EndpointAddr, TransportAddr};
-    use std::net::{Ipv4Addr, SocketAddr};
+    use russh::{Channel, ChannelId, server as ssh_server};
+    use russh_sftp::{
+        protocol::{Attrs, Data, FileAttributes, Handle, Status, StatusCode, Version},
+        server::Handler as SftpServerHandler,
+    };
+    use std::{
+        collections::{HashMap, HashSet},
+        net::{Ipv4Addr, SocketAddr},
+    };
+    use tokio::sync::Mutex as TokioMutex;
 
     #[test]
     fn ticket_round_trip() {
@@ -2112,6 +3190,118 @@ mod tests {
         assert_eq!(plan, FilePlan::Download { resume_from: 0 });
     }
 
+    #[tokio::test]
+    async fn ftp_round_trip_uses_passive_mode_and_deletes_after_receive() {
+        let root = tempfile::tempdir().unwrap();
+        let port = unused_local_port();
+        let ftp_root = root.path().to_path_buf();
+        let server = libunftp::ServerBuilder::new(Box::new(move || {
+            unftp_sbe_fs::Filesystem::new(ftp_root.clone()).unwrap()
+        }))
+        .passive_host([127, 0, 0, 1])
+        .passive_ports(41000..=41020)
+        .build()
+        .unwrap();
+        let server_task = tokio::spawn(async move {
+            let _ = server.listen(format!("127.0.0.1:{port}")).await;
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let source_path = root.path().join("source.txt");
+        std::fs::write(&source_path, b"ftp payload").unwrap();
+        let source = Source::from_file(source_path, None).await.unwrap();
+        let profile = storage::FtpProfile {
+            url: format!("ftp://127.0.0.1:{port}"),
+            username: "user".to_string(),
+            password: "pass".to_string(),
+            remote_dir: "ii/".to_string(),
+        };
+        let upload = upload_to_ftp(&source, &profile, false).await.unwrap();
+
+        let destination = root.path().join("received.txt");
+        let mut client = ftp_connect(&profile).await.unwrap();
+        let mut trace = RecvTrace::new(false);
+        let bytes = download_ftp_to_file(
+            &mut client,
+            &upload.object_key,
+            destination.clone(),
+            0,
+            source.size(),
+            false,
+            &mut trace,
+        )
+        .await
+        .unwrap();
+        assert_eq!(bytes, 11);
+        assert_eq!(std::fs::read(&destination).unwrap(), b"ftp payload");
+        try_delete_ftp(&mut client, &upload.object_key, true, &mut trace).await;
+        client.quit().await.unwrap();
+        assert!(!root.path().join(&upload.object_key).exists());
+        server_task.abort();
+    }
+
+    #[tokio::test]
+    async fn sftp_password_round_trip_accepts_host_key_and_deletes_after_receive() {
+        let state = Arc::new(TestSftpState::default());
+        let port = unused_local_port();
+        let config = ssh_server::Config {
+            keys: vec![
+                russh::keys::PrivateKey::random(&mut rand::rng(), russh::keys::Algorithm::Ed25519)
+                    .unwrap(),
+            ],
+            ..Default::default()
+        };
+        let mut server = TestSftpServer {
+            state: Arc::clone(&state),
+        };
+        let server_task = tokio::spawn(async move {
+            let _ = ssh_server::Server::run_on_address(
+                &mut server,
+                Arc::new(config),
+                ("127.0.0.1", port),
+            )
+            .await;
+        });
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        let root = tempfile::tempdir().unwrap();
+        let source_path = root.path().join("source.txt");
+        std::fs::write(&source_path, b"sftp payload").unwrap();
+        let source = Source::from_file(source_path, None).await.unwrap();
+        let profile = storage::SftpProfile {
+            host: "127.0.0.1".to_string(),
+            port,
+            username: "user".to_string(),
+            remote_dir: "ii/".to_string(),
+            auth: storage::SftpAuth::Password,
+            password: "pass".to_string(),
+            private_key_path: None,
+            private_key_passphrase: None,
+        };
+        let upload = upload_to_sftp(&source, &profile, false).await.unwrap();
+
+        let destination = root.path().join("received.txt");
+        let connection = sftp_connect(&profile).await.unwrap();
+        let mut trace = RecvTrace::new(false);
+        let bytes = download_sftp_to_file(
+            &connection.client,
+            &upload.object_key,
+            destination.clone(),
+            0,
+            source.size(),
+            false,
+            &mut trace,
+        )
+        .await
+        .unwrap();
+        assert_eq!(bytes, 12);
+        assert_eq!(std::fs::read(&destination).unwrap(), b"sftp payload");
+        try_delete_sftp(&connection.client, &upload.object_key, true, &mut trace).await;
+        connection.client.close().await.unwrap();
+        assert!(!state.files.lock().await.contains_key(&upload.object_key));
+        server_task.abort();
+    }
+
     fn test_ticket(name: &str, size: Option<u64>, content_md5: Option<[u8; 16]>) -> Ticket {
         Ticket::peer(
             EndpointAddr::from_parts(
@@ -2137,6 +3327,207 @@ mod tests {
             resume: false,
             local: false,
             trace: false,
+        }
+    }
+
+    fn unused_local_port() -> u16 {
+        let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
+        listener.local_addr().unwrap().port()
+    }
+
+    #[derive(Default)]
+    struct TestSftpState {
+        files: TokioMutex<HashMap<String, Vec<u8>>>,
+        dirs: TokioMutex<HashSet<String>>,
+    }
+
+    struct TestSftpServer {
+        state: Arc<TestSftpState>,
+    }
+
+    impl ssh_server::Server for TestSftpServer {
+        type Handler = TestSshSession;
+
+        fn new_client(&mut self, _: Option<SocketAddr>) -> Self::Handler {
+            TestSshSession {
+                state: Arc::clone(&self.state),
+                channels: Arc::new(TokioMutex::new(HashMap::new())),
+            }
+        }
+    }
+
+    struct TestSshSession {
+        state: Arc<TestSftpState>,
+        channels: Arc<TokioMutex<HashMap<ChannelId, Channel<ssh_server::Msg>>>>,
+    }
+
+    impl ssh_server::Handler for TestSshSession {
+        type Error = anyhow::Error;
+
+        async fn auth_password(
+            &mut self,
+            _user: &str,
+            _password: &str,
+        ) -> Result<ssh_server::Auth, Self::Error> {
+            Ok(ssh_server::Auth::Accept)
+        }
+
+        async fn channel_open_session(
+            &mut self,
+            channel: Channel<ssh_server::Msg>,
+            _session: &mut ssh_server::Session,
+        ) -> Result<bool, Self::Error> {
+            self.channels.lock().await.insert(channel.id(), channel);
+            Ok(true)
+        }
+
+        async fn subsystem_request(
+            &mut self,
+            channel_id: ChannelId,
+            name: &str,
+            session: &mut ssh_server::Session,
+        ) -> Result<(), Self::Error> {
+            if name != "sftp" {
+                session.channel_failure(channel_id)?;
+                return Ok(());
+            }
+            let channel = self
+                .channels
+                .lock()
+                .await
+                .remove(&channel_id)
+                .context("missing SFTP test channel")?;
+            session.channel_success(channel_id)?;
+            russh_sftp::server::run(
+                channel.into_stream(),
+                TestSftpHandler {
+                    state: Arc::clone(&self.state),
+                },
+            )
+            .await;
+            Ok(())
+        }
+    }
+
+    struct TestSftpHandler {
+        state: Arc<TestSftpState>,
+    }
+
+    impl SftpServerHandler for TestSftpHandler {
+        type Error = StatusCode;
+
+        fn unimplemented(&self) -> Self::Error {
+            StatusCode::OpUnsupported
+        }
+
+        async fn init(
+            &mut self,
+            _version: u32,
+            _extensions: HashMap<String, String>,
+        ) -> Result<Version, Self::Error> {
+            Ok(Version::new())
+        }
+
+        async fn open(
+            &mut self,
+            id: u32,
+            filename: String,
+            flags: OpenFlags,
+            _attrs: FileAttributes,
+        ) -> Result<Handle, Self::Error> {
+            let mut files = self.state.files.lock().await;
+            if flags.contains(OpenFlags::TRUNCATE) {
+                files.insert(filename.clone(), Vec::new());
+            } else if flags.contains(OpenFlags::CREATE) {
+                files.entry(filename.clone()).or_default();
+            } else if !files.contains_key(&filename) {
+                return Err(StatusCode::NoSuchFile);
+            }
+            Ok(Handle {
+                id,
+                handle: filename,
+            })
+        }
+
+        async fn close(&mut self, id: u32, _handle: String) -> Result<Status, Self::Error> {
+            Ok(test_sftp_status(id))
+        }
+
+        async fn read(
+            &mut self,
+            id: u32,
+            handle: String,
+            offset: u64,
+            len: u32,
+        ) -> Result<Data, Self::Error> {
+            let files = self.state.files.lock().await;
+            let bytes = files.get(&handle).ok_or(StatusCode::NoSuchFile)?;
+            let start = usize::try_from(offset).map_err(|_| StatusCode::Eof)?;
+            if start >= bytes.len() {
+                return Err(StatusCode::Eof);
+            }
+            let end = start.saturating_add(len as usize).min(bytes.len());
+            Ok(Data {
+                id,
+                data: bytes[start..end].to_vec(),
+            })
+        }
+
+        async fn write(
+            &mut self,
+            id: u32,
+            handle: String,
+            offset: u64,
+            data: Vec<u8>,
+        ) -> Result<Status, Self::Error> {
+            let start = usize::try_from(offset).map_err(|_| StatusCode::Failure)?;
+            let mut files = self.state.files.lock().await;
+            let bytes = files.get_mut(&handle).ok_or(StatusCode::NoSuchFile)?;
+            let end = start.saturating_add(data.len());
+            if bytes.len() < end {
+                bytes.resize(end, 0);
+            }
+            bytes[start..end].copy_from_slice(&data);
+            Ok(test_sftp_status(id))
+        }
+
+        async fn stat(&mut self, id: u32, path: String) -> Result<Attrs, Self::Error> {
+            if let Some(bytes) = self.state.files.lock().await.get(&path) {
+                let mut attrs = FileAttributes::empty();
+                attrs.size = Some(bytes.len() as u64);
+                return Ok(Attrs { id, attrs });
+            }
+            if self.state.dirs.lock().await.contains(&path) {
+                return Ok(Attrs {
+                    id,
+                    attrs: FileAttributes::default(),
+                });
+            }
+            Err(StatusCode::NoSuchFile)
+        }
+
+        async fn mkdir(
+            &mut self,
+            id: u32,
+            path: String,
+            _attrs: FileAttributes,
+        ) -> Result<Status, Self::Error> {
+            self.state.dirs.lock().await.insert(path);
+            Ok(test_sftp_status(id))
+        }
+
+        async fn remove(&mut self, id: u32, filename: String) -> Result<Status, Self::Error> {
+            self.state.files.lock().await.remove(&filename);
+            Ok(test_sftp_status(id))
+        }
+    }
+
+    fn test_sftp_status(id: u32) -> Status {
+        Status {
+            id,
+            status_code: StatusCode::Ok,
+            error_message: String::new(),
+            language_tag: String::new(),
         }
     }
 }

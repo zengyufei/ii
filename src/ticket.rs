@@ -56,12 +56,64 @@ pub struct WebDavTicket {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FtpPortableCredentials {
+    pub url: String,
+    pub username: String,
+    pub password: String,
+    pub remote_dir: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct FtpTicket {
+    pub version: u8,
+    pub profile: String,
+    pub object_key: String,
+    #[serde(default)]
+    pub delete_after_recv: bool,
+    pub portable: Option<FtpPortableCredentials>,
+    pub common: TicketCommon,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum SftpPortableAuth {
+    Password {
+        password: String,
+    },
+    PrivateKey {
+        private_key: String,
+        private_key_passphrase: Option<String>,
+    },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SftpPortableCredentials {
+    pub host: String,
+    pub port: u16,
+    pub username: String,
+    pub remote_dir: String,
+    pub auth: SftpPortableAuth,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SftpTicket {
+    pub version: u8,
+    pub profile: String,
+    pub object_key: String,
+    #[serde(default)]
+    pub delete_after_recv: bool,
+    pub portable: Option<SftpPortableCredentials>,
+    pub common: TicketCommon,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Ticket {
     Peer(PeerTicket),
     S3(S3Ticket),
     WebDav(WebDavTicket),
     RelayOnly(RelayOnlyTicket),
     TrustedRelayOnly(RelayOnlyTicket),
+    Ftp(FtpTicket),
+    Sftp(SftpTicket),
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -183,6 +235,56 @@ impl Ticket {
         })
     }
 
+    pub fn ftp(
+        profile: String,
+        object_key: String,
+        delete_after_recv: bool,
+        portable: Option<FtpPortableCredentials>,
+        name: String,
+        kind: PayloadKind,
+        size: Option<u64>,
+        content_md5: Option<[u8; 16]>,
+    ) -> Self {
+        Ticket::Ftp(FtpTicket {
+            version: 7,
+            profile,
+            object_key,
+            delete_after_recv,
+            portable,
+            common: TicketCommon {
+                name,
+                kind,
+                size,
+                content_md5,
+            },
+        })
+    }
+
+    pub fn sftp(
+        profile: String,
+        object_key: String,
+        delete_after_recv: bool,
+        portable: Option<SftpPortableCredentials>,
+        name: String,
+        kind: PayloadKind,
+        size: Option<u64>,
+        content_md5: Option<[u8; 16]>,
+    ) -> Self {
+        Ticket::Sftp(SftpTicket {
+            version: 8,
+            profile,
+            object_key,
+            delete_after_recv,
+            portable,
+            common: TicketCommon {
+                name,
+                kind,
+                size,
+                content_md5,
+            },
+        })
+    }
+
     pub fn encode(&self) -> Result<String> {
         let bytes = postcard::to_stdvec(self).context("serialize ticket")?;
         Ok(format!("{PREFIX}{}", URL_SAFE_NO_PAD.encode(bytes)))
@@ -202,6 +304,8 @@ impl Ticket {
                 Ticket::WebDav(webdav) if webdav.version == 4 => return Ok(ticket),
                 Ticket::RelayOnly(relay) if relay.version == 5 => return Ok(ticket),
                 Ticket::TrustedRelayOnly(relay) if relay.version == 6 => return Ok(ticket),
+                Ticket::Ftp(ftp) if ftp.version == 7 => return Ok(ticket),
+                Ticket::Sftp(sftp) if sftp.version == 8 => return Ok(ticket),
                 Ticket::Peer(peer) if peer.version != 2 => {
                     bail!("unsupported peer ticket version {}", peer.version)
                 }
@@ -219,6 +323,12 @@ impl Ticket {
                         "unsupported trusted relay-only ticket version {}",
                         relay.version
                     )
+                }
+                Ticket::Ftp(ftp) if ftp.version != 7 => {
+                    bail!("unsupported ftp ticket version {}", ftp.version)
+                }
+                Ticket::Sftp(sftp) if sftp.version != 8 => {
+                    bail!("unsupported sftp ticket version {}", sftp.version)
                 }
                 _ => {}
             }
@@ -254,6 +364,8 @@ impl Ticket {
             Ticket::WebDav(ticket) => &ticket.common,
             Ticket::RelayOnly(ticket) => &ticket.common,
             Ticket::TrustedRelayOnly(ticket) => &ticket.common,
+            Ticket::Ftp(ticket) => &ticket.common,
+            Ticket::Sftp(ticket) => &ticket.common,
         }
     }
 
@@ -262,7 +374,7 @@ impl Ticket {
             Ticket::Peer(ticket) => Some(&ticket.endpoint),
             Ticket::RelayOnly(ticket) => Some(&ticket.endpoint),
             Ticket::TrustedRelayOnly(ticket) => Some(&ticket.endpoint),
-            Ticket::S3(_) | Ticket::WebDav(_) => None,
+            Ticket::S3(_) | Ticket::WebDav(_) | Ticket::Ftp(_) | Ticket::Sftp(_) => None,
         }
     }
 
@@ -271,7 +383,9 @@ impl Ticket {
             Ticket::Peer(_)
             | Ticket::WebDav(_)
             | Ticket::RelayOnly(_)
-            | Ticket::TrustedRelayOnly(_) => None,
+            | Ticket::TrustedRelayOnly(_)
+            | Ticket::Ftp(_)
+            | Ticket::Sftp(_) => None,
             Ticket::S3(ticket) => Some(ticket),
         }
     }
@@ -281,8 +395,34 @@ impl Ticket {
             Ticket::Peer(_)
             | Ticket::S3(_)
             | Ticket::RelayOnly(_)
-            | Ticket::TrustedRelayOnly(_) => None,
+            | Ticket::TrustedRelayOnly(_)
+            | Ticket::Ftp(_)
+            | Ticket::Sftp(_) => None,
             Ticket::WebDav(ticket) => Some(ticket),
+        }
+    }
+
+    pub fn ftp_route(&self) -> Option<&FtpTicket> {
+        match self {
+            Ticket::Ftp(ticket) => Some(ticket),
+            Ticket::Peer(_)
+            | Ticket::S3(_)
+            | Ticket::WebDav(_)
+            | Ticket::RelayOnly(_)
+            | Ticket::TrustedRelayOnly(_)
+            | Ticket::Sftp(_) => None,
+        }
+    }
+
+    pub fn sftp_route(&self) -> Option<&SftpTicket> {
+        match self {
+            Ticket::Sftp(ticket) => Some(ticket),
+            Ticket::Peer(_)
+            | Ticket::S3(_)
+            | Ticket::WebDav(_)
+            | Ticket::RelayOnly(_)
+            | Ticket::TrustedRelayOnly(_)
+            | Ticket::Ftp(_) => None,
         }
     }
 
@@ -436,6 +576,78 @@ mod tests {
             Ticket::WebDav(webdav) => assert!(webdav.delete_after_recv),
             _ => panic!("expected webdav ticket"),
         }
+    }
+
+    #[test]
+    fn ftp_ticket_round_trip() {
+        let ticket = Ticket::ftp(
+            "legacy".into(),
+            "ii/abc".into(),
+            true,
+            Some(FtpPortableCredentials {
+                url: "ftp://ftp.example.com".into(),
+                username: "user".into(),
+                password: "pass".into(),
+                remote_dir: "ii/".into(),
+            }),
+            "file.txt".into(),
+            PayloadKind::File,
+            Some(12),
+            Some([7; 16]),
+        );
+        let decoded = Ticket::decode(&ticket.encode().unwrap()).unwrap();
+        assert_eq!(ticket, decoded);
+        assert!(decoded.ftp_route().unwrap().delete_after_recv);
+    }
+
+    #[test]
+    fn sftp_password_and_private_key_tickets_round_trip() {
+        let password = Ticket::sftp(
+            "server".into(),
+            "ii/password".into(),
+            false,
+            Some(SftpPortableCredentials {
+                host: "sftp.example.com".into(),
+                port: 22,
+                username: "user".into(),
+                remote_dir: "ii/".into(),
+                auth: SftpPortableAuth::Password {
+                    password: "pass".into(),
+                },
+            }),
+            "file.txt".into(),
+            PayloadKind::File,
+            Some(12),
+            Some([7; 16]),
+        );
+        let private_key = Ticket::sftp(
+            "server".into(),
+            "ii/key".into(),
+            true,
+            Some(SftpPortableCredentials {
+                host: "sftp.example.com".into(),
+                port: 2222,
+                username: "user".into(),
+                remote_dir: "ii/".into(),
+                auth: SftpPortableAuth::PrivateKey {
+                    private_key: "-----BEGIN OPENSSH PRIVATE KEY-----".into(),
+                    private_key_passphrase: Some("passphrase".into()),
+                },
+            }),
+            "file.txt".into(),
+            PayloadKind::File,
+            Some(12),
+            Some([7; 16]),
+        );
+
+        assert_eq!(
+            password,
+            Ticket::decode(&password.encode().unwrap()).unwrap()
+        );
+        assert_eq!(
+            private_key,
+            Ticket::decode(&private_key.encode().unwrap()).unwrap()
+        );
     }
 
     #[test]

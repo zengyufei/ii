@@ -22,7 +22,7 @@
 `ii` is built for temporary file transfer:
 
 - The sender serves one successful receive by default, then exits
-- It briefly probes for a usable path through complex networks
+- It briefly probes for a usable path through complex networks, with S3, WebDAV, FTP, and SFTP backend options
 - Receives resume automatically by default
 - Existing files with the same MD5 are skipped
 - Folders can be sent directly
@@ -138,26 +138,58 @@ ii send .\video.mp4 --webdav
 ii recv ii1k7v...x9a
 ```
 
+Use FTP or SFTP as a transfer backend:
+
+```powershell
+ii send .\video.mp4 --ftp
+ii send .\video.mp4 --sftp
+ii recv ii1k7v...x9a
+```
+
+FTP only supports plaintext `ftp://`; its credentials, file data, and control commands can be read on the network. SFTP supports password and SSH private-key authentication. On every connection, `ii` prints and accepts the server SSH SHA-256 host-key fingerprint without storing it; a server can therefore still be replaced by a man-in-the-middle.
+
 Select a backend profile:
 
 ```powershell
 ii send .\video.mp4 --s3 --profile work
 ii send .\video.mp4 --webdav --profile nas
+ii send .\video.mp4 --ftp --profile legacy
+ii send .\video.mp4 --sftp --profile server
 ```
 
-If the receiver has no WebDAV config, create a portable ticket:
+If the receiver has no backend config, create a portable ticket:
 
 ```powershell
 ii send .\video.mp4 --webdav -p
+ii send .\video.mp4 --ftp -p
+ii send .\video.mp4 --sftp -p
 ```
 
-`-p` writes the WebDAV URL, username, and password into the ticket. It is convenient but unsafe, so use it only when you trust the ticket recipient.
+`-p` writes the WebDAV/FTP URL, username, and password into the ticket. An SFTP password ticket includes the password; an SFTP private-key ticket includes the key text and its passphrase. Tickets are encoded, not encrypted, so use this only when you trust the ticket recipient.
 
-After a successful receive, the WebDAV config from a `-p` ticket is written to the receiver's local `ii.toml`. To remove the WebDAV object after receive, add `-d`:
+After a successful receive, configuration from a `-p` ticket is written to the receiver's local `ii.toml`; a portable SFTP private key is saved as a separate key file and the config stores only its path. To remove the backend object after receive, add `-d`:
 
 ```powershell
 ii send .\video.mp4 --webdav -p -d
+ii send .\video.mp4 --sftp -p -d
 ```
+
+An SFTP private-key profile looks like this:
+
+```toml
+[storage.sftp.server]
+host = "sftp.example.com"
+port = 22
+username = "ii"
+remote_dir = "ii/"
+auth = "private-key"
+private_key_path = "/home/you/.ssh/id_ed25519"
+private_key_passphrase = "optional-passphrase"
+```
+
+## Desktop GUI
+
+Releases also include `ii-gui`. It reuses `ii` transfer logic and supports the default automatic path, local-only transfers, a chosen HTTPS relay, S3, and WebDAV; it stores a local transfer queue and these profiles. FTP and SFTP are currently CLI-only.
 
 ## Diagnostics
 
@@ -212,7 +244,7 @@ ii relay --tls relay.example.com -H 8443 --cert D:\certs\fullchain.pem --key D:\
 ii send .\video.mp4 --relay https://relay.example.com:8443
 ```
 
-Manual TLS does not use `-k`; clients use normal system TLS verification. Both `--relay` modes force HTTPS relay-only transport and skip UDP and direct paths. See [ii.md](ii.md) for ports, state paths, and the security boundary.
+Manual TLS does not use `-k`; clients use normal system TLS verification. Both `--relay` modes force HTTPS relay-only transport and skip UDP and direct paths. See [ii.md](ii.md) for ports, state paths, and the security boundary. FTP and SFTP configuration, tickets, and security limits are documented in [ftp.md](ftp.md) and [sftp.md](sftp.md).
 
 ## Full Manual
 

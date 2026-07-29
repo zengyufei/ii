@@ -24,9 +24,11 @@ pub struct SendArgs {
     pub copy: bool,
     pub output: Option<PathBuf>,
     pub s3: bool,
+    pub ftp: bool,
     pub delete_after_recv: bool,
     pub profile: Option<String>,
     pub webdav: bool,
+    pub sftp: bool,
     pub portable_webdav: bool,
     pub local: bool,
     pub relay: Option<iroh::RelayUrl>,
@@ -163,9 +165,11 @@ fn parse_send(args: Vec<String>) -> Result<SendArgs, ParseAction> {
                 "-c" | "--copy" => out.copy = true,
                 "-o" | "--output" => out.output = Some(PathBuf::from(iter.value(&arg)?)),
                 "--s3" => out.s3 = true,
+                "--ftp" => out.ftp = true,
                 "-d" => out.delete_after_recv = true,
                 "--profile" => out.profile = Some(iter.value("--profile")?),
                 "--webdav" => out.webdav = true,
+                "--sftp" => out.sftp = true,
                 "-p" => out.portable_webdav = true,
                 "--local" => out.local = true,
                 "--relay" => out.relay = Some(parse_relay_url(&iter.value("--relay")?)?),
@@ -308,7 +312,9 @@ fn parse_relay(args: Vec<String>) -> Result<RelayArgs, ParseAction> {
 fn validate_send(args: &SendArgs) -> Result<(), ParseAction> {
     let backend_count = [
         args.s3,
+        args.ftp,
         args.webdav,
+        args.sftp,
         args.local,
         args.relay.is_some(),
         args.no_relay,
@@ -319,12 +325,12 @@ fn validate_send(args: &SendArgs) -> Result<(), ParseAction> {
 
     if backend_count > 1 {
         return Err(ParseAction::error(
-            "--s3, --webdav, --local, --relay and --no-relay conflict with each other",
+            "--s3, --webdav, --ftp, --sftp, --local, --relay and --no-relay conflict with each other",
         ));
     }
 
-    if args.portable_webdav && !args.webdav {
-        return Err(ParseAction::error("-p requires --webdav"));
+    if args.portable_webdav && !args.webdav && !args.ftp && !args.sftp {
+        return Err(ParseAction::error("-p requires --webdav, --ftp or --sftp"));
     }
     if args.accept_self_signed_relay && args.relay.is_none() {
         return Err(ParseAction::error("-k requires --relay <https-url>"));
@@ -455,6 +461,8 @@ Options:
   -o, --output <path>
   --s3
   --webdav
+  --ftp
+  --sftp
   -p
   -d
   --profile <name>
@@ -560,6 +568,42 @@ mod tests {
             }
             _ => panic!("expected send command"),
         }
+    }
+
+    #[test]
+    fn send_accepts_ftp_and_sftp_storage_options() {
+        let ftp = Cli::parse_from(["ii", "send", "--ftp", "-p", "-d", "file.txt"]);
+        match ftp.command {
+            Command::Send(args) => {
+                assert!(args.ftp);
+                assert!(args.portable_webdav);
+                assert!(args.delete_after_recv);
+            }
+            _ => panic!("expected send command"),
+        }
+
+        let sftp = Cli::parse_from(["ii", "send", "--sftp", "--profile", "server", "file.txt"]);
+        match sftp.command {
+            Command::Send(args) => {
+                assert!(args.sftp);
+                assert_eq!(args.profile.as_deref(), Some("server"));
+            }
+            _ => panic!("expected send command"),
+        }
+    }
+
+    #[test]
+    fn send_rejects_conflicting_storage_backends_and_orphaned_portable_flag() {
+        let conflicting = parse_args(["ii", "send", "--ftp", "--sftp", "file.txt"]);
+        let portable_without_backend = parse_args(["ii", "send", "-p", "file.txt"]);
+        assert!(matches!(
+            conflicting,
+            Err(ParseAction::Print { code: 2, .. })
+        ));
+        assert!(matches!(
+            portable_without_backend,
+            Err(ParseAction::Print { code: 2, .. })
+        ));
     }
 
     #[test]

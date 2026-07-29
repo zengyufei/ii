@@ -22,7 +22,7 @@ ii recv <ticket>
 - `-p`: 生成便携 ticket，把 WebDAV URL、用户名、密码和鉴权方式写入 ticket。
 - `-d`: 接收端成功接收后尝试删除远端对象。
 
-`--webdav` 和 `--s3`、`--local`、`--relay`、`--no-relay` 互斥。`-p` 只能和 `--webdav` 一起使用。`--profile` 只能和 `--s3` 或 `--webdav` 一起使用。`-d` 只能和 `--s3` 或 `--webdav` 一起使用。
+`--webdav` 和 `--s3`、`--ftp`、`--sftp`、`--local`、`--relay`、`--no-relay` 互斥。`-p` 只能和 `--webdav`、`--ftp` 或 `--sftp` 一起使用。`--profile` 与 `-d` 只能在中转后端模式下使用。FTP 和 SFTP 的配置与安全限制见 [ftp.md](ftp.md) 和 [sftp.md](sftp.md)。
 
 ## 配置路径
 

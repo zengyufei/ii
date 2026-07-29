@@ -4,7 +4,19 @@
 
 ## Unreleased
 
-暂无。
+### 新增
+
+- 新增 `ii send --ftp` 和 `ii send --sftp`，支持 FTP 与 SFTP 中转发送文件、stdin 和目录。
+- 新增 FTP/SFTP profile、便携 ticket、接收后删除远端对象和 `ii doctor` 配置检查。
+- 新增基于 Slint 的 `ii-gui` 桌面客户端，提供发送、接收、S3/WebDAV/TLS relay profile 管理、传输队列和诊断界面。
+
+### 变更
+
+- Release 流水线新增 Windows GUI 可执行文件、Linux AppImage 和 macOS `.app.zip` 产物。
+
+### 文档
+
+- 新增 FTP 与 SFTP 中转说明，并同步中英文 README 和完整命令手册。
 
 ## 0.1.12 - 2026-07-17
 

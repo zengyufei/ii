@@ -9,7 +9,7 @@
 ## 命令总览
 
 ```text
-ii send [<path>] [--name <name>] [-t] [-c] [-o <path>] [--s3] [--webdav] [--profile <name>] [-d] [-p] [--local] [--relay <https-url> [-k]] [--no-relay]
+ii send [<path>] [--name <name>] [-t] [-c] [-o <path>] [--s3 | --webdav | --ftp | --sftp] [--profile <name>] [-d] [-p] [--local] [--relay <https-url> [-k]] [--no-relay]
 ii recv <ticket> [-o <dir>] [--stdout] [--overwrite] [--resume] [--local] [--trace]
 ii relay (--public <https-url> | --tls <domain> --cert <path> --key <path>) [-H <bind-port>]
 ii doctor
@@ -23,7 +23,7 @@ ii version
 - 默认先走直连和局域网，必要时再走公网 relay。
 - 需要显式限制路径时，用 `--local`、`--relay`、`--no-relay`。
 - `ii relay` 是运维命令，不是用户日常发文件要记的东西。
-- `--s3` 和 `--webdav` 是可选中转后端，第一次会初始化本机 `ii.toml`。
+- `--s3`、`--webdav`、`--ftp` 和 `--sftp` 是可选中转后端，第一次会初始化本机 `ii.toml`。
 
 ## `ii send`
 
@@ -98,25 +98,31 @@ tar czf - .\project | ii send --name project.tar.gz
   之后再执行 `ii send ... --s3` 时，会直接复用这份配置。
 
 `--profile <name>`
-: 只在 `--s3` 或 `--webdav` 模式下生效，用来选择 `ii.toml` 里的后端 profile。  
-  例子：`ii send .\file.zip --s3 --profile work`、`ii send .\file.zip --webdav --profile nas`。  
-  S3 和 WebDAV 不指定时都默认使用 `default`。旧的 `[storage.s3.cloudflare]` 会自动兼容迁移为 S3 的 `default` profile。
+: 只在 `--s3`、`--webdav`、`--ftp` 或 `--sftp` 模式下生效，用来选择 `ii.toml` 里的后端 profile。
+  例子：`ii send .\file.zip --s3 --profile work`、`ii send .\file.zip --webdav --profile nas`、`ii send .\file.zip --ftp --profile legacy`、`ii send .\file.zip --sftp --profile server`。
+  四种后端不指定时都默认使用 `default`。旧的 `[storage.s3.cloudflare]` 会自动兼容迁移为 S3 的 `default` profile。
 
 `-d`
-: 只在 `--s3` 或 `--webdav` 模式下生效。接收端拿到文件后，会尝试删除中转端里的对应对象；删除失败会忽略，不影响下载结果。
+: 只在 `--s3`、`--webdav`、`--ftp` 或 `--sftp` 模式下生效。接收端拿到文件后，会尝试删除中转端里的对应对象；删除失败会忽略，不影响下载结果。
 
 `--webdav`
 : 走 WebDAV 中转后端，不走 peer/relay 路径。  
   如果本机还没有配置，`ii` 会在终端里依次提示 `URL`、`Username`、`Password`，三项都是明文输入。上传成功后把配置写到平台默认路径：Windows 是 `ii.exe` 同目录下的 `ii.toml`，Linux/macOS/其他 Unix-like 是 `/etc/ii/ii.toml`。  
   文件和 stdin 会按 `remote_dir/<md5>` 存到 WebDAV；同 MD5 对象已存在时不重复上传。
 
+`--ftp`
+: 走 FTP 中转后端，不走 peer/relay 路径。首次缺配置时，`ii` 提示 `FTP URL`、`Username`、`Password`，上传成功后才写入 `ii.toml`。只接受明文 `ftp://主机[:端口]`；账号、文件和控制命令都可能被网络上的人读取。详见 [ftp.md](ftp.md)。
+
+`--sftp`
+: 走 SFTP 中转后端，不走 peer/relay 路径。首次缺配置时，`ii` 提示主机、用户名和密码或私钥路径，上传成功后才写入 `ii.toml`。支持密码与 SSH 私钥认证。每次连接都会打印并直接接受服务器 SSH SHA-256 主机指纹，不保存 known-hosts；服务器仍可被中间人替换。详见 [sftp.md](sftp.md)。
+
 `-p`
-: 只在 `--webdav` 模式下生效。生成便携 WebDAV ticket，把 WebDAV URL、用户名和密码直接写进 ticket。  
-  这能保证对方没有 WebDAV 配置也能 `ii recv`，但谁拿到 ticket 谁就拿到了这次 WebDAV 访问凭据。接收端成功接收后，会把 ticket 内的 WebDAV 配置写入本机 `ii.toml`，后续不需要再配置。
+: 只在 `--webdav`、`--ftp` 或 `--sftp` 模式下生效。生成便携 ticket。WebDAV/FTP ticket 写入 URL、用户名和密码；SFTP 密码 ticket 写入密码，私钥 ticket 写入私钥文本和口令。
+  ticket 只有编码，没有加密。谁拿到 ticket 谁就拿到了这次后端访问凭据。接收成功后，配置会写入本机 `ii.toml`；便携 SFTP 私钥会另存为密钥文件，配置只保存路径。
 
 ### 路径规则
 
-- `--s3`、`--webdav`、`--local`、`--relay`、`--no-relay` 互斥。
+- `--s3`、`--webdav`、`--ftp`、`--sftp`、`--local`、`--relay`、`--no-relay` 互斥。
 - 默认不需要用户选 relay。
 - 如果没有局域网或直连可用，默认会自动退到公网 relay。
 - 指定 `--relay https://...` 后，当前发送会强制走 HTTPS relay-only，不使用默认公网 relay。
@@ -189,7 +195,7 @@ ii recv ii1k7v...x9a --local --trace
 - 默认模式下，如果 ticket 同时带 relay 和很多直连地址，`ii recv` 会先给完整地址集一个短直连窗口；短时间内连不上就切到 relay-only，避免不可达的私网/VPN 地址把建连拖到十几秒。
 - relay-only ticket 自带 relay 地址和 TLS 策略；接收端无需安装证书或写 relay 配置，也不会尝试 UDP 或直连。自签 ticket 只由发送端带 `-k` 时生成。
 - 排查慢的时候，先跑一次默认模式，再跑一次 `--local` 对比；如果 `--local` 明显快，问题通常在公网发现或 relay 路径，不在本地写盘。
-- WebDAV 普通 ticket 不带凭据，接收端首次使用时会提示输入 `URL`、`Username`、`Password`，下载成功后保存到 `ii.toml`；WebDAV `-p` ticket 会直接使用 ticket 内的 URL、用户名和密码，并在成功接收后保存到本机 `ii.toml`。
+- WebDAV、FTP 和 SFTP 普通 ticket 不带凭据，接收端首次使用对应 profile 时会提示补齐配置，下载成功后保存到 `ii.toml`。三种 `-p` ticket 都会直接使用 ticket 内的凭据并在成功接收后保存本机配置；便携 SFTP 私钥会另存为密钥文件。
 
 ## ticket
 
@@ -214,7 +220,7 @@ ticket 里可以带足够完成连接、恢复传输和重复文件判定的最�
 - endpoint
 - 文件内容指纹
 
-例外：`ii send --webdav -p` 会把 WebDAV URL、用户名和密码放进 ticket，这是为了让没有本机配置的接收方也能直接 `ii recv`。
+例外：`ii send --webdav -p`、`ii send --ftp -p`、`ii send --sftp -p` 会把后端访问凭据放进 ticket，让没有本机配置的接收方也能直接 `ii recv`。ticket 只有编码，没有加密；SFTP 还会直接接受服务器主机指纹。
 
 ## 中继规则
 
@@ -358,6 +364,8 @@ ii version
 - relay 服务：`iroh-relay`
 - S3 中转：`rust-s3`
 - WebDAV 中转：`reqwest_dav`
+- FTP 中转：`suppaftp`
+- SFTP 中转：`russh`、`russh-sftp`
 
 ## 源码对照
 

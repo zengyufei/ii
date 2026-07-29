@@ -1,0 +1,29 @@
+[package]
+name = "ii-gui"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+build = "build.rs"
+
+[dependencies]
+anyhow = "1"
+ii = { path = ".." }
+rfd = "0.17.2"
+rusqlite = { version = "0.40.1", features = ["bundled"] }
+slint = { version = "1.17.1", default-features = false, features = [
+    "accessibility",
+    "backend-winit",
+    "compat-1-2",
+    "renderer-femtovg",
+    "renderer-software",
+    "unstable-winit-030",
+] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros"] }
+
+[build-dependencies]
+slint-build = "1.17.1"
+winresource = "0.1"
+
+[dev-dependencies]
+tempfile = "3"

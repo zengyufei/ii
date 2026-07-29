@@ -1,0 +1,377 @@
+<!doctype html>
+<!-- PROTOTYPE: Three desktop UI directions for ii, switchable with ?variant=A|B|C. -->
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>ii UI Prototype</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #172129;
+      --muted: #65727c;
+      --line: #d5dde0;
+      --paper: #f6f8f8;
+      --panel: #ffffff;
+      --teal: #007c76;
+      --teal-pale: #d9f1ed;
+      --coral: #c84b39;
+      --coral-pale: #fce4df;
+      --gold: #8a6100;
+      --gold-pale: #fbefc9;
+      --shadow: 0 12px 32px rgba(23, 33, 41, .10);
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      min-width: 320px;
+      background: #e8eeee;
+      color: var(--ink);
+      font: 14px/1.45 Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+    button, input, select { font: inherit; }
+    button { cursor: pointer; }
+    .app-shell {
+      width: min(1440px, calc(100vw - 40px));
+      min-height: min(820px, calc(100vh - 40px));
+      margin: 20px auto;
+      overflow: hidden;
+      background: var(--paper);
+      border: 1px solid #c7d1d3;
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+    .hidden { display: none !important; }
+    .topbar {
+      height: 58px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 18px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+    }
+    .brand { display: flex; align-items: center; gap: 10px; font-weight: 750; letter-spacing: 0; }
+    .brand img { width: 28px; height: 28px; }
+    .brand small { color: var(--muted); font-weight: 600; }
+    .top-actions { display: flex; align-items: center; gap: 8px; }
+    .icon-button, .quiet-button, .command, .ghost-command {
+      min-height: 32px;
+      border: 1px solid transparent;
+      border-radius: 5px;
+      background: transparent;
+      color: var(--ink);
+    }
+    .icon-button { width: 32px; padding: 0; font-size: 18px; line-height: 1; }
+    .icon-button:hover, .quiet-button:hover, .ghost-command:hover { background: #edf2f2; }
+    .quiet-button { padding: 5px 9px; color: var(--muted); }
+    .command { padding: 7px 12px; border-color: var(--teal); background: var(--teal); color: white; font-weight: 700; }
+    .command:hover { background: #006a65; }
+    .ghost-command { padding: 7px 12px; border-color: var(--line); background: var(--panel); font-weight: 650; }
+    .danger-command { color: var(--coral); border-color: #f0b8af; background: #fff7f5; }
+    .badge { display: inline-flex; align-items: center; gap: 5px; padding: 3px 7px; border-radius: 999px; font-size: 12px; font-weight: 720; white-space: nowrap; }
+    .badge.running { color: #006b65; background: var(--teal-pale); }
+    .badge.waiting { color: var(--gold); background: var(--gold-pale); }
+    .badge.done { color: #4c5961; background: #e7ecec; }
+    .badge.warning { color: #9d382b; background: var(--coral-pale); }
+    .eyebrow { margin: 0 0 5px; color: var(--teal); font-size: 12px; font-weight: 760; text-transform: uppercase; }
+    .section-title { margin: 0; font-size: 18px; line-height: 1.2; letter-spacing: 0; }
+    .subtle { color: var(--muted); }
+    .meter { height: 7px; overflow: hidden; border-radius: 4px; background: #dce5e5; }
+    .meter > span { display: block; width: 62%; height: 100%; background: var(--teal); }
+    .key-value { display: grid; grid-template-columns: 112px 1fr; gap: 7px 12px; margin: 0; }
+    .key-value dt { color: var(--muted); }
+    .key-value dd { margin: 0; font-weight: 620; }
+    .prototype-state {
+      position: fixed;
+      left: 20px;
+      bottom: 22px;
+      z-index: 5;
+      max-width: min(360px, calc(100vw - 40px));
+      padding: 10px 12px;
+      border-left: 3px solid var(--coral);
+      background: #fff;
+      color: #4e5961;
+      box-shadow: 0 5px 18px rgba(23, 33, 41, .12);
+      font-size: 12px;
+    }
+    .prototype-state strong { color: var(--coral); }
+    .switcher {
+      position: fixed;
+      z-index: 5;
+      left: 50%;
+      bottom: 22px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 7px;
+      transform: translateX(-50%);
+      background: #172129;
+      color: white;
+      border-radius: 7px;
+      box-shadow: 0 8px 24px rgba(23, 33, 41, .28);
+    }
+    .switcher button { width: 34px; height: 34px; border: 0; border-radius: 4px; background: #2c3a42; color: white; font-size: 19px; }
+    .switcher button:hover { background: #42545e; }
+    .switcher-label { min-width: 176px; text-align: center; font-size: 12px; font-weight: 700; }
+
+    /* Variant A: operational sidebar */
+    .variant-a { display: grid; grid-template-columns: 186px minmax(0, 1fr); min-height: 760px; }
+    .rail { padding: 16px 10px; border-right: 1px solid var(--line); background: #eef3f3; }
+    .rail-label { padding: 0 10px 8px; color: var(--muted); font-size: 11px; font-weight: 760; text-transform: uppercase; }
+    .rail-item { width: 100%; display: flex; align-items: center; gap: 10px; padding: 9px 10px; margin: 2px 0; border: 0; border-radius: 5px; background: transparent; color: #40505a; text-align: left; }
+    .rail-item.active { background: #fff; color: var(--teal); font-weight: 750; box-shadow: 0 1px 3px rgba(23, 33, 41, .08); }
+    .rail-item .dot { width: 8px; height: 8px; border-radius: 50%; background: currentColor; }
+    .a-body { padding: 28px; }
+    .a-header { display: flex; align-items: end; justify-content: space-between; gap: 20px; margin-bottom: 22px; }
+    .a-grid { display: grid; grid-template-columns: minmax(460px, 1.6fr) minmax(300px, .9fr); gap: 16px; }
+    .tool-surface { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; }
+    .transfer-form { padding: 22px; }
+    .mode-strip { display: flex; gap: 0; margin: 18px 0 15px; border-bottom: 1px solid var(--line); }
+    .mode-strip button { padding: 8px 11px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--muted); }
+    .mode-strip button.active { border-color: var(--teal); color: var(--teal); font-weight: 760; }
+    .drop-zone { min-height: 145px; display: grid; place-content: center; gap: 6px; border: 1px dashed #8fa3a4; background: #f7faf9; color: #34454d; text-align: center; }
+    .drop-zone strong { font-size: 16px; }
+    .drop-zone button { justify-self: center; margin-top: 5px; }
+    .details-line { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--line); }
+    .advanced-row { display: flex; justify-content: space-between; gap: 12px; padding-top: 14px; }
+    .activity-head { padding: 16px 17px 12px; border-bottom: 1px solid var(--line); }
+    .activity-item { padding: 14px 17px; border-bottom: 1px solid var(--line); }
+    .activity-item:last-child { border-bottom: 0; }
+    .activity-row { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+    .activity-name { font-weight: 730; }
+    .activity-meta { margin: 3px 0 10px; color: var(--muted); font-size: 12px; }
+
+    /* Variant B: action-first split canvas */
+    .variant-b { min-height: 760px; background: #fff; }
+    .b-hero { padding: 46px 46px 24px; background: #f0f6f5; border-bottom: 1px solid var(--line); }
+    .b-hero h1 { max-width: 680px; margin: 0; font-size: 30px; line-height: 1.17; letter-spacing: 0; }
+    .b-hero p { max-width: 620px; margin: 11px 0 0; color: var(--muted); font-size: 16px; }
+    .b-workspace { display: grid; grid-template-columns: 1fr 1fr; min-height: 490px; }
+    .action-pane { padding: 34px 46px; }
+    .action-pane + .action-pane { border-left: 1px solid var(--line); background: #fbfcfc; }
+    .action-heading { display: flex; align-items: center; justify-content: space-between; margin-bottom: 26px; }
+    .action-heading h2 { margin: 0; font-size: 20px; }
+    .action-mark { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 50%; background: var(--teal); color: white; font-size: 18px; font-weight: 700; }
+    .file-line { display: flex; align-items: center; gap: 12px; padding: 15px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+    .file-glyph { display: grid; place-items: center; width: 38px; height: 42px; background: var(--teal-pale); color: var(--teal); font-weight: 800; }
+    .field-label { display: block; margin: 22px 0 7px; color: var(--muted); font-size: 12px; font-weight: 740; }
+    .ticket-input { width: 100%; min-height: 106px; padding: 12px; resize: none; border: 1px solid #aebfc0; border-radius: 4px; background: white; color: #26343b; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+    .select-line { width: 100%; display: flex; justify-content: space-between; align-items: center; padding: 9px 10px; border: 1px solid #aebfc0; border-radius: 4px; background: white; color: var(--ink); text-align: left; }
+    .b-status { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 14px 46px; border-top: 1px solid var(--line); background: #f7fafa; }
+    .status-progress { display: grid; grid-template-columns: minmax(150px, 1fr) auto; align-items: center; gap: 12px; width: min(560px, 100%); }
+
+    /* Variant C: table-first control room */
+    .variant-c { min-height: 760px; background: #fff; }
+    .c-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 16px 20px; border-bottom: 1px solid var(--line); }
+    .toolbar-left, .toolbar-right { display: flex; align-items: center; gap: 8px; }
+    .filter-button { padding: 6px 10px; border: 1px solid var(--line); border-radius: 4px; background: white; color: #45525b; }
+    .search { width: 210px; min-height: 34px; padding: 6px 9px; border: 1px solid var(--line); border-radius: 4px; background: #fbfcfc; }
+    .c-layout { display: grid; grid-template-columns: minmax(0, 1fr) 350px; min-height: 686px; }
+    .table-area { min-width: 0; }
+    .table-head, .transfer-row { display: grid; grid-template-columns: minmax(170px, 2fr) 82px 96px 120px minmax(165px, 1.3fr) 70px; gap: 12px; align-items: center; padding: 0 20px; }
+    .table-head { min-height: 42px; border-bottom: 1px solid var(--line); background: #f3f6f6; color: var(--muted); font-size: 11px; font-weight: 760; text-transform: uppercase; }
+    .transfer-row { min-height: 84px; border-bottom: 1px solid var(--line); }
+    .transfer-row.selected { background: #f0f8f7; border-left: 3px solid var(--teal); padding-left: 17px; }
+    .row-file { font-weight: 750; }
+    .row-file small { display: block; margin-top: 2px; color: var(--muted); font-weight: 500; }
+    .row-progress { display: grid; gap: 5px; color: var(--muted); font-size: 12px; }
+    .inspector { padding: 22px; border-left: 1px solid var(--line); background: #f8faf9; }
+    .inspector h2 { margin: 0 0 5px; font-size: 20px; }
+    .ticket-box { margin: 20px 0; padding: 11px; overflow: hidden; border: 1px solid #bfcccd; background: #fff; color: #40535b; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+    .inspector-actions { display: flex; gap: 8px; margin-top: 20px; }
+    .diagnostic-list { display: grid; gap: 9px; margin-top: 24px; padding-top: 19px; border-top: 1px solid var(--line); }
+    .diagnostic-list div { display: flex; justify-content: space-between; color: var(--muted); }
+    .diagnostic-list strong { color: var(--ink); }
+
+    @media (max-width: 960px) {
+      .app-shell { width: calc(100vw - 20px); margin: 10px auto; }
+      .a-grid, .c-layout { grid-template-columns: 1fr; }
+      .variant-a { grid-template-columns: 1fr; }
+      .rail { display: flex; gap: 4px; overflow: auto; padding: 10px; border-right: 0; border-bottom: 1px solid var(--line); }
+      .rail-label { display: none; }
+      .rail-item { width: auto; white-space: nowrap; }
+      .inspector { border-top: 1px solid var(--line); border-left: 0; }
+      .b-workspace { grid-template-columns: 1fr; }
+      .action-pane + .action-pane { border-top: 1px solid var(--line); border-left: 0; }
+      .table-head { display: none; }
+      .transfer-row { grid-template-columns: 1fr auto; padding: 16px 20px; }
+      .transfer-row > :nth-child(2), .transfer-row > :nth-child(3) { display: none; }
+      .row-progress { grid-column: 1 / -1; }
+    }
+    @media (max-width: 620px) {
+      .topbar { padding: 0 10px; }
+      .top-actions .quiet-button { display: none; }
+      .a-body, .b-hero, .action-pane { padding-left: 18px; padding-right: 18px; }
+      .a-header, .c-toolbar, .b-status { align-items: flex-start; flex-direction: column; }
+      .table-area { overflow-x: auto; }
+      .table-head, .transfer-row { min-width: 710px; }
+      .switcher { bottom: 12px; }
+      .prototype-state { left: 10px; bottom: 70px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="app-shell" aria-label="ii desktop UI prototype">
+    <header class="topbar">
+      <div class="brand"><img src="../logo.svg" alt="ii"><span>ii</span><small>FILE TRANSFER</small></div>
+      <div class="top-actions">
+        <button class="quiet-button" type="button" data-demo="language">ZH / EN</button>
+        <button class="quiet-button" type="button" data-demo="theme">System theme</button>
+        <button class="icon-button" type="button" title="Notifications" aria-label="Notifications" data-demo="notifications">&#9679;</button>
+      </div>
+    </header>
+
+    <section class="variant variant-a" data-variant="A">
+      <aside class="rail" aria-label="Primary navigation">
+        <div class="rail-label">Workspace</div>
+        <button class="rail-item active" type="button" data-demo="transfer"><span class="dot"></span>Transfer</button>
+        <button class="rail-item" type="button" data-demo="storage"><span class="dot"></span>Storage</button>
+        <button class="rail-item" type="button" data-demo="diagnostics"><span class="dot"></span>Diagnostics</button>
+        <div class="rail-label" style="margin-top:20px">Preferences</div>
+        <button class="rail-item" type="button" data-demo="settings"><span class="dot"></span>Settings</button>
+      </aside>
+      <div class="a-body">
+        <div class="a-header">
+          <div><p class="eyebrow">Transfer workspace</p><h1 class="section-title">Send something now</h1></div>
+          <button class="ghost-command" type="button" data-demo="receive">Receive a ticket</button>
+        </div>
+        <div class="a-grid">
+          <section class="tool-surface transfer-form">
+            <div class="mode-strip" aria-label="Transfer mode">
+              <button class="active" type="button" data-demo="default">Default</button>
+              <button type="button" data-demo="local">Local only</button>
+              <button type="button" data-demo="relay">Custom Relay</button>
+              <button type="button" data-demo="storage-mode">S3 / WebDAV</button>
+            </div>
+            <div class="drop-zone">
+              <strong>Drop a file or folder</strong>
+              <span class="subtle">The transfer starts only after you confirm.</span>
+              <button class="ghost-command" type="button" data-demo="pick-file">Choose file</button>
+            </div>
+            <div class="details-line">
+              <div><strong>report.zip</strong><div class="subtle">1.4 GB &middot; archive</div></div>
+              <button class="quiet-button" type="button" data-demo="clear-file">Clear</button>
+            </div>
+            <div class="advanced-row"><span class="subtle">Keep alive for multiple receivers</span><button class="quiet-button" type="button" data-demo="advanced">Advanced options</button></div>
+            <div style="margin-top:20px"><button class="command" type="button" data-demo="start-send">Generate ticket and send</button></div>
+          </section>
+          <section class="tool-surface">
+            <div class="activity-head"><p class="eyebrow">Active queue</p><h2 class="section-title">Transfers</h2></div>
+            <div class="activity-item">
+              <div class="activity-row"><span class="activity-name">report.zip</span><span class="badge running">Sending 62%</span></div>
+              <div class="activity-meta">1.4 GB &middot; default network &middot; 18.4 MB/s</div>
+              <div class="meter"><span></span></div>
+              <div style="margin-top:10px"><button class="quiet-button" type="button" data-demo="cancel">Cancel transfer</button></div>
+            </div>
+            <div class="activity-item"><div class="activity-row"><span class="activity-name">photos/</span><span class="badge done">Complete</span></div><div class="activity-meta">824 MB &middot; received at 12:41</div></div>
+            <div class="activity-item"><div class="activity-row"><span class="activity-name">backup.tar.gz</span><span class="badge waiting">Waiting</span></div><div class="activity-meta">Ticket ready to share</div></div>
+          </section>
+        </div>
+      </div>
+    </section>
+
+    <section class="variant variant-b hidden" data-variant="B">
+      <div class="b-hero">
+        <p class="eyebrow">Peer-to-peer transfer</p>
+        <h1>Move files between computers without making the workflow feel technical.</h1>
+        <p>One action to send. One ticket to receive. The rest stays out of the way until you need it.</p>
+      </div>
+      <div class="b-workspace">
+        <section class="action-pane">
+          <div class="action-heading"><div><p class="eyebrow">01 / Send</p><h2>Choose what to share</h2></div><div class="action-mark">&#8599;</div></div>
+          <button class="ghost-command" type="button" data-demo="pick-file-b">Choose file or folder</button>
+          <div class="file-line"><div class="file-glyph">ZIP</div><div><strong>report.zip</strong><div class="subtle">1.4 GB &middot; ready to send</div></div></div>
+          <label class="field-label" for="send-method">Connection method</label>
+          <select id="send-method" class="select-line" data-demo="method"><option>Default network</option><option>Local network only</option><option>Custom Relay</option><option>S3 / R2</option><option>WebDAV</option></select>
+          <div style="margin-top:26px"><button class="command" type="button" data-demo="start-send-b">Create ticket</button></div>
+        </section>
+        <section class="action-pane">
+          <div class="action-heading"><div><p class="eyebrow">02 / Receive</p><h2>Paste a ticket</h2></div><div class="action-mark">&#8601;</div></div>
+          <label class="field-label" for="ticket">Ticket from the sender</label>
+          <textarea id="ticket" class="ticket-input" spellcheck="false">ii1k7v...demo-transfer-ticket</textarea>
+          <label class="field-label" for="destination">Save location</label>
+          <button id="destination" class="select-line" type="button" data-demo="choose-destination"><span>~/Downloads</span><span class="subtle">Change</span></button>
+          <div style="margin-top:26px"><button class="command" type="button" data-demo="start-receive">Start receiving</button></div>
+        </section>
+      </div>
+      <footer class="b-status"><div><strong>report.zip</strong><span class="subtle"> &middot; Sending to 1 receiver</span></div><div class="status-progress"><div class="meter"><span></span></div><strong>62% &middot; 18.4 MB/s</strong></div><button class="quiet-button" type="button" data-demo="cancel-b">Cancel</button></footer>
+    </section>
+
+    <section class="variant variant-c hidden" data-variant="C">
+      <div class="c-toolbar">
+        <div class="toolbar-left"><button class="command" type="button" data-demo="new-send">+ Send</button><button class="ghost-command" type="button" data-demo="new-receive">Receive</button><button class="filter-button" type="button" data-demo="filter">All transfers v</button></div>
+        <div class="toolbar-right"><input class="search" type="search" placeholder="Search transfers" aria-label="Search transfers"><button class="quiet-button" type="button" data-demo="clear-history">Clear completed</button></div>
+      </div>
+      <div class="c-layout">
+        <section class="table-area" aria-label="Transfer table">
+          <div class="table-head"><span>Name</span><span>Direction</span><span>Method</span><span>Status</span><span>Progress</span><span>Action</span></div>
+          <div class="transfer-row selected">
+            <div class="row-file">report.zip<small>1.4 GB &middot; started 12:37</small></div><span>Send</span><span>Default</span><span class="badge running">Active</span><div class="row-progress"><div class="meter"><span></span></div><span>62% &middot; 18.4 MB/s</span></div><button class="quiet-button" type="button" data-demo="cancel-c">Cancel</button>
+          </div>
+          <div class="transfer-row">
+            <div class="row-file">photos/<small>824 MB &middot; today 12:41</small></div><span>Receive</span><span>WebDAV</span><span class="badge done">Complete</span><div class="row-progress"><div class="meter"><span style="width:100%"></span></div><span>Saved to Downloads</span></div><button class="quiet-button" type="button" data-demo="open-folder">Open</button>
+          </div>
+          <div class="transfer-row">
+            <div class="row-file">backup.tar.gz<small>4.8 GB &middot; waiting for receiver</small></div><span>Send</span><span>Local</span><span class="badge waiting">Waiting</span><div class="row-progress"><span>Ticket created</span></div><button class="quiet-button" type="button" data-demo="copy-ticket">Copy</button>
+          </div>
+        </section>
+        <aside class="inspector">
+          <p class="eyebrow">Selected transfer</p><h2>report.zip</h2><div class="subtle">Sending &middot; 1.4 GB</div>
+          <div class="ticket-box">ii1k7v...demo-transfer-ticket</div>
+          <dl class="key-value"><dt>Connection</dt><dd>Default network</dd><dt>Receivers</dt><dd>1 / keep alive enabled</dd><dt>Started</dt><dd>Today, 12:37</dd><dt>Destination</dt><dd>Remote device</dd></dl>
+          <div class="inspector-actions"><button class="ghost-command" type="button" data-demo="copy-ticket-inspector">Copy ticket</button><button class="ghost-command danger-command" type="button" data-demo="stop-inspector">Stop</button></div>
+          <div class="diagnostic-list"><div><span>Network route</span><strong>Ready</strong></div><div><span>Relay fallback</span><strong>Available</strong></div><div><span>Ticket version</span><strong>v6</strong></div></div>
+        </aside>
+      </div>
+    </section>
+  </main>
+
+  <aside class="prototype-state" aria-live="polite"><strong>PROTOTYPE</strong><br><span id="state-text">Variant A. Mock state: report.zip is sending at 62%. No file, network, clipboard, or config access.</span></aside>
+  <nav class="switcher" aria-label="Prototype variant switcher"><button id="previous" type="button" title="Previous layout" aria-label="Previous layout">&#8592;</button><span id="switcher-label" class="switcher-label">A &mdash; Operational sidebar</span><button id="next" type="button" title="Next layout" aria-label="Next layout">&#8594;</button></nav>
+
+  <script>
+    (() => {
+      const variants = [
+        { key: 'A', name: 'Operational sidebar', state: 'Variant A. Mock state: report.zip is sending at 62%. No file, network, clipboard, or config access.' },
+        { key: 'B', name: 'Action-first split', state: 'Variant B. Mock state: a send-ready archive and a pasted receive ticket are shown side by side.' },
+        { key: 'C', name: 'Transfer control room', state: 'Variant C. Mock state: transfer history and the selected ticket inspector are visible.' }
+      ];
+      const stateText = document.getElementById('state-text');
+      const label = document.getElementById('switcher-label');
+      const query = new URLSearchParams(window.location.search);
+      let current = variants.findIndex(item => item.key === query.get('variant'));
+      if (current < 0) current = 0;
+
+      function render(replace = true) {
+        const variant = variants[current];
+        document.querySelectorAll('[data-variant]').forEach(section => section.classList.toggle('hidden', section.dataset.variant !== variant.key));
+        label.textContent = `${variant.key} — ${variant.name}`;
+        stateText.textContent = variant.state;
+        const url = new URL(window.location.href);
+        url.searchParams.set('variant', variant.key);
+        history[replace ? 'replaceState' : 'pushState']({}, '', url);
+      }
+      function change(delta) { current = (current + delta + variants.length) % variants.length; render(false); }
+      document.getElementById('previous').addEventListener('click', () => change(-1));
+      document.getElementById('next').addEventListener('click', () => change(1));
+      document.addEventListener('keydown', event => {
+        const tag = document.activeElement && document.activeElement.tagName;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || document.activeElement?.isContentEditable) return;
+        if (event.key === 'ArrowLeft') change(-1);
+        if (event.key === 'ArrowRight') change(1);
+      });
+      window.addEventListener('popstate', () => {
+        const key = new URLSearchParams(window.location.search).get('variant');
+        const next = variants.findIndex(item => item.key === key);
+        if (next >= 0) { current = next; render(); }
+      });
+      document.querySelectorAll('[data-demo]').forEach(button => button.addEventListener('click', () => {
+        stateText.textContent = `Variant ${variants[current].key}. Demo action: “${button.dataset.demo}” updated only this in-memory prototype. No real transfer was started.`;
+      }));
+      render();
+    })();
+  </script>
+</body>
+</html>

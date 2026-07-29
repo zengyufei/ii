@@ -32,6 +32,7 @@
 /ii-relay.exe
 
 # Editor and OS files
+.playwright-cli/
 .vscode/
 .idea/
 *.swp

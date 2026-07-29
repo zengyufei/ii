@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=ii
+Comment=ii file transfer
+Exec=ii-gui
+Icon=ii-gui
+Categories=Network;FileTransfer;
+Terminal=false
