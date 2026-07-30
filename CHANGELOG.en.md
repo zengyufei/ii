@@ -25,6 +25,12 @@ All notable changes to `ii` are documented here. The default Chinese version is 
 
 - Restricted the release workflow to the three CLI artifacts; fixed Linux and macOS UPX path handling, which had overwritten UPX's reserved environment variable.
 
+## 0.1.15 - 2026-07-30
+
+### Changed
+
+- The release workflow continues to report UPX-compressed CLI sizes for all targets, without blocking publication on a size limit.
+
 ## Unreleased
 
 Nothing yet.

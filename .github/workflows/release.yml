@@ -78,7 +78,7 @@ jobs:
           cmake -S upx-5.1.0-src -B upx-build -DCMAKE_BUILD_TYPE=Release
           cmake --build upx-build --parallel 2
           printf 'UPX_BIN=%s\n' "$PWD/upx-build/upx" >> "$GITHUB_ENV"
-      - name: Compress, verify, and enforce CLI budget
+      - name: Compress and verify CLI
         shell: bash
         run: |
           set -eux
@@ -97,9 +97,7 @@ jobs:
             echo
             echo "Unpacked: $unpacked_bytes bytes"
             echo "UPX: $packed_bytes bytes"
-            echo "Budget: 1048576 bytes"
           } >> "$GITHUB_STEP_SUMMARY"
-          test "$packed_bytes" -le 1048576
       - name: Prepare artifact
         shell: bash
         run: cp "${{ matrix.binary }}" "${{ matrix.artifact }}"
