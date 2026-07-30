@@ -5,6 +5,7 @@ use rcgen::generate_simple_self_signed;
 use rustls::pki_types::pem::PemObject;
 use serde::{Deserialize, Serialize};
 use std::{
+    fmt::{self, Write},
     fs,
     net::{IpAddr, Ipv4Addr, SocketAddr},
     path::{Path, PathBuf},
@@ -12,7 +13,13 @@ use std::{
 };
 use tokio::signal;
 use tracing::info;
-use tracing_subscriber::EnvFilter;
+use tracing::{
+    Event, Level, Metadata, Subscriber,
+    field::{Field, Visit},
+    level_filters::LevelFilter,
+    span,
+    subscriber::Interest,
+};
 
 const RELAY_STATE_VERSION: u8 = 1;
 const CERT_FILE_NAME: &str = "relay-cert.pem";
@@ -159,12 +166,142 @@ async fn run_server(
 }
 
 fn install_logging() {
-    let filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| EnvFilter::new("info"));
-    let _ = tracing_subscriber::fmt()
-        .with_env_filter(filter)
-        .with_target(false)
-        .compact()
-        .try_init();
+    let _ = tracing::subscriber::set_global_default(RelayLogger {
+        filter: LogFilter::from_env(),
+    });
+}
+
+#[derive(Debug)]
+struct RelayLogger {
+    filter: LogFilter,
+}
+
+impl Subscriber for RelayLogger {
+    fn register_callsite(&self, metadata: &'static Metadata<'static>) -> Interest {
+        if self.filter.allows(metadata) {
+            Interest::always()
+        } else {
+            Interest::never()
+        }
+    }
+
+    fn enabled(&self, metadata: &Metadata<'_>) -> bool {
+        self.filter.allows(metadata)
+    }
+
+    fn max_level_hint(&self) -> Option<LevelFilter> {
+        self.filter.max_level()
+    }
+
+    fn new_span(&self, _: &span::Attributes<'_>) -> span::Id {
+        span::Id::from_u64(1)
+    }
+
+    fn record(&self, _: &span::Id, _: &span::Record<'_>) {}
+
+    fn record_follows_from(&self, _: &span::Id, _: &span::Id) {}
+
+    fn event(&self, event: &Event<'_>) {
+        if !self.filter.allows(event.metadata()) {
+            return;
+        }
+        let mut fields = EventFields::default();
+        event.record(&mut fields);
+        if fields.text.is_empty() {
+            eprintln!("{} {}", event.metadata().level(), event.metadata().name());
+        } else {
+            eprintln!("{} {}", event.metadata().level(), fields.text);
+        }
+    }
+
+    fn enter(&self, _: &span::Id) {}
+
+    fn exit(&self, _: &span::Id) {}
+}
+
+#[derive(Default)]
+struct EventFields {
+    text: String,
+}
+
+impl Visit for EventFields {
+    fn record_debug(&mut self, field: &Field, value: &dyn fmt::Debug) {
+        if !self.text.is_empty() {
+            self.text.push(' ');
+        }
+        let _ = write!(self.text, "{}={value:?}", field.name());
+    }
+}
+
+#[derive(Debug, Clone)]
+struct LogFilter {
+    default: LevelFilter,
+    targets: Vec<(String, LevelFilter)>,
+}
+
+impl LogFilter {
+    fn from_env() -> Self {
+        let mut filter = Self {
+            default: LevelFilter::INFO,
+            targets: Vec::new(),
+        };
+        let Ok(value) = std::env::var("RUST_LOG") else {
+            return filter;
+        };
+        for directive in value
+            .split(',')
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+        {
+            let (target, level) = match directive.rsplit_once('=') {
+                Some((target, level)) => (Some(target.trim()), level.trim()),
+                None => (None, directive),
+            };
+            let Ok(level) = level.parse::<LevelFilter>() else {
+                continue;
+            };
+            match target {
+                Some(target) if !target.is_empty() => {
+                    filter.targets.push((target.to_string(), level))
+                }
+                _ => filter.default = level,
+            }
+        }
+        filter
+    }
+
+    fn allows(&self, metadata: &Metadata<'_>) -> bool {
+        let level = self
+            .targets
+            .iter()
+            .filter(|(target, _)| {
+                metadata.target() == target || metadata.target().starts_with(&format!("{target}::"))
+            })
+            .max_by_key(|(target, _)| target.len())
+            .map(|(_, level)| *level)
+            .unwrap_or(self.default);
+        Self::allows_level(level, *metadata.level())
+    }
+
+    fn max_level(&self) -> Option<LevelFilter> {
+        self.targets
+            .iter()
+            .map(|(_, level)| *level)
+            .chain(std::iter::once(self.default))
+            .max()
+    }
+
+    fn allows_level(level: LevelFilter, message_level: Level) -> bool {
+        match (level, message_level) {
+            (LevelFilter::OFF, _) => false,
+            (LevelFilter::ERROR, Level::ERROR) => true,
+            (LevelFilter::WARN, Level::ERROR | Level::WARN) => true,
+            (LevelFilter::INFO, Level::ERROR | Level::WARN | Level::INFO) => true,
+            (LevelFilter::DEBUG, Level::ERROR | Level::WARN | Level::INFO | Level::DEBUG) => true,
+            (LevelFilter::TRACE, _) => true,
+            _ => false,
+        }
+    }
 }
 
 fn relay_paths(config_path: PathBuf) -> RelayPaths {
@@ -293,6 +430,13 @@ fn load_self_signed_server_config(
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn unused_local_port() -> u16 {
+        std::net::TcpListener::bind("127.0.0.1:0")
+            .expect("bind temporary port")
+            .local_addr()
+            .expect("read temporary port")
+            .port()
+    }
 
     fn public_url() -> iroh::RelayUrl {
         "https://127.0.0.1:8443".parse().unwrap()
@@ -321,6 +465,47 @@ mod tests {
         assert_eq!(first_cert, fs::read(&paths.cert_path).unwrap());
         assert_eq!(first_key, fs::read(&paths.key_path).unwrap());
         load_self_signed_server_config(&paths.cert_path, &paths.key_path).unwrap();
+    }
+
+    #[tokio::test]
+    async fn minimal_relay_serves_probe_endpoints_and_stops() {
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
+        let temp = tempfile::tempdir().unwrap();
+        let paths = relay_paths(temp.path().join("relay.toml"));
+        load_or_create_state(&paths, &public_url()).unwrap();
+        let server_config =
+            load_self_signed_server_config(&paths.cert_path, &paths.key_path).unwrap();
+        let server =
+            server::Server::spawn(build_server_config(server_config, unused_local_port()).unwrap())
+                .await
+                .unwrap();
+
+        let https = server.https_addr().unwrap();
+        let client = reqwest::Client::builder()
+            .danger_accept_invalid_certs(true)
+            .build()
+            .unwrap();
+        assert_eq!(
+            client
+                .get(format!("https://127.0.0.1:{}/ping", https.port()))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            reqwest::StatusCode::OK
+        );
+
+        let http = server.http_addr().unwrap();
+        assert_eq!(
+            reqwest::get(format!("http://{http}/generate_204"))
+                .await
+                .unwrap()
+                .status(),
+            reqwest::StatusCode::NO_CONTENT
+        );
+        server.shutdown().await.unwrap();
     }
 
     #[test]
@@ -367,5 +552,28 @@ mod tests {
 
         let err = load_or_create_state(&paths, &public_url()).unwrap_err();
         assert!(err.to_string().contains("unsupported relay.toml"));
+    }
+
+    #[test]
+    fn log_filter_uses_default_and_longest_target_match() {
+        let filter = LogFilter {
+            default: LevelFilter::INFO,
+            targets: vec![
+                ("iroh".to_string(), LevelFilter::WARN),
+                ("iroh_relay".to_string(), LevelFilter::DEBUG),
+            ],
+        };
+        assert!(LogFilter::allows_level(LevelFilter::DEBUG, Level::DEBUG));
+        assert!(!LogFilter::allows_level(LevelFilter::WARN, Level::INFO));
+        assert!(LogFilter::allows_level(filter.default, Level::INFO));
+        assert_eq!(
+            filter
+                .targets
+                .iter()
+                .filter(|(target, _)| "iroh_relay::client".starts_with(target))
+                .max_by_key(|(target, _)| target.len())
+                .map(|(_, level)| *level),
+            Some(LevelFilter::DEBUG)
+        );
     }
 }

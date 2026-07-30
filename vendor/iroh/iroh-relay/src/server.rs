@@ -20,7 +20,6 @@ use std::{
     future::Future,
     net::SocketAddr,
     num::NonZeroU32,
-    path::PathBuf,
     pin::Pin,
     sync::{
         Arc,
@@ -40,32 +39,27 @@ use iroh_base::EndpointId;
 #[cfg(feature = "test-utils")]
 use iroh_base::RelayUrl;
 use n0_error::{e, stack_error};
-use n0_future::{StreamExt, task::AbortOnDropHandle};
-use rustls::server::WantsServerCert;
+use n0_future::task::AbortOnDropHandle;
+#[cfg(feature = "server-management")]
 use serde::Serialize;
 use tokio::{
     net::TcpListener,
     task::{JoinError, JoinSet},
 };
-use tokio_rustls_acme::{
-    acme::{LETS_ENCRYPT_PRODUCTION_DIRECTORY, LETS_ENCRYPT_STAGING_DIRECTORY},
-    caches::DirCache,
-};
 use tracing::{Instrument, debug, error, info, info_span, instrument};
 
 use self::http_server::{BytesBody, HyperError, HyperResult};
+#[cfg(feature = "server-quic")]
+use crate::quic::server::{QuicServer, QuicSpawnError, ServerHandle as QuicServerHandle};
 use crate::{
     defaults::DEFAULT_KEY_CACHE_CAPACITY,
     http::{AUTH_TOKEN_URL_QUERY_PARAM, ProtocolVersion, RELAY_PROBE_PATH},
-    quic::server::{QuicServer, QuicSpawnError, ServerHandle as QuicServerHandle},
-    tls::CaTlsConfig,
 };
 
 pub mod client;
 pub mod clients;
 pub mod http_server;
 mod metrics;
-pub(crate) mod resolver;
 pub mod streams;
 #[cfg(feature = "test-utils")]
 pub mod testing;
@@ -73,13 +67,14 @@ pub mod testing;
 pub use self::{
     http_server::{Handlers, RelayService},
     metrics::{Metrics, RelayMetrics},
-    resolver::{DEFAULT_CERT_RELOAD_INTERVAL, reloading_resolver},
 };
 
 const NO_CONTENT_CHALLENGE_HEADER: &str = "X-Iroh-Challenge";
 const NO_CONTENT_RESPONSE_HEADER: &str = "X-Iroh-Response";
 const NOTFOUND: &[u8] = b"Not Found";
+#[cfg(feature = "server-management")]
 const ROBOTS_TXT: &[u8] = b"User-agent: *\nDisallow: /\n";
+#[cfg(feature = "server-management")]
 const INDEX: &[u8] = br#"<html><body>
 <h1>Iroh Relay</h1>
 <p>
@@ -112,6 +107,7 @@ pub struct ServerConfig {
     /// Configuration for the Relay server, disabled if `None`.
     pub relay: Option<RelayConfig>,
     /// Configuration for the QUIC server, disabled if `None`.
+    #[cfg(feature = "server-quic")]
     pub quic: Option<QuicConfig>,
     /// Socket to serve metrics on.
     #[cfg(feature = "metrics")]
@@ -425,6 +421,7 @@ impl Drop for OnDisconnectGuard {
 }
 
 /// Configuration for the QUIC server.
+#[cfg(feature = "server-quic")]
 #[derive(Debug)]
 #[non_exhaustive]
 pub struct QuicConfig {
@@ -442,6 +439,7 @@ pub struct QuicConfig {
     pub server_config: Option<rustls::ServerConfig>,
 }
 
+#[cfg(feature = "server-quic")]
 impl QuicConfig {
     /// Creates a new [`QuicConfig`] bound to `bind_addr`.
     ///
@@ -525,15 +523,6 @@ impl ClientRateLimit {
 #[derive(Debug)]
 #[non_exhaustive]
 pub enum CertConfig {
-    /// Use Let's Encrypt.
-    LetsEncrypt {
-        /// Configuration for the ACME client.
-        acme_config: AcmeConfig,
-        /// Builder for the [`rustls::ServerConfig`].
-        ///
-        /// The ACME resolver will be injected when starting the server.
-        server_config_builder: rustls::ConfigBuilder<rustls::ServerConfig, WantsServerCert>,
-    },
     /// Use a TLS key and certificate chain that can be reloaded.
     Manual {
         /// The [`rustls::ServerConfig`] to use.
@@ -541,71 +530,6 @@ pub enum CertConfig {
         /// This needs to have the certificates or a certificate loader, it will be used by the server as-is.
         server_config: rustls::ServerConfig,
     },
-}
-
-/// Configuration for the ACME client.
-#[derive(Debug, Clone)]
-pub struct AcmeConfig {
-    pub(crate) directory_url: String,
-    pub(crate) domains: Vec<String>,
-    pub(crate) contact: Vec<String>,
-    pub(crate) cache_path: Option<PathBuf>,
-    pub(crate) tls_config: CaTlsConfig,
-}
-
-impl AcmeConfig {
-    /// Creates a new [`AcmeConfig`] with a ACME directory URL.
-    pub fn new(directory_url: String) -> Self {
-        Self {
-            directory_url,
-            domains: Vec::new(),
-            contact: Vec::new(),
-            cache_path: None,
-            tls_config: CaTlsConfig::default(),
-        }
-    }
-
-    /// Creates a new [`AcmeConfig`] with the Let's Encrypt directory URL.
-    pub fn letsencrypt(production: bool) -> Self {
-        let url = if production {
-            LETS_ENCRYPT_PRODUCTION_DIRECTORY
-        } else {
-            LETS_ENCRYPT_STAGING_DIRECTORY
-        };
-        Self::new(url.to_string())
-    }
-
-    /// Provides the list of domains for which certificates should be obtained.
-    pub fn domains(mut self, domains: Vec<String>) -> Self {
-        self.domains = domains;
-        self
-    }
-
-    /// Provides a list of contacts for the account.
-    ///
-    /// Note that email addresses must include a `mailto:` prefix.
-    pub fn contact(mut self, contact: Vec<String>) -> Self {
-        self.contact = contact;
-        self
-    }
-
-    /// Sets the directory where to cache certificates.
-    ///
-    /// If not called certificates will not be cached.
-    pub fn cache_path(mut self, path: PathBuf) -> Self {
-        self.cache_path = Some(path);
-        self
-    }
-
-    /// Sets the [`CaTlsConfig`] used to verify the ACME server's TLS certificate.
-    ///
-    /// Defaults to [`CaTlsConfig::embedded`]. Set a config with extra roots when targeting
-    /// an ACME server whose certificate is not signed by a publicly trusted CA, such as a
-    /// local test server.
-    pub fn tls_config(mut self, tls_config: CaTlsConfig) -> Self {
-        self.tls_config = tls_config;
-        self
-    }
 }
 
 /// A running Relay + QAD server.
@@ -623,12 +547,14 @@ pub struct Server {
     /// [`Server::http_addr`].
     https_addr: Option<SocketAddr>,
     /// The address of the QUIC server, if configured.
+    #[cfg(feature = "server-quic")]
     quic_addr: Option<SocketAddr>,
     /// Handle to the relay server.
     relay_handle: Option<http_server::ServerHandle>,
     /// Handle to the relay service for runtime control.
     relay_service: Option<http_server::RelayService>,
     /// Handle to the quic server.
+    #[cfg(feature = "server-quic")]
     quic_handle: Option<QuicServerHandle>,
     /// The main task running the server.
     supervisor: AbortOnDropHandle<Result<(), SupervisorError>>,
@@ -644,17 +570,13 @@ pub struct Server {
 pub enum SpawnError {
     #[error("Unable to get local address")]
     LocalAddr { source: std::io::Error },
+    #[cfg(feature = "server-quic")]
     #[error("Failed to bind QAD listener")]
     QuicSpawn { source: QuicSpawnError },
     #[error("Failed to parse TLS header")]
     TlsHeaderParse { source: InvalidHeaderValue },
     #[error("Failed to bind TcpListener")]
     BindTlsListener { source: std::io::Error },
-    #[error("Failed to build ACME client TLS config")]
-    AcmeClientTlsConfig {
-        #[error(std_err)]
-        source: std::io::Error,
-    },
     #[error("No local address")]
     NoLocalAddr { source: std::io::Error },
     #[error("Failed to bind server socket to {addr}")]
@@ -674,8 +596,6 @@ pub enum SpawnError {
 #[stack_error(derive, add_meta)]
 #[non_exhaustive]
 pub enum SupervisorError {
-    #[error("Acme event stream finished")]
-    AcmeEventStreamFinished {},
     #[error(transparent)]
     JoinError {
         #[error(from, std_err)]
@@ -731,69 +651,26 @@ impl Server {
                     .headers(headers)
                     .key_cache_capacity(key_cache_capacity)
                     .access(relay_config.access)
-                    .request_handler(Method::GET, "/", Box::new(root_handler))
-                    .request_handler(Method::GET, "/index.html", Box::new(root_handler))
-                    .request_handler(Method::GET, RELAY_PROBE_PATH, Box::new(probe_handler))
-                    .request_handler(Method::GET, "/robots.txt", Box::new(robots_handler))
-                    .request_handler(Method::GET, "/healthz", Box::new(healthz_handler));
+                    .request_handler(Method::GET, RELAY_PROBE_PATH, Box::new(probe_handler));
+                #[cfg(feature = "server-management")]
+                {
+                    builder = builder
+                        .request_handler(Method::GET, "/", Box::new(root_handler))
+                        .request_handler(Method::GET, "/index.html", Box::new(root_handler))
+                        .request_handler(Method::GET, "/robots.txt", Box::new(robots_handler))
+                        .request_handler(Method::GET, "/healthz", Box::new(healthz_handler));
+                }
                 if let Some(cfg) = relay_config.limits.client_rx {
                     builder = builder.client_rx_ratelimit(cfg);
                 }
                 let (http_addr, tls_config) = match relay_config.tls {
                     Some(tls_config) => {
-                        let server_tls_config = match tls_config.cert {
-                            CertConfig::LetsEncrypt {
-                                acme_config,
-                                server_config_builder,
-                            } => {
-                                let cache = acme_config.cache_path.map(DirCache::new);
-                                let crypto_provider =
-                                    server_config_builder.crypto_provider().clone();
-                                let client_tls_config = acme_config
-                                    .tls_config
-                                    .client_config(crypto_provider)
-                                    .map_err(|err| e!(SpawnError::AcmeClientTlsConfig, err))?;
-                                let config =
-                                    tokio_rustls_acme::AcmeConfig::new_with_client_tls_config(
-                                        acme_config.domains,
-                                        Arc::new(client_tls_config),
-                                    )
-                                    .contact(acme_config.contact)
-                                    .directory(acme_config.directory_url)
-                                    .cache_option(cache);
-                                let mut state = config.state();
-                                let resolver = state.resolver().clone();
-                                let server_config =
-                                    server_config_builder.with_cert_resolver(resolver);
-                                let acceptor =
-                                    http_server::TlsAcceptor::LetsEncrypt(state.acceptor());
-                                tasks.spawn(
-                                    async move {
-                                        while let Some(event) = state.next().await {
-                                            match event {
-                                                Ok(ok) => debug!("acme event: {ok:?}"),
-                                                Err(err) => error!("error: {err:?}"),
-                                            }
-                                        }
-                                        Err(e!(SupervisorError::AcmeEventStreamFinished))
-                                    }
-                                    .instrument(info_span!("acme")),
-                                );
-                                http_server::TlsConfig {
-                                    config: Arc::new(server_config),
-                                    acceptor,
-                                }
-                            }
-                            CertConfig::Manual { server_config } => {
-                                let server_config = Arc::new(server_config);
-                                let acceptor =
-                                    tokio_rustls::TlsAcceptor::from(server_config.clone());
-                                let acceptor = http_server::TlsAcceptor::Manual(acceptor);
-                                http_server::TlsConfig {
-                                    config: server_config,
-                                    acceptor,
-                                }
-                            }
+                        let CertConfig::Manual { server_config } = tls_config.cert;
+                        let server_config = Arc::new(server_config);
+                        let acceptor = tokio_rustls::TlsAcceptor::from(server_config.clone());
+                        let server_tls_config = http_server::TlsConfig {
+                            config: server_config,
+                            acceptor: http_server::TlsAcceptor::Manual(acceptor),
                         };
                         builder = builder.tls_config(Some(server_tls_config.clone()));
 
@@ -830,12 +707,15 @@ impl Server {
             }
             None => (None, None, None),
         };
+        #[cfg(not(feature = "server-quic"))]
+        let _ = &tls_config;
         // If http_addr is Some then relay_server is serving HTTPS.  If http_addr is None
         // relay_server is serving HTTP, including the /generate_204 service.
         let relay_addr = relay_server.as_ref().map(|srv| srv.addr());
         let relay_handle = relay_server.as_ref().map(|srv| srv.handle());
         let relay_service = relay_server.as_ref().map(|srv| srv.service().clone());
 
+        #[cfg(feature = "server-quic")]
         let quic_server = match config.quic {
             Some(quic_config) => {
                 debug!("Starting QUIC server {}", quic_config.bind_addr);
@@ -852,17 +732,24 @@ impl Server {
             }
             None => None,
         };
+        #[cfg(feature = "server-quic")]
         let quic_addr = quic_server.as_ref().map(|srv| srv.bind_addr());
+        #[cfg(feature = "server-quic")]
         let quic_handle = quic_server.as_ref().map(|srv| srv.handle());
 
+        #[cfg(feature = "server-quic")]
         let task = tokio::spawn(relay_supervisor(tasks, relay_server, quic_server));
+        #[cfg(not(feature = "server-quic"))]
+        let task = tokio::spawn(relay_supervisor(tasks, relay_server));
 
         Ok(Self {
             http_addr: http_addr.or(relay_addr),
             https_addr: http_addr.and(relay_addr),
+            #[cfg(feature = "server-quic")]
             quic_addr,
             relay_handle,
             relay_service,
+            #[cfg(feature = "server-quic")]
             quic_handle,
             supervisor: AbortOnDropHandle::new(task),
             metrics,
@@ -880,6 +767,7 @@ impl Server {
         if let Some(handle) = self.relay_handle {
             handle.shutdown();
         }
+        #[cfg(feature = "server-quic")]
         if let Some(handle) = self.quic_handle {
             handle.shutdown();
         }
@@ -914,6 +802,7 @@ impl Server {
     }
 
     /// The socket address the QUIC server is listening on.
+    #[cfg(feature = "server-quic")]
     pub fn quic_addr(&self) -> Option<SocketAddr> {
         self.quic_addr
     }
@@ -958,6 +847,7 @@ impl Server {
 /// As soon as one of the tasks exits, all other tasks are stopped and the server stops.
 /// The supervisor finishes once all tasks are finished.
 #[instrument(skip_all)]
+#[cfg(feature = "server-quic")]
 async fn relay_supervisor(
     mut tasks: JoinSet<Result<(), SupervisorError>>,
     mut relay_http_server: Option<http_server::Server>,
@@ -1016,6 +906,41 @@ async fn relay_supervisor(
     ret
 }
 
+#[cfg(not(feature = "server-quic"))]
+#[instrument(skip_all)]
+async fn relay_supervisor(
+    mut tasks: JoinSet<Result<(), SupervisorError>>,
+    mut relay_http_server: Option<http_server::Server>,
+) -> Result<(), SupervisorError> {
+    let relay_enabled = relay_http_server.is_some();
+    let mut relay_fut = match relay_http_server {
+        Some(ref mut server) => n0_future::Either::Left(server.task_handle()),
+        None => n0_future::Either::Right(n0_future::future::pending()),
+    };
+    let res = tokio::select! {
+        biased;
+        Some(ret) = tasks.join_next() => ret,
+        ret = &mut relay_fut, if relay_enabled => ret.map(Ok),
+        else => Ok(Err(e!(SupervisorError::NoRelayServicesEnabled))),
+    };
+    let ret = match res {
+        Ok(Ok(())) => Ok(()),
+        Ok(Err(err)) => Err(err),
+        Err(err) => {
+            if let Ok(panic) = err.try_into_panic() {
+                std::panic::resume_unwind(panic);
+            }
+            Err(e!(SupervisorError::TaskCancelled))
+        }
+    };
+    if let Some(server) = relay_http_server {
+        server.shutdown();
+    }
+    tasks.shutdown().await;
+    ret
+}
+
+#[cfg(feature = "server-management")]
 fn root_handler(
     _r: Request<Incoming>,
     response: ResponseBuilder,
@@ -1040,6 +965,7 @@ fn probe_handler(
         .map_err(|err| Box::new(err) as HyperError)
 }
 
+#[cfg(feature = "server-management")]
 fn robots_handler(
     _r: Request<Incoming>,
     response: ResponseBuilder,
@@ -1086,6 +1012,7 @@ fn is_challenge_char(c: char) -> bool {
 }
 
 /// Health check response
+#[cfg(feature = "server-management")]
 #[derive(Serialize)]
 struct Health {
     status: &'static str,
@@ -1093,6 +1020,7 @@ struct Health {
     git_hash: &'static str,
 }
 
+#[cfg(feature = "server-management")]
 fn healthz_handler(
     _r: Request<Incoming>,
     response: ResponseBuilder,

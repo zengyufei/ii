@@ -13,7 +13,7 @@ pub const QUIC_ADDR_DISC_CLOSE_CODE: VarInt = VarInt::from_u32(1);
 /// Endpoint close reason
 pub const QUIC_ADDR_DISC_CLOSE_REASON: &[u8] = b"finished";
 
-#[cfg(feature = "server")]
+#[cfg(feature = "server-quic")]
 pub(crate) mod server {
     use n0_error::e;
     use noq::{

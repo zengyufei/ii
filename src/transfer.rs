@@ -10,7 +10,6 @@ use anyhow::{Context, Result, bail};
 use futures_util::TryStreamExt;
 use iroh::{Endpoint, RelayMap, RelayMode, SecretKey, TransportAddr, endpoint::presets};
 use iroh_relay::tls::CaTlsConfig;
-use reqwest_dav::Depth;
 use russh::{
     client::{self as ssh_client, Handler as SshClientHandler},
     keys::{HashAlg, PrivateKeyWithHashAlg, decode_secret_key},
@@ -625,7 +624,7 @@ async fn upload_to_s3(
     .context("upload task")?
 }
 
-fn s3_object_exists(bucket: &s3::Bucket, object_path: &str) -> Result<bool> {
+fn s3_object_exists(bucket: &crate::s3::Client, object_path: &str) -> Result<bool> {
     match bucket.head_object(object_path) {
         Ok((_, code)) if (200..300).contains(&code) => Ok(true),
         Ok((_, 404)) => Ok(false),
@@ -709,9 +708,9 @@ async fn upload_to_webdav(
             progress.advance(bytes.len() as u64);
         }
     });
-    let body = reqwest_dav::re_exports::reqwest::Body::wrap_stream(stream);
+    let body = reqwest::Body::wrap_stream(stream);
     let response = client
-        .start_request(reqwest_dav::re_exports::reqwest::Method::PUT, &object_key)
+        .start_request(reqwest::Method::PUT, &object_key)
         .await
         .with_context(|| format!("prepare WebDAV upload {object_key}"))?
         .header("content-type", "application/octet-stream")
@@ -730,7 +729,7 @@ async fn upload_to_webdav(
     Ok(WebDavUploadResult { object_key })
 }
 
-async fn ensure_webdav_parent_dirs(client: &reqwest_dav::Client, object_key: &str) -> Result<()> {
+async fn ensure_webdav_parent_dirs(client: &crate::webdav::Client, object_key: &str) -> Result<()> {
     let mut current = String::new();
     let parts = object_key.trim_matches('/').split('/').collect::<Vec<_>>();
     for part in parts.iter().take(parts.len().saturating_sub(1)) {
@@ -742,32 +741,22 @@ async fn ensure_webdav_parent_dirs(client: &reqwest_dav::Client, object_key: &st
         }
         current.push_str(part);
         match client.mkcol(&current).await {
-            Ok(()) => {}
-            Err(err) if matches!(webdav_error_status(&err), Some(405 | 409)) => {}
+            Ok(status) if (200..300).contains(&status) || matches!(status, 405 | 409) => {}
+            Ok(status) => bail!("create WebDAV dir {current} failed with status {status}"),
             Err(err) => return Err(err).with_context(|| format!("create WebDAV dir {current}")),
         }
     }
     Ok(())
 }
 
-async fn webdav_object_exists(client: &reqwest_dav::Client, object_key: &str) -> Result<bool> {
-    match client.list(object_key, Depth::Number(0)).await {
-        Ok(_) => Ok(true),
-        Err(err) if webdav_error_status(&err) == Some(404) => Ok(false),
-        Err(err) => Err(err).with_context(|| format!("check WebDAV object {object_key}")),
-    }
-}
-
-fn webdav_error_status(err: &reqwest_dav::Error) -> Option<u16> {
-    match err {
-        reqwest_dav::Error::Reqwest(err) => err.status().map(|status| status.as_u16()),
-        reqwest_dav::Error::Decode(reqwest_dav::DecodeError::StatusMismatched(status)) => {
-            Some(status.response_code)
-        }
-        reqwest_dav::Error::Decode(reqwest_dav::DecodeError::Server(server)) => {
-            Some(server.response_code)
-        }
-        _ => None,
+async fn webdav_object_exists(client: &crate::webdav::Client, object_key: &str) -> Result<bool> {
+    let response = client.propfind(object_key).await?;
+    match response.status() {
+        status if (200..300).contains(&status) => response
+            .is_multistatus()
+            .with_context(|| format!("parse WebDAV object response for {object_key}")),
+        404 => Ok(false),
+        status => bail!("check WebDAV object {object_key} failed with status {status}"),
     }
 }
 
@@ -2161,7 +2150,7 @@ fn webdav_profile_from_portable(
 }
 
 async fn download_webdav_to_file(
-    client: &reqwest_dav::Client,
+    client: &crate::webdav::Client,
     object_key: &str,
     path: PathBuf,
     resume_from: u64,
@@ -2209,7 +2198,7 @@ async fn download_webdav_to_file(
 }
 
 async fn download_webdav_to_stdout(
-    client: &reqwest_dav::Client,
+    client: &crate::webdav::Client,
     object_key: &str,
     total_size: Option<u64>,
     show_progress: bool,
@@ -2229,7 +2218,7 @@ async fn download_webdav_to_stdout(
 }
 
 async fn download_webdav_tar(
-    client: &reqwest_dav::Client,
+    client: &crate::webdav::Client,
     object_key: &str,
     out_dir: PathBuf,
     total_size: Option<u64>,
@@ -2264,12 +2253,12 @@ async fn download_webdav_tar(
 }
 
 async fn webdav_get(
-    client: &reqwest_dav::Client,
+    client: &crate::webdav::Client,
     object_key: &str,
     resume_from: u64,
-) -> Result<reqwest_dav::re_exports::reqwest::Response> {
+) -> Result<reqwest::Response> {
     let mut request = client
-        .start_request(reqwest_dav::re_exports::reqwest::Method::GET, object_key)
+        .start_request(reqwest::Method::GET, object_key)
         .await
         .with_context(|| format!("prepare WebDAV download {object_key}"))?;
     if resume_from > 0 {
@@ -2290,7 +2279,7 @@ fn ensure_webdav_success(status: u16) -> Result<()> {
 }
 
 async fn copy_webdav_response_with_progress<W>(
-    mut response: reqwest_dav::re_exports::reqwest::Response,
+    mut response: reqwest::Response,
     writer: &mut W,
     progress: &mut TransferProgress,
 ) -> Result<u64>
@@ -2311,7 +2300,7 @@ where
 }
 
 async fn try_delete_webdav(
-    client: &reqwest_dav::Client,
+    client: &crate::webdav::Client,
     object_key: &str,
     delete_after_recv: bool,
     trace: &mut RecvTrace,
@@ -2320,10 +2309,11 @@ async fn try_delete_webdav(
         return;
     }
     match client.delete(object_key).await {
-        Ok(()) => trace.info("webdav delete requested after receive"),
-        Err(err) if webdav_error_status(&err) == Some(404) => {
-            trace.info("webdav delete ignored: object already missing")
+        Ok(status) if (200..300).contains(&status) => {
+            trace.info("webdav delete requested after receive")
         }
+        Ok(404) => trace.info("webdav delete ignored: object already missing"),
+        Ok(status) => trace.info(format_args!("webdav delete ignored: status {status}")),
         Err(err) => trace.info(format_args!("webdav delete ignored: {err:#}")),
     }
 }

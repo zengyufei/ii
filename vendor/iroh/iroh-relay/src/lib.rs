@@ -12,11 +12,11 @@
 //!   revised version of the Designated Encrypted Relay for Packets (DERP) protocol written by
 //!   Tailscale.
 #![cfg_attr(
-    feature = "server",
+    feature = "server-minimal",
     doc = "- [`server`]: A fully-fledged iroh-relay server over HTTP or HTTPS."
 )]
 #![cfg_attr(
-    not(feature = "server"),
+    not(feature = "server-minimal"),
     doc = "- `server`: A fully-fledged iroh-relay server over HTTP or HTTPS."
 )]
 //!
@@ -38,7 +38,7 @@ mod ping_tracker;
 pub mod protos;
 pub mod quic;
 mod relay_map;
-#[cfg(feature = "server")]
+#[cfg(feature = "server-minimal")]
 pub mod server;
 #[cfg(test)]
 pub(crate) mod test_utils;

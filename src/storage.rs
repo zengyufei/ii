@@ -416,20 +416,16 @@ fn load_or_prompt_webdav_profile_from_path(
     })
 }
 
-pub fn build_webdav_client(profile: &WebDavProfile) -> Result<reqwest_dav::Client> {
+pub fn build_webdav_client(profile: &WebDavProfile) -> Result<crate::webdav::Client> {
     let auth = match profile.auth {
         WebDavAuth::Basic => {
-            reqwest_dav::Auth::Basic(profile.username.clone(), profile.password.clone())
+            crate::webdav::Auth::Basic(profile.username.clone(), profile.password.clone())
         }
         WebDavAuth::Digest => {
-            reqwest_dav::Auth::Digest(profile.username.clone(), profile.password.clone())
+            crate::webdav::Auth::Digest(profile.username.clone(), profile.password.clone())
         }
     };
-    reqwest_dav::ClientBuilder::new()
-        .set_host(profile.url.clone())
-        .set_auth(auth)
-        .build()
-        .context("create WebDAV client")
+    crate::webdav::Client::new(profile.url.clone(), auth).context("create WebDAV client")
 }
 
 pub fn load_or_prompt_ftp_profile() -> Result<FtpProfileSelection> {
@@ -550,26 +546,16 @@ fn load_or_prompt_sftp_profile_from_path(
     })
 }
 
-pub fn build_bucket(profile: &S3Profile) -> Result<Box<s3::Bucket>> {
-    let region = s3::Region::Custom {
-        region: profile.region.clone(),
-        endpoint: profile.endpoint.clone(),
-    };
-    let credentials = s3::creds::Credentials::new(
-        Some(profile.access_key_id.as_str()),
-        Some(profile.secret_access_key.as_str()),
-        None,
-        None,
-        None,
+pub fn build_bucket(profile: &S3Profile) -> Result<crate::s3::Client> {
+    crate::s3::Client::new(
+        &profile.bucket,
+        &profile.region,
+        &profile.endpoint,
+        &profile.access_key_id,
+        &profile.secret_access_key,
+        profile.path_style,
     )
-    .context("create S3 credentials")?;
-    let bucket =
-        s3::Bucket::new(&profile.bucket, region, credentials).context("create S3 bucket")?;
-    Ok(if profile.path_style {
-        bucket.with_path_style()
-    } else {
-        bucket
-    })
+    .context("create S3 bucket")
 }
 
 pub fn normalized_object_key(prefix: &str, random_id: &str, name: &str) -> String {

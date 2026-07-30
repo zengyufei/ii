@@ -2,7 +2,7 @@
 
 All notable changes to `ii` are documented here. The default Chinese version is [CHANGELOG.md](CHANGELOG.md).
 
-## Unreleased
+## 0.1.13 - 2026-07-30
 
 ### Added
 
@@ -13,10 +13,15 @@ All notable changes to `ii` are documented here. The default Chinese version is 
 ### Changed
 
 - Added Windows GUI executables, Linux AppImages, and macOS `.app.zip` artifacts to the release workflow.
+- Pruned relay, S3, WebDAV, FTP, and logging dependencies while retaining current CLI, configuration, and transfer-protocol compatibility; added UPX integrity checks and a 1 MiB CLI size gate for all release targets.
 
 ### Documentation
 
 - Added FTP and SFTP backend guides and synchronized the English README and full command manual.
+
+## Unreleased
+
+Nothing yet.
 
 ## 0.1.12 - 2026-07-17
 

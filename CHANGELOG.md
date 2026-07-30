@@ -2,7 +2,7 @@
 
 本文件记录 `ii` 的重要变更。默认中文版本在这里，英文版本见 [CHANGELOG.en.md](CHANGELOG.en.md)。
 
-## Unreleased
+## 0.1.13 - 2026-07-30
 
 ### 新增
 
@@ -13,10 +13,15 @@
 ### 变更
 
 - Release 流水线新增 Windows GUI 可执行文件、Linux AppImage 和 macOS `.app.zip` 产物。
+- 裁剪 relay、S3、WebDAV、FTP 和日志依赖；保留现有 CLI、配置格式和传输协议兼容性，并在发布流水线中增加三端 CLI 的 UPX 完整性与 1 MiB 大小门禁。
 
 ### 文档
 
 - 新增 FTP 与 SFTP 中转说明，并同步中英文 README 和完整命令手册。
+
+## Unreleased
+
+暂无。
 
 ## 0.1.12 - 2026-07-17
 

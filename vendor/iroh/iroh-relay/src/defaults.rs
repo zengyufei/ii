@@ -47,6 +47,6 @@ pub mod timeouts {
     pub(crate) const DNS_TIMEOUT: Duration = Duration::from_secs(3);
 
     /// Maximum time the server will attempt to get a successful write to the connection.
-    #[cfg(feature = "server")]
+    #[cfg(feature = "server-minimal")]
     pub const SERVER_WRITE_TIMEOUT: Duration = Duration::from_secs(2);
 }

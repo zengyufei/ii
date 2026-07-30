@@ -8,10 +8,8 @@ use std::{
 
 use n0_error::{ensure, stack_error};
 use n0_future::{FutureExt, Sink, Stream, ready, time};
-use tokio::{
-    io::{AsyncRead, AsyncWrite},
-    sync::watch,
-};
+use tokio::io::{AsyncRead, AsyncWrite};
+use tokio::sync::watch;
 use tracing::{instrument, warn};
 
 use super::{ClientRateLimit, Metrics};

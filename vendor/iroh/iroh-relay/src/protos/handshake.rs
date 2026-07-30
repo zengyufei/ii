@@ -24,19 +24,19 @@
 //!
 //! [Concealed HTTP Auth RFC]: https://datatracker.ietf.org/doc/rfc9729/
 //! [RFC 5705]: https://datatracker.ietf.org/doc/html/rfc5705
-#[cfg(feature = "server")]
+#[cfg(feature = "server-minimal")]
 use std::sync::Arc;
 
 use bytes::{BufMut, Bytes, BytesMut};
 use data_encoding::BASE32HEX_NOPAD as HEX;
 #[cfg(not(wasm_browser))]
 use http::HeaderValue;
-#[cfg(feature = "server")]
+#[cfg(feature = "server-minimal")]
 use iroh_base::Signature;
 use iroh_base::{PublicKey, SecretKey};
 use n0_error::{AnyError, anyerr, e, ensure, stack_error};
 use n0_future::{SinkExt, TryStreamExt};
-#[cfg(feature = "server")]
+#[cfg(feature = "server-minimal")]
 use rand::CryptoRng;
 use tracing::trace;
 
@@ -45,7 +45,7 @@ use super::{
     streams::BytesStreamSink,
 };
 use crate::ExportKeyingMaterial;
-#[cfg(feature = "server")]
+#[cfg(feature = "server-minimal")]
 use crate::server::{Access, ClientRequest, DynAccessControl, OnDisconnectGuard};
 
 /// Domain separation string for the [`ServerChallenge`] signature
@@ -168,12 +168,12 @@ pub enum Error {
         frame_type: FrameType,
         source: AnyError,
     },
-    #[cfg(feature = "server")]
+    #[cfg(feature = "server-minimal")]
     /// Failed to deserialize client auth header
     ClientAuthHeaderInvalid { value: HeaderValue },
 }
 
-#[cfg(feature = "server")]
+#[cfg(feature = "server-minimal")]
 #[stack_error(derive, add_meta)]
 #[non_exhaustive]
 pub(crate) enum VerificationError {
@@ -199,7 +199,7 @@ pub(crate) enum VerificationError {
 
 impl ServerChallenge {
     /// Generates a new challenge.
-    #[cfg(feature = "server")]
+    #[cfg(feature = "server-minimal")]
     pub(crate) fn new<R: CryptoRng + ?Sized>(rng: &mut R) -> Self {
         let mut challenge = [0u8; 16];
         rng.fill_bytes(&mut challenge);
@@ -230,7 +230,7 @@ impl ClientAuth {
     }
 
     /// Verifies this client's authentication given the challenge this was sent in response to.
-    #[cfg(feature = "server")]
+    #[cfg(feature = "server-minimal")]
     pub(crate) fn verify(&self, challenge: &ServerChallenge) -> Result<(), Box<VerificationError>> {
         let message = challenge.message_to_sign();
         self.public_key
@@ -284,7 +284,7 @@ impl KeyMaterialClientAuth {
     ///    (e.g. there's an HTTPS proxy in between that doesn't think/care about the TLS keying material exporter).
     ///    This situation is detected when the key material suffix mismatches.
     /// 2. The signature itself doesn't verify.
-    #[cfg(feature = "server")]
+    #[cfg(feature = "server-minimal")]
     pub(crate) fn verify(
         &self,
         io: &impl ExportKeyingMaterial,
@@ -382,7 +382,7 @@ pub(crate) async fn clientside(
 /// This struct represents a client that has successfully authenticated itself to the relay
 /// server. The authorization must still be confirmed by calling [`Self::authorize_if`] to
 /// complete the protocol and notify the client of success or failure.
-#[cfg(feature = "server")]
+#[cfg(feature = "server-minimal")]
 #[derive(Debug)]
 #[must_use = "the protocol is not finished unless `authorize_if` is called"]
 pub struct SuccessfulAuthentication {
@@ -393,7 +393,7 @@ pub struct SuccessfulAuthentication {
 }
 
 /// The mechanism that was used for authentication.
-#[cfg(feature = "server")]
+#[cfg(feature = "server-minimal")]
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 #[non_exhaustive]
 pub enum Mechanism {
@@ -417,7 +417,7 @@ pub enum Mechanism {
 /// The return value [`SuccessfulAuthentication`] still needs to be resolved by calling
 /// [`SuccessfulAuthentication::authorize_if`] to finish the whole authorization protocol
 /// (otherwise the client won't be notified about auth success or failure).
-#[cfg(feature = "server")]
+#[cfg(feature = "server-minimal")]
 pub async fn serverside(
     io: &mut (impl BytesStreamSink + ExportKeyingMaterial),
     client_auth_header: Option<HeaderValue>,
@@ -473,7 +473,7 @@ pub async fn serverside(
     }
 }
 
-#[cfg(feature = "server")]
+#[cfg(feature = "server-minimal")]
 impl SuccessfulAuthentication {
     /// Authorizes a [`ClientRequest`] and completes the authorization protocol.
     ///

@@ -32,11 +32,11 @@ pub(crate) const MAX_FRAME_SIZE: usize = 1024 * 1024;
 ///
 /// The default QUIC max_idle_timeout is 30s, so setting that to half this time gives some
 /// chance of recovering.
-#[cfg(feature = "server")]
+#[cfg(feature = "server-minimal")]
 pub(crate) const PING_INTERVAL: Duration = Duration::from_secs(15);
 
 /// The number of packets buffered for sending per client
-#[cfg(feature = "server")]
+#[cfg(feature = "server-minimal")]
 pub const PER_CLIENT_SEND_QUEUE_DEPTH: usize = 512;
 
 /// Protocol send errors.
@@ -134,7 +134,7 @@ pub enum Status {
 }
 
 impl Status {
-    #[cfg(feature = "server")]
+    #[cfg(feature = "server-minimal")]
     fn write_to<O: BufMut>(&self, mut dst: O) -> O {
         match self {
             Status::Healthy => dst.put_u8(0),
@@ -144,7 +144,7 @@ impl Status {
         dst
     }
 
-    #[cfg(feature = "server")]
+    #[cfg(feature = "server-minimal")]
     fn encoded_len(&self) -> usize {
         1
     }
@@ -312,7 +312,7 @@ impl RelayToClientMsg {
         }
     }
 
-    #[cfg(feature = "server")]
+    #[cfg(feature = "server-minimal")]
     pub(crate) fn to_bytes(&self) -> BytesMut {
         self.write_to(BytesMut::with_capacity(self.encoded_len()))
     }
@@ -320,7 +320,7 @@ impl RelayToClientMsg {
     /// Encodes this frame for sending over websockets.
     ///
     /// Specifically meant for being put into a binary websocket message frame.
-    #[cfg(feature = "server")]
+    #[cfg(feature = "server-minimal")]
     pub(crate) fn write_to<O: BufMut>(&self, mut dst: O) -> O {
         dst = self.typ().write_to(dst);
         match self {
@@ -357,7 +357,7 @@ impl RelayToClientMsg {
         dst
     }
 
-    #[cfg(feature = "server")]
+    #[cfg(feature = "server-minimal")]
     pub(crate) fn encoded_len(&self) -> usize {
         let payload_len = match self {
             Self::Datagrams { datagrams, .. } => {
@@ -525,7 +525,7 @@ impl ClientToRelayMsg {
     ///
     /// Specifically, bytes received from a binary websocket message frame.
     #[allow(clippy::result_large_err)]
-    #[cfg(feature = "server")]
+    #[cfg(feature = "server-minimal")]
     pub(crate) fn from_bytes(mut content: Bytes, cache: &KeyCache) -> Result<Self, Error> {
         let frame_type = FrameType::from_bytes(&mut content)?;
         let frame_len = content.len();

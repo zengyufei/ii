@@ -72,15 +72,9 @@ webpki_types = { package = "rustls-pki-types", version = "1.12" }
 clap = { version = "4", features = ["derive"], optional = true }
 dashmap = { version = "6.1.0", optional = true }
 rcgen = { version = "0.14", optional = true }
-reloadable-state = { version = "0.1", optional = true }
-rustls-cert-reloadable-resolver = { version = "0.7.1", optional = true }
-rustls-cert-file-reader = { version = "0.4.2", optional = true }
 time = { version = "0.3.37", optional = true }
-tokio-rustls-acme = { version = "0.9", optional = true }
 tokio-websockets = { version = "0.13", features = ["rustls-bring-your-own-connector", "getrandom", "rand", "server", "sha1_smol"], optional = true } # server-side websocket implementation
-simdutf8 = { version = "0.1.5", optional = true } # minimal version fix
 sha1 = { version = "0.11.0", optional = true }
-toml = { version = "1.0", optional = true }
 serde_json = { version = "1", optional = true }
 tracing-subscriber = { version = "0.3", default-features = false, features = ["ansi", "fmt", "std"], optional = true }
 
@@ -132,24 +126,22 @@ default = ["metrics", "tls-ring"]
 # Enables fetching TLS trust anchors from the operating system
 platform-verifier = ["dep:rustls-platform-verifier"]
 server = [
+    "server-minimal",
+    "server-quic",
+    "server-management",
+]
+server-minimal = [
     "tokio/signal",
     "dep:dashmap",
-    "dep:rcgen",
-    "dep:reloadable-state",
-    "dep:rustls-cert-file-reader",
-    "dep:rustls-cert-reloadable-resolver",
     "dep:time",
-    "dep:tokio-rustls-acme",
     "dep:tokio-websockets",
-    "dep:simdutf8",
     "dep:sha1",
-    "dep:toml",
-    "dep:serde_json",
-    "noq/runtime-tokio",
     "tls-ring",
 ]
+server-quic = ["noq/runtime-tokio"]
+server-management = ["dep:serde_json"]
 metrics = ["dep:iroh-metrics", "iroh-metrics/metrics", "iroh-metrics/service"]
-test-utils = []
+test-utils = ["dep:rcgen", "iroh-dns/peer-discovery"]
 tls-ring = [
     "noq/ring",
     "rustls/ring",

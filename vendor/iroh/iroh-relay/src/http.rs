@@ -3,9 +3,9 @@
 use http::{HeaderName, HeaderValue};
 use n0_error::stack_error;
 
-#[cfg(feature = "server")]
+#[cfg(feature = "server-minimal")]
 pub(crate) const WEBSOCKET_UPGRADE_PROTOCOL: &str = "websocket";
-#[cfg(feature = "server")] // only used in the server for now
+#[cfg(feature = "server-minimal")] // only used in the server for now
 pub(crate) const SUPPORTED_WEBSOCKET_VERSION: &str = "13";
 
 /// The HTTP path under which the relay accepts relaying connections
@@ -19,7 +19,7 @@ pub const CLIENT_AUTH_HEADER: HeaderName = HeaderName::from_static("x-iroh-relay
 
 /// The URL query parameter name used to pass the authorization token when
 /// HTTP headers are not available (notably, in browsers).
-#[cfg(any(wasm_browser, feature = "server"))]
+#[cfg(any(wasm_browser, feature = "server-minimal"))]
 pub(crate) const AUTH_TOKEN_URL_QUERY_PARAM: &str = "token";
 
 /// The relay protocol version negotiated between client and server.

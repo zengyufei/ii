@@ -1,0 +1,32 @@
+# Binary Size Ledger
+
+The release artifact is the UPX-compressed CLI executable. The release workflow
+verifies the packed artifact and enforces a `1,048,576` byte limit on Windows,
+Linux, and macOS.
+
+## Windows x86_64
+
+All measurements use `cargo build -p ii --release --locked` followed by UPX
+`5.1.0` with `--best --lzma` and `upx -t`.
+
+| Revision | Unpacked bytes | UPX bytes | Change | Verification |
+| --- | ---: | ---: | ---: | --- |
+| Before FTP/SFTP | 5,700,608 | 2,085,376 | baseline | prior controlled build |
+| Before dependency pruning | 7,689,216 | 2,624,512 | +539,136 | prior controlled build |
+| Regex and relay dependency pruning | 6,364,672 | 2,288,640 | -335,872 | `cargo test -p ii --locked`, `upx -t` |
+| S3 client and credential-chain pruning | 6,115,840 | 2,204,160 | -84,480 | `cargo test -p ii --locked`, S3 SigV4/multipart request tests, `upx -t` |
+| WebDAV client API/XML-model pruning | 5,997,568 | 2,165,248 | -38,912 | `cargo test -p ii --locked`, Basic/Digest/PROPFIND request tests, `upx -t` |
+| Relay QUIC-listener feature split | 5,967,872 | 2,158,592 | -6,656 | `cargo test -p ii --locked`, `upx -t` |
+| Relay management endpoint pruning | 5,965,824 | 2,157,056 | -1,536 | `cargo test -p ii --locked`, relay `/ping` and `/generate_204` smoke test, `upx -t` |
+| Relay logging subscriber pruning | 5,922,816 | 2,142,208 | -14,848 | `cargo test -p ii --locked`, `upx -t` |
+| WebDAV Multi-Status validation | 5,955,584 | 2,153,984 | +11,776 | `cargo test -p ii --locked`, malformed XML regression tests, `upx -t` |
+| WebDAV strict XML document validation | 5,956,096 | 2,151,936 | -2,048 | `cargo test -p ii --locked` (66 tests), malformed, non-WebDAV, multiple-root, and trailing-CDATA XML regression tests, `upx -t` |
+| Rejected: relay rate-limit feature split | 5,952,000 | 2,154,496 | +1,536 | Full `ii` regression suite (66 tests), full relay-library feature compile, `upx -t`; reverted because packed size grew |
+| Final release reproduction | 5,956,096 | 2,153,472 | -512 | `cargo test -p ii --locked` (66 tests), `cargo build -p ii --release --locked`, UPX `5.1.0 --best --lzma`, `upx -t` |
+| Single-thread Tokio runtime | 5,946,368 | 2,148,864 | -4,608 | `cargo test -p ii --locked` (66 tests), `cargo build -p ii --release --locked`, UPX `5.1.0 --best --lzma`, `upx -t` |
+
+The current artifact remains `1,100,288` bytes above the `1 MiB` budget. Equivalent
+release rebuilds have varied by up to `1,536` UPX bytes; the latest measurement is
+recorded with the pinned `5.1.0` packer. No
+release is considered size-compliant until every target satisfies the workflow
+budget check.

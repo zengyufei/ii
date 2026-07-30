@@ -27,7 +27,6 @@ use tokio::{
     net::{TcpListener, TcpStream},
     sync::{Notify, watch},
 };
-use tokio_rustls_acme::AcmeAcceptor;
 use tokio_util::{sync::CancellationToken, task::AbortOnDropHandle};
 use tracing::{Instrument, debug, error, info, info_span, trace, warn};
 
@@ -208,6 +207,7 @@ impl ServerHandle {
 #[derive(Debug, Clone)]
 pub struct TlsConfig {
     /// The server config
+    #[allow(dead_code)] // Kept for the optional QUIC address-discovery listener.
     pub(super) config: Arc<rustls::ServerConfig>,
     /// The kind
     pub(super) acceptor: TlsAcceptor,
@@ -278,11 +278,6 @@ pub enum ServeConnectionError {
     },
     #[error("TLS[manual] accept")]
     ManualAccept {
-        #[error(std_err)]
-        source: std::io::Error,
-    },
-    #[error("TLS[acme] accept")]
-    LetsEncryptAccept {
         #[error(std_err)]
         source: std::io::Error,
     },
@@ -897,13 +892,8 @@ impl Inner {
     }
 }
 
-/// TLS Certificate Authority acceptor.
 #[derive(Clone, derive_more::Debug)]
 pub(super) enum TlsAcceptor {
-    /// Uses Let's Encrypt as the Certificate Authority. This is used in production.
-    LetsEncrypt(#[debug("tokio_rustls_acme::AcmeAcceptor")] AcmeAcceptor),
-    /// Manually added tls acceptor. Generally used for tests or for when we've passed in
-    /// a certificate via a file.
     Manual(#[debug("tokio_rustls::TlsAcceptor")] tokio_rustls::TlsAcceptor),
 }
 
@@ -1052,7 +1042,6 @@ impl RelayService {
         if let Err(error) = res {
             match error {
                 ServeConnectionError::ManualAccept { source, .. }
-                | ServeConnectionError::LetsEncryptAccept { source, .. }
                     if source.kind() == std::io::ErrorKind::UnexpectedEof =>
                 {
                     debug!(reason=?source, "peer disconnected");
@@ -1081,37 +1070,17 @@ impl RelayServiceWithNotify {
         stream: TcpStream,
         tls_config: TlsConfig,
     ) -> Result<(), ServeConnectionError> {
-        let TlsConfig { acceptor, config } = tls_config;
-        let stream = match acceptor {
-            TlsAcceptor::LetsEncrypt(a) => {
-                match a
-                    .accept(stream)
-                    .await
-                    .map_err(|err| e!(ServeConnectionError::LetsEncryptAccept, err))?
-                {
-                    None => {
-                        info!("TLS[acme]: received TLS-ALPN-01 validation request");
-                        return Ok(());
-                    }
-                    Some(start_handshake) => {
-                        debug!("TLS[acme]: start handshake");
-                        let tls_stream = start_handshake
-                            .into_stream(config)
-                            .await
-                            .map_err(|err| e!(ServeConnectionError::TlsHandshake, err))?;
-                        MaybeTlsStream::Tls(tls_stream)
-                    }
-                }
-            }
-            TlsAcceptor::Manual(a) => {
-                debug!("TLS[manual]: accept");
-                let tls_stream = a
-                    .accept(stream)
-                    .await
-                    .map_err(|err| e!(ServeConnectionError::ManualAccept, err))?;
-                MaybeTlsStream::Tls(tls_stream)
-            }
-        };
+        let TlsConfig {
+            acceptor,
+            config: _,
+        } = tls_config;
+        let TlsAcceptor::Manual(acceptor) = acceptor;
+        debug!("TLS[manual]: accept");
+        let tls_stream = acceptor
+            .accept(stream)
+            .await
+            .map_err(|err| e!(ServeConnectionError::ManualAccept, err))?;
+        let stream = MaybeTlsStream::Tls(tls_stream);
         self.serve_connection(stream).await
     }
 

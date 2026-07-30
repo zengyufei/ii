@@ -1,9 +1,11 @@
 pub mod cli;
 pub mod doctor;
 pub mod relay;
+pub mod s3;
 pub mod storage;
 pub mod ticket;
 pub mod transfer;
+pub mod webdav;
 
 use anyhow::Result;
 use cli::{Cli, Command};
