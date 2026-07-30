@@ -25,6 +25,8 @@
 
 自动找路 / 局域网优先 / 可公网中继或 `--s3` / `--webdav` / `--ftp` / `--sftp` 中继
 
+也可用 `ii send <文件或文件夹> --web` 临时开一个局域网下载页
+
 断点续收 / 秒传跳过 / 冲突覆盖 / 支持传完清理中转
 
 进度速率 / 完成耗时 / 支持诊断本机 / 支持自建中继
@@ -125,6 +127,15 @@ tar czf - .\project | ii send --name project.tar.gz
 ```powershell
 ii recv ii1k7v...x9a --stdout > project.tar.gz
 ```
+
+临时开局域网下载页：
+
+```powershell
+ii send .\video.mp4 --web
+ii send .\my-folder --web
+```
+
+命令行会在主局域网 URL 上方显示进入下载页的二维码，并在 `other:` 下列出其余物理和虚拟网卡的 IPv4 URL；下载页顶部的二维码则直达 `/download`，方便手机扫码下载。目录会下载为 `.tar`。按 `Ctrl+C` 关闭服务。该模式没有鉴权，只适合临时、可信的局域网。
 
 局域网优先，不走公网中继：
 

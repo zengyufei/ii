@@ -10,6 +10,7 @@ use anyhow::{Context, Result, bail};
 use futures_util::TryStreamExt;
 use iroh::{Endpoint, RelayMap, RelayMode, SecretKey, TransportAddr, endpoint::presets};
 use iroh_relay::tls::CaTlsConfig;
+use qrcodegen::{QrCode, QrCodeEcc};
 use russh::{
     client::{self as ssh_client, Handler as SshClientHandler},
     keys::{HashAlg, PrivateKeyWithHashAlg, decode_secret_key},
@@ -24,6 +25,7 @@ use rustls::{
 use std::{
     ffi::OsStr,
     io::{IsTerminal, Read, Write},
+    net::{Ipv4Addr, SocketAddr, UdpSocket},
     path::{Path, PathBuf},
     process::{Command, Stdio},
     sync::{
@@ -37,6 +39,7 @@ use tempfile::NamedTempFile;
 use tokio::{
     fs,
     io::{self, AsyncRead, AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt},
+    net::{TcpListener, TcpStream},
 };
 use tokio_util::io::ReaderStream;
 
@@ -397,12 +400,448 @@ fn finalize_md5(ctx: md5::Md5) -> [u8; 16] {
 }
 
 pub async fn send(args: SendArgs) -> Result<()> {
+    if args.web {
+        return send_web(args).await;
+    }
     let copy = args.copy;
     let output = args.output.clone();
     send_inner(args, move |ticket| {
         print_ticket(ticket, copy, output.clone())
     })
     .await
+}
+
+struct WebShare {
+    source: Source,
+    download_name: String,
+    download_qr_svg: String,
+}
+
+async fn send_web(args: SendArgs) -> Result<()> {
+    let source = Source::open(args.path.clone(), args.name.clone()).await?;
+    let download_name = match source.kind() {
+        PayloadKind::Dir => format!("{}.tar", source.name()),
+        PayloadKind::File | PayloadKind::Stdin => source.name().to_string(),
+    };
+    let listener = TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0))
+        .await
+        .context("bind web server")?;
+    let port = listener
+        .local_addr()
+        .context("read web server address")?
+        .port();
+    let host = local_web_host();
+    let url = format!("http://{host}:{port}/");
+    let download_url = format!("{url}download");
+    let share = Arc::new(WebShare {
+        source,
+        download_name,
+        download_qr_svg: web_qr_svg(&download_url)?,
+    });
+
+    if std::io::stdout().is_terminal() {
+        print!("{}", web_qr_terminal(&url)?);
+    }
+    println!("ii web: {url}");
+    println!();
+    println!("other:");
+    for host in web_other_hosts(host, web_interface_ipv4_addrs()) {
+        println!("http://{host}:{port}/");
+    }
+    println!();
+    println!("press Ctrl+C to stop sharing");
+
+    loop {
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => break,
+            accepted = listener.accept() => {
+                let (stream, _) = accepted.context("accept web connection")?;
+                let share = Arc::clone(&share);
+                tokio::spawn(async move {
+                    if let Err(err) = serve_web_connection(stream, share).await {
+                        eprintln!("ii web: request failed: {err:#}");
+                    }
+                });
+            }
+        }
+    }
+    Ok(())
+}
+
+fn local_web_host() -> Ipv4Addr {
+    let socket = match UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)) {
+        Ok(socket) => socket,
+        Err(_) => return Ipv4Addr::LOCALHOST,
+    };
+    if socket.connect((Ipv4Addr::new(8, 8, 8, 8), 80)).is_ok() {
+        if let Ok(SocketAddr::V4(addr)) = socket.local_addr() {
+            if !addr.ip().is_unspecified() {
+                return *addr.ip();
+            }
+        }
+    }
+    Ipv4Addr::LOCALHOST
+}
+
+fn web_other_hosts(primary: Ipv4Addr, mut hosts: Vec<Ipv4Addr>) -> Vec<Ipv4Addr> {
+    hosts.retain(|host| !host.is_loopback() && !host.is_unspecified() && *host != primary);
+    hosts.sort_unstable();
+    hosts.dedup();
+    hosts
+}
+
+#[cfg(windows)]
+fn web_interface_ipv4_addrs() -> Vec<Ipv4Addr> {
+    use std::{
+        ffi::c_void,
+        mem,
+        ptr::{self, NonNull},
+    };
+
+    const AF_INET: u32 = 2;
+    const ERROR_BUFFER_OVERFLOW: u32 = 111;
+
+    #[repr(C)]
+    union AdapterHeader {
+        alignment: u64,
+        fields: AdapterHeaderFields,
+    }
+
+    #[repr(C)]
+    #[derive(Clone, Copy)]
+    struct AdapterHeaderFields {
+        length: u32,
+        interface_index: u32,
+    }
+
+    #[repr(C)]
+    struct AdapterAddresses {
+        header: AdapterHeader,
+        next: *mut AdapterAddresses,
+        adapter_name: *mut i8,
+        first_unicast_address: *mut UnicastAddress,
+    }
+
+    #[repr(C)]
+    struct UnicastAddress {
+        header: AdapterHeader,
+        next: *mut UnicastAddress,
+        address: SocketAddress,
+    }
+
+    #[repr(C)]
+    struct SocketAddress {
+        address: *const c_void,
+        length: i32,
+    }
+
+    #[repr(C)]
+    struct SockAddrIn {
+        family: u16,
+        port: u16,
+        address: [u8; 4],
+        zero: [u8; 8],
+    }
+
+    #[link(name = "iphlpapi")]
+    unsafe extern "system" {
+        fn GetAdaptersAddresses(
+            family: u32,
+            flags: u32,
+            reserved: *mut c_void,
+            addresses: *mut AdapterAddresses,
+            size: *mut u32,
+        ) -> u32;
+    }
+
+    let mut size = 15 * 1024;
+    for _ in 0..2 {
+        let words = (size as usize).div_ceil(mem::size_of::<usize>());
+        let mut buffer = vec![0usize; words];
+        let result = unsafe {
+            GetAdaptersAddresses(
+                AF_INET,
+                0,
+                ptr::null_mut(),
+                buffer.as_mut_ptr().cast(),
+                &mut size,
+            )
+        };
+        if result == ERROR_BUFFER_OVERFLOW {
+            continue;
+        }
+        if result != 0 {
+            return Vec::new();
+        }
+
+        let mut hosts = Vec::new();
+        let mut adapter = NonNull::new(buffer.as_mut_ptr().cast::<AdapterAddresses>());
+        while let Some(current) = adapter {
+            let mut unicast = unsafe { NonNull::new(current.as_ref().first_unicast_address) };
+            while let Some(current) = unicast {
+                let address = unsafe { current.as_ref().address.address };
+                if !address.is_null() {
+                    let address = unsafe { &*address.cast::<SockAddrIn>() };
+                    if address.family == AF_INET as u16 {
+                        hosts.push(Ipv4Addr::from(address.address));
+                    }
+                }
+                unicast = unsafe { NonNull::new(current.as_ref().next) };
+            }
+            adapter = unsafe { NonNull::new(current.as_ref().next) };
+        }
+        return hosts;
+    }
+    Vec::new()
+}
+
+#[cfg(unix)]
+fn web_interface_ipv4_addrs() -> Vec<Ipv4Addr> {
+    use std::{
+        ffi::{c_char, c_int, c_void},
+        ptr,
+    };
+
+    #[repr(C)]
+    struct IfAddrs {
+        next: *mut IfAddrs,
+        name: *mut c_char,
+        flags: u32,
+        address: *mut c_void,
+        netmask: *mut c_void,
+        destination: *mut c_void,
+        data: *mut c_void,
+    }
+
+    #[cfg(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd"
+    ))]
+    #[repr(C)]
+    struct SockAddrIn {
+        length: u8,
+        family: u8,
+        port: u16,
+        address: [u8; 4],
+        zero: [u8; 8],
+    }
+
+    #[cfg(not(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd"
+    )))]
+    #[repr(C)]
+    struct SockAddrIn {
+        family: u16,
+        port: u16,
+        address: [u8; 4],
+        zero: [u8; 8],
+    }
+
+    #[cfg(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd"
+    ))]
+    const AF_INET: u8 = 2;
+    #[cfg(not(any(
+        target_os = "macos",
+        target_os = "ios",
+        target_os = "freebsd",
+        target_os = "openbsd",
+        target_os = "netbsd"
+    )))]
+    const AF_INET: u16 = 2;
+
+    #[link(name = "c")]
+    unsafe extern "C" {
+        fn getifaddrs(addresses: *mut *mut IfAddrs) -> c_int;
+        fn freeifaddrs(addresses: *mut IfAddrs);
+    }
+
+    let mut first = ptr::null_mut();
+    if unsafe { getifaddrs(&mut first) } != 0 {
+        return Vec::new();
+    }
+
+    let mut hosts = Vec::new();
+    let mut current = first;
+    while !current.is_null() {
+        let address = unsafe { (*current).address };
+        if !address.is_null() {
+            let address = unsafe { &*address.cast::<SockAddrIn>() };
+            if address.family == AF_INET {
+                hosts.push(Ipv4Addr::from(address.address));
+            }
+        }
+        current = unsafe { (*current).next };
+    }
+    unsafe { freeifaddrs(first) };
+    hosts
+}
+
+#[cfg(not(any(windows, unix)))]
+fn web_interface_ipv4_addrs() -> Vec<Ipv4Addr> {
+    Vec::new()
+}
+
+async fn serve_web_connection(mut stream: TcpStream, share: Arc<WebShare>) -> Result<()> {
+    let mut request = Vec::with_capacity(1024);
+    let mut chunk = [0u8; 1024];
+    while request.len() < 16 * 1024 {
+        let read = stream.read(&mut chunk).await.context("read web request")?;
+        if read == 0 {
+            return Ok(());
+        }
+        request.extend_from_slice(&chunk[..read]);
+        if request.windows(4).any(|window| window == b"\r\n\r\n") {
+            break;
+        }
+    }
+
+    let request_line = request
+        .split(|byte| *byte == b'\n')
+        .next()
+        .and_then(|line| std::str::from_utf8(line).ok())
+        .unwrap_or_default();
+    let path = request_line.split_whitespace().nth(1).unwrap_or("");
+    match path {
+        "/" => write_web_page(&mut stream, &share).await,
+        "/download" => write_web_download(&mut stream, &share).await,
+        _ => {
+            write_web_response(
+                &mut stream,
+                "404 Not Found",
+                "text/plain; charset=utf-8",
+                b"not found",
+            )
+            .await
+        }
+    }
+}
+
+async fn write_web_page(stream: &mut TcpStream, share: &WebShare) -> Result<()> {
+    let name = html_escape(&share.download_name);
+    let body = format!(
+        "<!doctype html><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>{name}</title><style>body{{margin:0;background:#f5f5f5;color:#171717;font-family:system-ui,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif}}main{{box-sizing:border-box;width:min(100%,32rem);margin:0 auto;padding:2rem 1.25rem 2.5rem;text-align:center}}svg{{display:block;width:min(72vw,17.5rem);height:auto;margin:0 auto 1.5rem;background:#fff}}h1{{margin:0;overflow-wrap:anywhere;font-size:1.5rem;line-height:1.3}}.meta{{margin:0.75rem 0 1.5rem;color:#555;font-size:1rem}}a{{box-sizing:border-box;display:block;width:100%;min-height:3rem;padding:0.75rem 1rem;border-radius:0.25rem;background:#1769aa;color:#fff;font-size:1rem;font-weight:600;line-height:1.5;text-decoration:none}}@media (max-width:30rem){{main{{padding:1.5rem 1rem 2rem}}svg{{width:min(82vw,17.5rem);margin-bottom:1.25rem}}h1{{font-size:1.25rem}}.meta{{margin:0.625rem 0 1.25rem}}}}</style><main>{}<h1>{name}</h1><p class=\"meta\">{}</p><a href=\"/download\">Download</a></main>",
+        share.download_qr_svg,
+        fmt_bytes(share.source.size),
+    );
+    write_web_response(
+        stream,
+        "200 OK",
+        "text/html; charset=utf-8",
+        body.as_bytes(),
+    )
+    .await
+}
+
+async fn write_web_download(stream: &mut TcpStream, share: &WebShare) -> Result<()> {
+    let header = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\nContent-Disposition: attachment; filename=\"{}\"\r\nConnection: close\r\n\r\n",
+        share.source.size,
+        content_disposition_name(&share.download_name),
+    );
+    stream
+        .write_all(header.as_bytes())
+        .await
+        .context("write download headers")?;
+    let mut file = share.source.open_file().await?;
+    io::copy(&mut file, stream)
+        .await
+        .context("write download")?;
+    stream.shutdown().await.context("finish download")?;
+    Ok(())
+}
+
+async fn write_web_response(
+    stream: &mut TcpStream,
+    status: &str,
+    content_type: &str,
+    body: &[u8],
+) -> Result<()> {
+    let header = format!(
+        "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+        body.len(),
+    );
+    stream
+        .write_all(header.as_bytes())
+        .await
+        .context("write web headers")?;
+    stream.write_all(body).await.context("write web body")?;
+    stream.shutdown().await.context("finish web response")?;
+    Ok(())
+}
+
+fn content_disposition_name(name: &str) -> String {
+    name.replace(['\r', '\n', '\\', '"'], "_")
+}
+
+fn html_escape(value: &str) -> String {
+    value
+        .replace('&', "&amp;")
+        .replace('<', "&lt;")
+        .replace('>', "&gt;")
+        .replace('"', "&quot;")
+}
+
+fn web_qr_svg(url: &str) -> Result<String> {
+    const QUIET_ZONE: i32 = 4;
+    let code = QrCode::encode_text(url, QrCodeEcc::Low)
+        .map_err(|_| anyhow::anyhow!("generate web QR code: URL is too long"))?;
+    let size = code.size();
+    let view_box = size + QUIET_ZONE * 2;
+    let mut path = String::new();
+    for y in 0..size {
+        for x in 0..size {
+            if code.get_module(x, y) {
+                path.push_str(&format!("M{} {}h1v1h-1z", x + QUIET_ZONE, y + QUIET_ZONE));
+            }
+        }
+    }
+    Ok(format!(
+        "<svg xmlns=\"http://www.w3.org/2000/svg\" viewBox=\"0 0 {view_box} {view_box}\" width=\"240\" height=\"240\" role=\"img\" aria-label=\"QR code\"><rect width=\"100%\" height=\"100%\" fill=\"white\"/><path d=\"{path}\" fill=\"black\"/></svg>"
+    ))
+}
+
+fn web_qr_terminal(url: &str) -> Result<String> {
+    const QUIET_ZONE: i32 = 4;
+    let code = QrCode::encode_text(url, QrCodeEcc::Low)
+        .map_err(|_| anyhow::anyhow!("generate web QR code: URL is too long"))?;
+    let size = code.size();
+    let width = size + QUIET_ZONE * 2;
+    let height = width + width.rem_euclid(2);
+    let mut output = String::new();
+    for y in (0..height).step_by(2) {
+        for x in 0..width {
+            let top = web_qr_module(&code, x, y, QUIET_ZONE);
+            let bottom = web_qr_module(&code, x, y + 1, QUIET_ZONE);
+            let cell = match (top, bottom) {
+                (true, true) => "█",
+                (true, false) => "▀",
+                (false, true) => "▄",
+                (false, false) => " ",
+            };
+            output.push_str(cell);
+        }
+        output.push('\n');
+    }
+    Ok(output)
+}
+
+fn web_qr_module(code: &QrCode, x: i32, y: i32, quiet_zone: i32) -> bool {
+    let size = code.size();
+    let x = x - quiet_zone;
+    let y = y - quiet_zone;
+    x >= 0 && x < size && y >= 0 && y < size && code.get_module(x, y)
 }
 
 pub async fn send_with_events(
@@ -3181,6 +3620,103 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn web_share_serves_page_and_download() {
+        let dir = tempfile::tempdir().unwrap();
+        let source_path = dir.path().join("hello.txt");
+        std::fs::write(&source_path, b"web payload").unwrap();
+        let share = Arc::new(WebShare {
+            source: Source::from_file(source_path, None).await.unwrap(),
+            download_name: "hello.txt".to_string(),
+            download_qr_svg: web_qr_svg("http://192.168.1.2:3456/download").unwrap(),
+        });
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            for _ in 0..2 {
+                let (stream, _) = listener.accept().await.unwrap();
+                let share = Arc::clone(&share);
+                tokio::spawn(async move { serve_web_connection(stream, share).await.unwrap() });
+            }
+        });
+
+        let page = web_request(address, "/").await;
+        assert!(page.starts_with(b"HTTP/1.1 200 OK"));
+        assert!(
+            page.windows(b"hello.txt".len())
+                .any(|part| part == b"hello.txt")
+        );
+        assert!(page.windows(b"<svg".len()).any(|part| part == b"<svg"));
+        assert!(
+            page.windows(b"name=\"viewport\"".len())
+                .any(|part| part == b"name=\"viewport\"")
+        );
+        assert!(
+            page.windows(b"width:min(82vw,17.5rem)".len())
+                .any(|part| part == b"width:min(82vw,17.5rem)")
+        );
+        assert!(
+            page.windows(b"href=\"/download\"".len())
+                .any(|part| part == b"href=\"/download\"")
+        );
+
+        let download = web_request(address, "/download").await;
+        assert!(download.starts_with(b"HTTP/1.1 200 OK"));
+        assert!(download.ends_with(b"web payload"));
+        server.await.unwrap();
+    }
+
+    #[test]
+    fn web_qr_svg_is_self_contained_and_deterministic() {
+        let url = "http://192.168.1.2:3456/";
+        let first = web_qr_svg(url).unwrap();
+        assert_eq!(first, web_qr_svg(url).unwrap());
+        assert!(first.starts_with("<svg "));
+        assert!(first.contains("viewBox=\"0 0 "));
+        assert!(first.contains("<path d=\"M"));
+        assert!(!first.contains(url));
+        assert!(!first.contains("href="));
+        assert!(!first.contains("<script"));
+        assert!(!first.contains("<image"));
+        assert!(!first.contains("<foreignObject"));
+    }
+
+    #[test]
+    fn web_qr_terminal_is_self_contained_and_deterministic() {
+        let url = "http://192.168.1.2:3456/";
+        let first = web_qr_terminal(url).unwrap();
+        assert_eq!(first, web_qr_terminal(url).unwrap());
+        assert!(!first.contains(url));
+        assert!(first.ends_with('\n'));
+        assert!(first.contains('█'));
+        assert!(first.contains(' '));
+        assert!(
+            first
+                .chars()
+                .all(|character| matches!(character, '█' | '▀' | '▄' | ' ' | '\n'))
+        );
+    }
+
+    #[test]
+    fn web_other_hosts_filters_sorts_and_deduplicates() {
+        let primary = Ipv4Addr::new(192, 168, 1, 8);
+        let hosts = web_other_hosts(
+            primary,
+            vec![
+                Ipv4Addr::UNSPECIFIED,
+                Ipv4Addr::LOCALHOST,
+                Ipv4Addr::new(172, 17, 0, 1),
+                Ipv4Addr::new(10, 0, 0, 2),
+                primary,
+                Ipv4Addr::new(172, 17, 0, 1),
+            ],
+        );
+        assert_eq!(
+            hosts,
+            vec![Ipv4Addr::new(10, 0, 0, 2), Ipv4Addr::new(172, 17, 0, 1)]
+        );
+    }
+
+    #[tokio::test]
     async fn ftp_round_trip_uses_passive_mode_and_deletes_after_receive() {
         let root = tempfile::tempdir().unwrap();
         let port = unused_local_port();
@@ -3323,6 +3859,21 @@ mod tests {
     fn unused_local_port() -> u16 {
         let listener = std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).unwrap();
         listener.local_addr().unwrap().port()
+    }
+
+    async fn web_request(address: SocketAddr, path: &str) -> Vec<u8> {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            let mut stream = TcpStream::connect(address).await.unwrap();
+            stream
+                .write_all(format!("GET {path} HTTP/1.1\r\nHost: test\r\n\r\n").as_bytes())
+                .await
+                .unwrap();
+            let mut response = Vec::new();
+            stream.read_to_end(&mut response).await.unwrap();
+            response
+        })
+        .await
+        .unwrap()
     }
 
     #[derive(Default)]

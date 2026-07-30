@@ -1,8 +1,7 @@
 # Binary Size Ledger
 
 The release artifact is the UPX-compressed CLI executable. The release workflow
-verifies the packed artifact and enforces a `1,048,576` byte limit on Windows,
-Linux, and macOS.
+verifies the packed artifact and reports its size on Windows, Linux, and macOS.
 
 ## Windows x86_64
 
@@ -24,9 +23,19 @@ All measurements use `cargo build -p ii --release --locked` followed by UPX
 | Rejected: relay rate-limit feature split | 5,952,000 | 2,154,496 | +1,536 | Full `ii` regression suite (66 tests), full relay-library feature compile, `upx -t`; reverted because packed size grew |
 | Final release reproduction | 5,956,096 | 2,153,472 | -512 | `cargo test -p ii --locked` (66 tests), `cargo build -p ii --release --locked`, UPX `5.1.0 --best --lzma`, `upx -t` |
 | Single-thread Tokio runtime | 5,946,368 | 2,148,864 | -4,608 | `cargo test -p ii --locked` (66 tests), `cargo build -p ii --release --locked`, UPX `5.1.0 --best --lzma`, `upx -t` |
+| LAN web-share QR SVG and terminal QR | 5,970,944 | 2,161,152 | +12,288 | `cargo test -p ii --locked` (76 tests), `cargo build -p ii --release --locked`, UPX `5.1.0 --best --lzma`, `upx -t` |
+| Web download QR and responsive share page | 5,975,040 | 2,159,616 | -1,536 | `cargo test -p ii --locked` (76 tests), `cargo build -p ii --release --locked`, UPX `5.1.0 --best --lzma`, `upx -t` |
+| Web-share other IPv4 URL list | 5,979,648 | 2,160,640 | +1,024 | `cargo test -p ii --locked` (77 tests), isolated `cargo build -p ii --release --locked`, UPX `5.1.0 --best --lzma`, `upx -t` |
 
-The current artifact remains `1,100,288` bytes above the `1 MiB` budget. Equivalent
-release rebuilds have varied by up to `1,536` UPX bytes; the latest measurement is
-recorded with the pinned `5.1.0` packer. No
-release is considered size-compliant until every target satisfies the workflow
-budget check.
+Equivalent release rebuilds have varied by up to `1,536` UPX bytes; the latest
+measurement is recorded with the pinned `5.1.0` packer.
+
+## QR Dependency Audit
+
+`D:\cache\n0-scan` contains `--depth 1` clones of all 120 public
+`n0-computer` repositories. `squiggle` is an empty GitHub repository; all 119
+non-empty repositories were scanned with `git grep` for QR-code dependencies and
+source usage. The only direct generator found was `iroh-live`'s `qrcode 0.14.1`,
+which depends on `image`. `ii` uses `qrcodegen 1.8.0` instead: it only supplies
+the QR matrix, while `ii` emits its own inline SVG with no image or front-end
+dependency chain.

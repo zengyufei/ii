@@ -3514,7 +3514,7 @@ dependencies = [
 
 [[package]]
 name = "ii"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "anyhow",
  "attohttpc",
@@ -3528,6 +3528,7 @@ dependencies = [
  "md-5",
  "percent-encoding",
  "postcard",
+ "qrcodegen",
  "quick-xml 0.41.0",
  "rand 0.10.2",
  "rcgen",
@@ -3552,7 +3553,7 @@ dependencies = [
 
 [[package]]
 name = "ii-gui"
-version = "0.1.16"
+version = "0.1.17"
 dependencies = [
  "anyhow",
  "ii",
@@ -5986,6 +5987,12 @@ checksum = "7f6d64c71eb498fe9eae14ce4ec935c555749aef511cca85b5568910d6e48001"
 dependencies = [
  "bytemuck",
 ]
+
+[[package]]
+name = "qrcodegen"
+version = "1.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4339fc7a1021c9c1621d87f5e3505f2805c8c105420ba2f2a4df86814590c142"
 
 [[package]]
 name = "quick-error"

@@ -29,6 +29,7 @@ pub struct SendArgs {
     pub profile: Option<String>,
     pub webdav: bool,
     pub sftp: bool,
+    pub web: bool,
     pub portable_webdav: bool,
     pub local: bool,
     pub relay: Option<iroh::RelayUrl>,
@@ -170,6 +171,7 @@ fn parse_send(args: Vec<String>) -> Result<SendArgs, ParseAction> {
                 "--profile" => out.profile = Some(iter.value("--profile")?),
                 "--webdav" => out.webdav = true,
                 "--sftp" => out.sftp = true,
+                "--web" => out.web = true,
                 "-p" => out.portable_webdav = true,
                 "--local" => out.local = true,
                 "--relay" => out.relay = Some(parse_relay_url(&iter.value("--relay")?)?),
@@ -315,6 +317,7 @@ fn validate_send(args: &SendArgs) -> Result<(), ParseAction> {
         args.ftp,
         args.webdav,
         args.sftp,
+        args.web,
         args.local,
         args.relay.is_some(),
         args.no_relay,
@@ -325,7 +328,7 @@ fn validate_send(args: &SendArgs) -> Result<(), ParseAction> {
 
     if backend_count > 1 {
         return Err(ParseAction::error(
-            "--s3, --webdav, --ftp, --sftp, --local, --relay and --no-relay conflict with each other",
+            "--s3, --webdav, --ftp, --sftp, --web, --local, --relay and --no-relay conflict with each other",
         ));
     }
 
@@ -334,6 +337,12 @@ fn validate_send(args: &SendArgs) -> Result<(), ParseAction> {
     }
     if args.accept_self_signed_relay && args.relay.is_none() {
         return Err(ParseAction::error("-k requires --relay <https-url>"));
+    }
+    if args.web && args.path.is_none() {
+        return Err(ParseAction::error("--web requires a file or folder path"));
+    }
+    if args.web && (args.copy || args.output.is_some()) {
+        return Err(ParseAction::error("--web cannot be used with -c or -o"));
     }
 
     Ok(())
@@ -463,6 +472,7 @@ Options:
   --webdav
   --ftp
   --sftp
+  --web
   -p
   -d
   --profile <name>
@@ -568,6 +578,30 @@ mod tests {
             }
             _ => panic!("expected send command"),
         }
+    }
+
+    #[test]
+    fn send_accepts_web_for_a_file_or_folder() {
+        let cli = Cli::parse_from(["ii", "send", "photos", "--web"]);
+        match cli.command {
+            Command::Send(args) => {
+                assert!(args.web);
+                assert_eq!(args.path, Some(PathBuf::from("photos")));
+            }
+            _ => panic!("expected send command"),
+        }
+    }
+
+    #[test]
+    fn send_rejects_web_without_a_path_or_with_another_mode() {
+        assert!(matches!(
+            parse_args(["ii", "send", "--web"]),
+            Err(ParseAction::Print { code: 2, .. })
+        ));
+        assert!(matches!(
+            parse_args(["ii", "send", "file.txt", "--web", "--local"]),
+            Err(ParseAction::Print { code: 2, .. })
+        ));
     }
 
     #[test]

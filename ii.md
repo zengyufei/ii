@@ -9,7 +9,7 @@
 ## 命令总览
 
 ```text
-ii send [<path>] [--name <name>] [-t] [-c] [-o <path>] [--s3 | --webdav | --ftp | --sftp] [--profile <name>] [-d] [-p] [--local] [--relay <https-url> [-k]] [--no-relay]
+ii send [<path>] [--name <name>] [-t] [-c] [-o <path>] [--web | --s3 | --webdav | --ftp | --sftp] [--profile <name>] [-d] [-p] [--local] [--relay <https-url> [-k]] [--no-relay]
 ii recv <ticket> [-o <dir>] [--stdout] [--overwrite] [--resume] [--local] [--trace]
 ii relay (--public <https-url> | --tls <domain> --cert <path> --key <path>) [-H <bind-port>]
 ii doctor
@@ -74,8 +74,11 @@ tar czf - .\project | ii send --name project.tar.gz
   Windows 使用 `clip.exe`，macOS 使用 `pbcopy`，Linux 会依次尝试 `wl-copy`、`xclip`、`xsel`。
 
 `-o <path>`
-: 把完整的 `ii recv ...` 命令写到指定文件路径。  
+: 把完整的 `ii recv ...` 命令写到指定文件路径。
   如果文件已存在，会覆盖。这个 `-o` 属于 `ii send`，不影响 `ii recv -o <dir>` 的保存目录语义。
+
+`--web`
+: 在局域网内临时开放一个无鉴权 HTTP 下载页。执行后会在主 URL 上方展示进入下载页的二维码，随后在 `other:` 下列出其余物理和虚拟网卡的 IPv4 URL；下载页顶部二维码直达 `/download`。按 `Ctrl+C` 停止服务。文件直接下载；文件夹会按原目录名打包为 `.tar` 下载。它不生成 ticket，不能和 `-c`、`-o`、`--s3`、`--webdav`、`--ftp`、`--sftp`、`--local`、`--relay`、`--no-relay` 同时使用。
 
 `--local`
 : 只走局域网优先路径，不走公网发现，不走公网 relay。
@@ -122,7 +125,7 @@ tar czf - .\project | ii send --name project.tar.gz
 
 ### 路径规则
 
-- `--s3`、`--webdav`、`--ftp`、`--sftp`、`--local`、`--relay`、`--no-relay` 互斥。
+- `--web`、`--s3`、`--webdav`、`--ftp`、`--sftp`、`--local`、`--relay`、`--no-relay` 互斥。
 - 默认不需要用户选 relay。
 - 如果没有局域网或直连可用，默认会自动退到公网 relay。
 - 指定 `--relay https://...` 后，当前发送会强制走 HTTPS relay-only，不使用默认公网 relay。

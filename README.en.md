@@ -23,6 +23,7 @@
 
 - The sender serves one successful receive by default, then exits
 - It briefly probes for a usable path through complex networks, with S3, WebDAV, FTP, and SFTP backend options
+- `ii send <file-or-folder> --web` opens a temporary LAN download page
 - Receives resume automatically by default
 - Existing files with the same MD5 are skipped
 - Folders can be sent directly
@@ -123,6 +124,15 @@ Receive to stdout:
 ```powershell
 ii recv ii1k7v...x9a --stdout > project.tar.gz
 ```
+
+Open a temporary LAN download page:
+
+```powershell
+ii send .\video.mp4 --web
+ii send .\my-folder --web
+```
+
+The command displays a QR code directly above the primary LAN URL for opening the download page, then lists the remaining physical and virtual adapter IPv4 URLs under `other:`. The QR code at the top of that page points directly to `/download` for phone downloads. Folders download as `.tar` archives. Press `Ctrl+C` to stop the server. This mode has no authentication and is intended only for short-lived, trusted LAN sharing.
 
 Prefer local network paths and avoid public relays:
 
