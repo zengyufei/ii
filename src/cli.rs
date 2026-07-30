@@ -30,6 +30,7 @@ pub struct SendArgs {
     pub webdav: bool,
     pub sftp: bool,
     pub web: bool,
+    pub web_token: Option<String>,
     pub portable_webdav: bool,
     pub local: bool,
     pub relay: Option<iroh::RelayUrl>,
@@ -156,6 +157,7 @@ fn parse_send(args: Vec<String>) -> Result<SendArgs, ParseAction> {
             Some(("output", value)) => out.output = Some(PathBuf::from(value)),
             Some(("profile", value)) => out.profile = Some(value.to_string()),
             Some(("relay", value)) => out.relay = Some(parse_relay_url(value)?),
+            Some(("token", value)) => out.web_token = Some(value.to_string()),
             Some((flag, _)) => {
                 return Err(ParseAction::error(format!("unknown option `--{flag}`")));
             }
@@ -172,6 +174,7 @@ fn parse_send(args: Vec<String>) -> Result<SendArgs, ParseAction> {
                 "--webdav" => out.webdav = true,
                 "--sftp" => out.sftp = true,
                 "--web" => out.web = true,
+                "--token" => out.web_token = Some(iter.value("--token")?),
                 "-p" => out.portable_webdav = true,
                 "--local" => out.local = true,
                 "--relay" => out.relay = Some(parse_relay_url(&iter.value("--relay")?)?),
@@ -344,8 +347,25 @@ fn validate_send(args: &SendArgs) -> Result<(), ParseAction> {
     if args.web && (args.copy || args.output.is_some()) {
         return Err(ParseAction::error("--web cannot be used with -c or -o"));
     }
+    if args.web_token.is_some() && !args.web {
+        return Err(ParseAction::error("--token requires --web"));
+    }
+    if let Some(token) = args.web_token.as_deref()
+        && !is_valid_web_token(token)
+    {
+        return Err(ParseAction::error(
+            "--token must contain 16 to 128 ASCII letters, digits, '-' or '_'",
+        ));
+    }
 
     Ok(())
+}
+
+fn is_valid_web_token(token: &str) -> bool {
+    (16..=128).contains(&token.len())
+        && token
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
 }
 
 fn reject_extra(command: &str, args: Vec<String>) -> Result<(), ParseAction> {
@@ -473,6 +493,7 @@ Options:
   --ftp
   --sftp
   --web
+  --token <value>
   -p
   -d
   --profile <name>
@@ -602,6 +623,62 @@ mod tests {
             parse_args(["ii", "send", "file.txt", "--web", "--local"]),
             Err(ParseAction::Print { code: 2, .. })
         ));
+    }
+
+    #[test]
+    fn send_accepts_web_token() {
+        let token = "A1b2C3d4E5f6G7h8";
+        for args in [
+            vec!["ii", "send", "file.txt", "--web", "--token", token],
+            vec![
+                "ii",
+                "send",
+                "file.txt",
+                "--web",
+                "--token=A1b2C3d4E5f6G7h8",
+            ],
+        ] {
+            let cli = Cli::parse_from(args);
+            match cli.command {
+                Command::Send(args) => assert_eq!(args.web_token.as_deref(), Some(token)),
+                _ => panic!("expected send command"),
+            }
+        }
+    }
+
+    #[test]
+    fn web_token_accepts_hyphen_and_underscore() {
+        assert!(is_valid_web_token("A1b2C3d4E5f6G_-h"));
+    }
+
+    #[test]
+    fn send_rejects_invalid_web_tokens() {
+        for args in [
+            vec!["ii", "send", "file.txt", "--token", "A1b2C3d4E5f6G7h8"],
+            vec!["ii", "send", "file.txt", "--web", "--token"],
+            vec!["ii", "send", "file.txt", "--web", "--token", "too-short"],
+            vec![
+                "ii",
+                "send",
+                "file.txt",
+                "--web",
+                "--token",
+                "A1b2C3d4E5f6G7h!",
+            ],
+            vec![
+                "ii",
+                "send",
+                "file.txt",
+                "--web",
+                "--token",
+                &"a".repeat(129),
+            ],
+        ] {
+            assert!(matches!(
+                parse_args(args),
+                Err(ParseAction::Print { code: 2, .. })
+            ));
+        }
     }
 
     #[test]

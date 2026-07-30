@@ -130,9 +130,10 @@ Open a temporary LAN download page:
 ```powershell
 ii send .\video.mp4 --web
 ii send .\my-folder --web
+ii send .\video.mp4 --web --token A1b2C3d4E5f6G7h8
 ```
 
-The command displays a QR code directly above the primary LAN URL for opening the download page, then lists the remaining physical and virtual adapter IPv4 URLs under `other:`. The QR code at the top of that page points directly to `/download` for phone downloads. Folders download as `.tar` archives. Press `Ctrl+C` to stop the server. This mode has no authentication and is intended only for short-lived, trusted LAN sharing.
+The command displays a QR code directly above the primary LAN URL for opening the download page, then lists the remaining physical and virtual adapter IPv4 URLs under `other:`. The QR code at the top of that page points directly to `/download` for phone downloads. The page can also upload multiple files into `./ii/` under the directory where the command started; directory uploads are not supported. Folders download as `.tar` archives. Press `Ctrl+C` to stop the server. Optional `--token <value>` adds a path access token to the page, download, and upload URLs; it must be 16 to 128 ASCII letters, digits, `-`, or `_`, and omitting it keeps the unprotected URLs. This mode has no account authentication and is intended only for short-lived, trusted LAN sharing.
 
 Prefer local network paths and avoid public relays:
 

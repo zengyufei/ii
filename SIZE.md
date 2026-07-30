@@ -26,6 +26,8 @@ All measurements use `cargo build -p ii --release --locked` followed by UPX
 | LAN web-share QR SVG and terminal QR | 5,970,944 | 2,161,152 | +12,288 | `cargo test -p ii --locked` (76 tests), `cargo build -p ii --release --locked`, UPX `5.1.0 --best --lzma`, `upx -t` |
 | Web download QR and responsive share page | 5,975,040 | 2,159,616 | -1,536 | `cargo test -p ii --locked` (76 tests), `cargo build -p ii --release --locked`, UPX `5.1.0 --best --lzma`, `upx -t` |
 | Web-share other IPv4 URL list | 5,979,648 | 2,160,640 | +1,024 | `cargo test -p ii --locked` (77 tests), isolated `cargo build -p ii --release --locked`, UPX `5.1.0 --best --lzma`, `upx -t` |
+| Web-share bidirectional file upload | 5,992,960 | 2,166,784 | +5,632 | `cargo test -p ii --locked` (78 tests), `cargo build -p ii --release --locked`, UPX `5.1.0 --best --lzma`, `upx -t` |
+| Web-share path access token | 6,001,664 | 2,169,344 | +2,560 | `cargo test -p ii --locked` (83 tests), `cargo build -p ii --release --locked`, UPX `5.1.0 --best --lzma`, `upx -t` |
 
 Equivalent release rebuilds have varied by up to `1,536` UPX bytes; the latest
 measurement is recorded with the pinned `5.1.0` packer.

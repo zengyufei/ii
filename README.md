@@ -133,9 +133,10 @@ ii recv ii1k7v...x9a --stdout > project.tar.gz
 ```powershell
 ii send .\video.mp4 --web
 ii send .\my-folder --web
+ii send .\video.mp4 --web --token A1b2C3d4E5f6G7h8
 ```
 
-命令行会在主局域网 URL 上方显示进入下载页的二维码，并在 `other:` 下列出其余物理和虚拟网卡的 IPv4 URL；下载页顶部的二维码则直达 `/download`，方便手机扫码下载。目录会下载为 `.tar`。按 `Ctrl+C` 关闭服务。该模式没有鉴权，只适合临时、可信的局域网。
+命令行会在主局域网 URL 上方显示进入下载页的二维码，并在 `other:` 下列出其余物理和虚拟网卡的 IPv4 URL；下载页顶部的二维码则直达 `/download`，方便手机扫码下载。网页也可以一次上传多个文件，接收文件写到启动命令当前目录的 `./ii/`，不支持上传目录。目录会下载为 `.tar`。按 `Ctrl+C` 关闭服务。可选 `--token <value>` 为网页、下载和上传加路径访问令牌，令牌只能是 16 到 128 个 ASCII 字母、数字、`-` 或 `_`；不带时保持无令牌 URL。该模式没有账号鉴权，只适合临时、可信的局域网。
 
 局域网优先，不走公网中继：
 

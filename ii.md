@@ -1,6 +1,6 @@
 # ii 用户手册
 
-`ii` 是唯一对外品牌和唯一用户入口。用户只需要记 `ii`，不用记 `sendme`、`provide/get`、`iroh-relay`，也不用接触 `hash`、`peer id`、`token` 这些底层词。
+`ii` 是唯一对外品牌和唯一用户入口。用户只需要记 `ii`，不用记 `sendme`、`provide/get`、`iroh-relay`，也不用接触 `hash`、`peer id` 这些底层词。
 
 ## 一句话
 
@@ -9,7 +9,7 @@
 ## 命令总览
 
 ```text
-ii send [<path>] [--name <name>] [-t] [-c] [-o <path>] [--web | --s3 | --webdav | --ftp | --sftp] [--profile <name>] [-d] [-p] [--local] [--relay <https-url> [-k]] [--no-relay]
+ii send [<path>] [--name <name>] [-t] [-c] [-o <path>] [--web [--token <value>] | --s3 | --webdav | --ftp | --sftp] [--profile <name>] [-d] [-p] [--local] [--relay <https-url> [-k]] [--no-relay]
 ii recv <ticket> [-o <dir>] [--stdout] [--overwrite] [--resume] [--local] [--trace]
 ii relay (--public <https-url> | --tls <domain> --cert <path> --key <path>) [-H <bind-port>]
 ii doctor
@@ -78,7 +78,10 @@ tar czf - .\project | ii send --name project.tar.gz
   如果文件已存在，会覆盖。这个 `-o` 属于 `ii send`，不影响 `ii recv -o <dir>` 的保存目录语义。
 
 `--web`
-: 在局域网内临时开放一个无鉴权 HTTP 下载页。执行后会在主 URL 上方展示进入下载页的二维码，随后在 `other:` 下列出其余物理和虚拟网卡的 IPv4 URL；下载页顶部二维码直达 `/download`。按 `Ctrl+C` 停止服务。文件直接下载；文件夹会按原目录名打包为 `.tar` 下载。它不生成 ticket，不能和 `-c`、`-o`、`--s3`、`--webdav`、`--ftp`、`--sftp`、`--local`、`--relay`、`--no-relay` 同时使用。
+: 在局域网内临时开放一个无账号鉴权 HTTP 下载页。执行后会在主 URL 上方展示进入下载页的二维码，随后在 `other:` 下列出其余物理和虚拟网卡的 IPv4 URL；下载页顶部二维码直达 `/download`。网页可一次上传多个文件，接收文件写到启动命令当前目录的 `./ii/`，不支持上传目录。按 `Ctrl+C` 停止服务。文件直接下载；文件夹会按原目录名打包为 `.tar` 下载。它不生成 ticket，不能和 `-c`、`-o`、`--s3`、`--webdav`、`--ftp`、`--sftp`、`--local`、`--relay`、`--no-relay` 同时使用。
+
+`--token <value>`
+: 仅和 `--web` 同用，把网页、下载和上传 URL 固定到 `/<value>/` 路径下；遗漏或写错路径会返回 `404`。`value` 必须为 16 到 128 个 ASCII 字母、数字、`-` 或 `_`。不提供时仍使用原来的无令牌 URL。
 
 `--local`
 : 只走局域网优先路径，不走公网发现，不走公网 relay。
