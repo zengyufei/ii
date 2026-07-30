@@ -19,6 +19,12 @@
 
 - 新增 FTP 与 SFTP 中转说明，并同步中英文 README 和完整命令手册。
 
+## 0.1.14 - 2026-07-30
+
+### 变更
+
+- Release 流水线仅构建和发布 CLI 三端产物；修正 Linux 与 macOS 使用 UPX 路径时误写入 UPX 保留环境变量的问题。
+
 ## Unreleased
 
 暂无。

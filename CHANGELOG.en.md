@@ -19,6 +19,12 @@ All notable changes to `ii` are documented here. The default Chinese version is 
 
 - Added FTP and SFTP backend guides and synchronized the English README and full command manual.
 
+## 0.1.14 - 2026-07-30
+
+### Changed
+
+- Restricted the release workflow to the three CLI artifacts; fixed Linux and macOS UPX path handling, which had overwritten UPX's reserved environment variable.
+
 ## Unreleased
 
 Nothing yet.
