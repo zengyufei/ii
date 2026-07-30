@@ -31,6 +31,12 @@
 
 - Release 流水线继续报告三端 CLI 的 UPX 压缩大小，但不再以大小限制阻断发布。
 
+## 0.1.16 - 2026-07-30
+
+### 修复
+
+- 修正 Release 流水线的 UPX 平台处理：Windows 解压前清理残留目录，macOS 压缩 Mach-O 时传入 `--force-macos`。
+
 ## Unreleased
 
 暂无。

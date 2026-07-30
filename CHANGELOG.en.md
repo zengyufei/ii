@@ -31,6 +31,12 @@ All notable changes to `ii` are documented here. The default Chinese version is 
 
 - The release workflow continues to report UPX-compressed CLI sizes for all targets, without blocking publication on a size limit.
 
+## 0.1.16 - 2026-07-30
+
+### Fixed
+
+- Fixed platform-specific UPX release handling: clear a stale Windows extraction directory, and pass `--force-macos` when compressing macOS Mach-O binaries.
+
 ## Unreleased
 
 Nothing yet.

@@ -61,6 +61,7 @@ jobs:
         shell: pwsh
         run: |
           Invoke-WebRequest https://github.com/upx/upx/releases/download/v5.1.0/upx-5.1.0-win64.zip -OutFile upx.zip
+          Remove-Item -Recurse -Force upx-5.1.0-win64 -ErrorAction SilentlyContinue
           Expand-Archive -Path upx.zip -DestinationPath .
       - name: Install UPX 5.1.0 (Linux)
         if: runner.os == 'Linux'
@@ -88,9 +89,15 @@ jobs:
           else
             upx="$UPX_BIN"
           fi
+          upx_args=(--best --lzma)
+          upx_test_args=()
+          if [ "$RUNNER_OS" = macOS ]; then
+            upx_args+=(--force-macos)
+            upx_test_args+=(--force-macos)
+          fi
           unpacked_bytes=$(wc -c < "$binary")
-          "$upx" --best --lzma "$binary"
-          "$upx" -t "$binary"
+          "$upx" "${upx_args[@]}" "$binary"
+          "$upx" -t "${upx_test_args[@]}" "$binary"
           packed_bytes=$(wc -c < "$binary")
           {
             echo "## CLI ${{ matrix.name }}"
