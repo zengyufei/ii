@@ -6,6 +6,13 @@ All notable changes to `ii` are documented here. The default Chinese version is 
 
 Nothing yet.
 
+## 0.1.19 - 2026-07-31
+
+### Added
+
+- Added `ii web [directory]` for temporary LAN recursive directory browsing, normal file responses, and multi-file uploads; it supports `--token` and `--path`, and prints a QR code plus all IPv4 LAN URLs in the terminal.
+- Added `ii send ... --web --path <dir>` to write web uploads directly into a chosen directory; relative paths are based on the startup directory, while the default remains `./ii/`.
+
 ## 0.1.18 - 2026-07-30
 
 ### Added

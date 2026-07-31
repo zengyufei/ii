@@ -1,5 +1,5 @@
 use crate::{
-    cli::{RecvArgs, SendArgs},
+    cli::{RecvArgs, SendArgs, WebArgs},
     storage,
     ticket::{
         FtpPortableCredentials, PayloadKind, ResumeRequest, SftpPortableAuth,
@@ -10,7 +10,7 @@ use anyhow::{Context, Result, bail};
 use futures_util::TryStreamExt;
 use iroh::{Endpoint, RelayMap, RelayMode, SecretKey, TransportAddr, endpoint::presets};
 use iroh_relay::tls::CaTlsConfig;
-use percent_encoding::percent_decode_str;
+use percent_encoding::{NON_ALPHANUMERIC, percent_decode_str, utf8_percent_encode};
 use qrcodegen::{QrCode, QrCodeEcc};
 use russh::{
     client::{self as ssh_client, Handler as SshClientHandler},
@@ -27,7 +27,7 @@ use std::{
     ffi::OsStr,
     io::{IsTerminal, Read, Write},
     net::{Ipv4Addr, SocketAddr, UdpSocket},
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     process::{Command, Stdio},
     sync::{
         Arc, Mutex,
@@ -37,6 +37,7 @@ use std::{
 };
 use suppaftp::tokio::AsyncFtpStream;
 use tempfile::NamedTempFile;
+use time::{OffsetDateTime, format_description::FormatItem, macros::format_description};
 use tokio::{
     fs,
     io::{self, AsyncRead, AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt},
@@ -46,6 +47,8 @@ use tokio_util::io::ReaderStream;
 
 const ALPN: &[u8] = b"ii/file/1";
 const DEFAULT_CONNECT_FAST_PATH_TIMEOUT: Duration = Duration::from_secs(3);
+const WEB_DIRECTORY_TIME_FORMAT: &[FormatItem<'static>] =
+    format_description!("[year]-[month]-[day] [hour]:[minute]");
 static NEXT_OBJECT_ID: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -412,10 +415,19 @@ pub async fn send(args: SendArgs) -> Result<()> {
     .await
 }
 
+enum WebContent {
+    Download {
+        source: Source,
+        download_name: String,
+        download_qr_svg: String,
+    },
+    Directory {
+        root: PathBuf,
+    },
+}
+
 struct WebShare {
-    source: Source,
-    download_name: String,
-    download_qr_svg: String,
+    content: WebContent,
     upload_dir: PathBuf,
     web_token: Option<String>,
 }
@@ -427,16 +439,63 @@ struct WebRequest {
     body: Vec<u8>,
 }
 
+struct WebDirectoryEntry {
+    name: String,
+    is_dir: bool,
+    modified: String,
+    size: String,
+}
+
 async fn send_web(args: SendArgs) -> Result<()> {
     let source = Source::open(args.path.clone(), args.name.clone()).await?;
-    let web_token = args.web_token.clone();
     let download_name = match source.kind() {
         PayloadKind::Dir => format!("{}.tar", source.name()),
         PayloadKind::File | PayloadKind::Stdin => source.name().to_string(),
     };
-    let upload_dir = std::env::current_dir()
-        .context("read current directory for web uploads")?
-        .join("ii");
+    let start_dir = std::env::current_dir().context("read current directory for web uploads")?;
+    let upload_dir = web_upload_dir(&start_dir, args.web_upload_dir.as_deref());
+    serve_web(
+        WebContent::Download {
+            source,
+            download_name,
+            download_qr_svg: String::new(),
+        },
+        upload_dir,
+        args.web_token,
+    )
+    .await
+}
+
+pub async fn web(args: WebArgs) -> Result<()> {
+    let start_dir = std::env::current_dir().context("read current directory for web service")?;
+    let root = web_directory_root(&start_dir, args.dir.as_deref()).await?;
+    let upload_dir = web_upload_dir(&start_dir, args.web_upload_dir.as_deref());
+    serve_web(WebContent::Directory { root }, upload_dir, args.web_token).await
+}
+
+async fn web_directory_root(start_dir: &Path, requested_dir: Option<&Path>) -> Result<PathBuf> {
+    let path = match requested_dir {
+        Some(path) if path.is_absolute() => path.to_path_buf(),
+        Some(path) => start_dir.join(path),
+        None => start_dir.to_path_buf(),
+    };
+    let root = fs::canonicalize(&path)
+        .await
+        .with_context(|| format!("read web directory {}", path.display()))?;
+    let metadata = fs::metadata(&root)
+        .await
+        .with_context(|| format!("read web directory {}", root.display()))?;
+    if !metadata.is_dir() {
+        bail!("web path is not a directory: {}", path.display());
+    }
+    Ok(root)
+}
+
+async fn serve_web(
+    mut content: WebContent,
+    upload_dir: PathBuf,
+    web_token: Option<String>,
+) -> Result<()> {
     let listener = TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0))
         .await
         .context("bind web server")?;
@@ -447,11 +506,14 @@ async fn send_web(args: SendArgs) -> Result<()> {
     let host = local_web_host();
     let root_path = web_root_path(web_token.as_deref());
     let url = format!("http://{host}:{port}{root_path}");
-    let download_url = format!("{url}download");
+    if let WebContent::Download {
+        download_qr_svg, ..
+    } = &mut content
+    {
+        *download_qr_svg = web_qr_svg(&format!("{url}download"))?;
+    }
     let share = Arc::new(WebShare {
-        source,
-        download_name,
-        download_qr_svg: web_qr_svg(&download_url)?,
+        content,
         upload_dir,
         web_token,
     });
@@ -483,6 +545,14 @@ async fn send_web(args: SendArgs) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn web_upload_dir(start_dir: &Path, configured_dir: Option<&Path>) -> PathBuf {
+    match configured_dir {
+        Some(dir) if dir.is_absolute() => dir.to_path_buf(),
+        Some(dir) => start_dir.join(dir),
+        None => start_dir.join("ii"),
+    }
 }
 
 fn web_root_path(token: Option<&str>) -> String {
@@ -731,10 +801,26 @@ async fn serve_web_connection(mut stream: TcpStream, share: Arc<WebShare>) -> Re
     };
 
     match request.method.as_str() {
-        "GET" => match path {
-            "" => write_web_page(&mut stream, &share).await,
-            "download" => write_web_download(&mut stream, &share).await,
-            _ => write_web_error(&mut stream, "404 Not Found", "not found").await,
+        "GET" => match &share.content {
+            WebContent::Download {
+                source,
+                download_name,
+                download_qr_svg,
+            } => match path {
+                "" => write_web_page(&mut stream, source, download_name, download_qr_svg).await,
+                "download" => write_web_download(&mut stream, source, download_name).await,
+                _ => write_web_error(&mut stream, "404 Not Found", "not found").await,
+            },
+            WebContent::Directory { root } => {
+                write_web_directory(
+                    &mut stream,
+                    root,
+                    share.web_token.as_deref(),
+                    path,
+                    &request.target,
+                )
+                .await
+            }
         },
         "POST" if path.starts_with("upload?name=") => {
             write_web_upload(
@@ -816,12 +902,17 @@ async fn read_web_request(stream: &mut TcpStream) -> Result<WebRequest> {
     })
 }
 
-async fn write_web_page(stream: &mut TcpStream, share: &WebShare) -> Result<()> {
-    let name = html_escape(&share.download_name);
+async fn write_web_page(
+    stream: &mut TcpStream,
+    source: &Source,
+    download_name: &str,
+    download_qr_svg: &str,
+) -> Result<()> {
+    let name = html_escape(download_name);
     let body = format!(
         "<!doctype html><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>{name}</title><style>body{{margin:0;background:#f5f5f5;color:#171717;font-family:system-ui,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif}}main{{box-sizing:border-box;width:min(100%,32rem);margin:0 auto;padding:2rem 1.25rem 2.5rem;text-align:center}}svg{{display:block;width:min(72vw,17.5rem);height:auto;margin:0 auto 1.5rem;background:#fff}}h1{{margin:0;overflow-wrap:anywhere;font-size:1.5rem;line-height:1.3}}.meta{{margin:0.75rem 0 1.5rem;color:#555;font-size:1rem}}a,button{{box-sizing:border-box;display:block;width:100%;min-height:3rem;padding:0.75rem 1rem;border:0;border-radius:0.25rem;background:#1769aa;color:#fff;font:inherit;font-weight:600;line-height:1.5;text-align:center;text-decoration:none}}button:disabled{{opacity:.6}}.upload{{display:grid;gap:.75rem;margin-top:1.5rem;padding-top:1.5rem;border-top:1px solid #ccc;text-align:left}}input{{box-sizing:border-box;width:100%;min-height:3rem;padding:.625rem;border:1px solid #999;border-radius:.25rem;background:#fff;color:#171717;font:inherit}}output{{display:grid;gap:.375rem;overflow-wrap:anywhere;color:#555;font-size:.875rem;line-height:1.4}}@media (max-width:30rem){{main{{padding:1.5rem 1rem 2rem}}svg{{width:min(82vw,17.5rem);margin-bottom:1.25rem}}h1{{font-size:1.25rem}}.meta{{margin:0.625rem 0 1.25rem}}}}</style><main>{}<h1>{name}</h1><p class=\"meta\">{}</p><a href=\"download\">Download</a><div class=\"upload\"><input id=\"upload\" type=\"file\" multiple aria-label=\"Upload files\"><button id=\"upload-button\" type=\"button\">Upload</button><output id=\"upload-status\" aria-live=\"polite\"></output></div></main><script>const input=document.getElementById('upload');const button=document.getElementById('upload-button');const status=document.getElementById('upload-status');button.addEventListener('click',async()=>{{const files=[...input.files];if(!files.length)return;button.disabled=true;status.textContent='';for(const file of files){{const row=document.createElement('div');row.textContent=file.name;status.append(row);try{{const response=await fetch('upload?name='+encodeURIComponent(file.name),{{method:'POST',body:file}});const text=await response.text();row.textContent=response.ok?text:file.name+': '+text;}}catch(error){{row.textContent=file.name+': '+error;}}}}button.disabled=false;input.value='';}});</script>",
-        share.download_qr_svg,
-        fmt_bytes(share.source.size),
+        download_qr_svg,
+        fmt_bytes(source.size),
     );
     write_web_response(
         stream,
@@ -832,21 +923,248 @@ async fn write_web_page(stream: &mut TcpStream, share: &WebShare) -> Result<()> 
     .await
 }
 
-async fn write_web_download(stream: &mut TcpStream, share: &WebShare) -> Result<()> {
+async fn write_web_download(
+    stream: &mut TcpStream,
+    source: &Source,
+    download_name: &str,
+) -> Result<()> {
     let header = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\nContent-Disposition: attachment; filename=\"{}\"\r\nConnection: close\r\n\r\n",
-        share.source.size,
-        content_disposition_name(&share.download_name),
+        source.size,
+        content_disposition_name(download_name),
     );
     stream
         .write_all(header.as_bytes())
         .await
         .context("write download headers")?;
-    let mut file = share.source.open_file().await?;
+    let mut file = source.open_file().await?;
     io::copy(&mut file, stream)
         .await
         .context("write download")?;
     stream.shutdown().await.context("finish download")?;
+    Ok(())
+}
+
+async fn write_web_directory(
+    stream: &mut TcpStream,
+    root: &Path,
+    web_token: Option<&str>,
+    path: &str,
+    request_target: &str,
+) -> Result<()> {
+    let Some((target, segments, trailing_slash)) = web_directory_target(root, path).await else {
+        return write_web_error(stream, "404 Not Found", "not found").await;
+    };
+    let metadata = match fs::metadata(&target).await {
+        Ok(metadata) => metadata,
+        Err(_) => return write_web_error(stream, "404 Not Found", "not found").await,
+    };
+
+    if metadata.is_dir() {
+        if !path.is_empty() && !trailing_slash {
+            return write_web_redirect(stream, &format!("{request_target}/")).await;
+        }
+        let body = match web_directory_page_body(root, &target, web_token, &segments).await {
+            Ok(body) => body,
+            Err(_) => return write_web_error(stream, "404 Not Found", "not found").await,
+        };
+        return write_web_response(
+            stream,
+            "200 OK",
+            "text/html; charset=utf-8",
+            body.as_bytes(),
+        )
+        .await;
+    }
+
+    if trailing_slash {
+        return write_web_error(stream, "404 Not Found", "not found").await;
+    }
+    let file = match fs::File::open(&target).await {
+        Ok(file) => file,
+        Err(_) => return write_web_error(stream, "404 Not Found", "not found").await,
+    };
+    write_web_file(stream, file, metadata.len()).await
+}
+
+async fn web_directory_target(root: &Path, path: &str) -> Option<(PathBuf, Vec<String>, bool)> {
+    if path.starts_with('/') || path.contains('?') {
+        return None;
+    }
+    let trailing_slash = path.ends_with('/');
+    let path = if trailing_slash {
+        &path[..path.len().checked_sub(1)?]
+    } else {
+        path
+    };
+    let mut segments = Vec::new();
+    if !path.is_empty() {
+        for encoded in path.split('/') {
+            if encoded.is_empty() {
+                return None;
+            }
+            let segment = percent_decode_str(encoded).decode_utf8().ok()?.into_owned();
+            let mut components = Path::new(&segment).components();
+            if segment.is_empty()
+                || matches!(segment.as_str(), "." | "..")
+                || segment.contains(['/', '\\', '\0'])
+                || !matches!(components.next(), Some(Component::Normal(_)))
+                || components.next().is_some()
+            {
+                return None;
+            }
+            segments.push(segment);
+        }
+    }
+
+    let target = segments
+        .iter()
+        .fold(root.to_path_buf(), |path, segment| path.join(segment));
+    let target = fs::canonicalize(target).await.ok()?;
+    target
+        .starts_with(root)
+        .then_some((target, segments, trailing_slash))
+}
+
+async fn web_directory_page_body(
+    root: &Path,
+    directory: &Path,
+    web_token: Option<&str>,
+    segments: &[String],
+) -> Result<String> {
+    let mut entries = fs::read_dir(directory)
+        .await
+        .with_context(|| format!("read web directory {}", directory.display()))?;
+    let mut listed = Vec::new();
+    while let Some(entry) = entries
+        .next_entry()
+        .await
+        .context("read web directory entry")?
+    {
+        let file_name = entry.file_name();
+        let Some(name) = file_name.to_str().map(str::to_owned) else {
+            continue;
+        };
+        let target = match fs::canonicalize(entry.path()).await {
+            Ok(target) if target.starts_with(root) => target,
+            _ => continue,
+        };
+        let metadata = match fs::metadata(target).await {
+            Ok(metadata) => metadata,
+            Err(_) => continue,
+        };
+        listed.push(WebDirectoryEntry {
+            name,
+            is_dir: metadata.is_dir(),
+            modified: web_directory_modified(&metadata),
+            size: if metadata.is_dir() {
+                "-".to_string()
+            } else {
+                fmt_bytes(metadata.len())
+            },
+        });
+    }
+    listed.sort_by(|left, right| left.name.cmp(&right.name));
+
+    let mut rows = String::new();
+    if !segments.is_empty() {
+        let parent = web_directory_href(&segments[..segments.len() - 1], true);
+        rows.push_str(&format!("<a href=\"{parent}\">../</a>\n"));
+    }
+    for entry in listed {
+        let mut entry_segments = segments.to_vec();
+        entry_segments.push(entry.name.clone());
+        let href = web_directory_href(&entry_segments, entry.is_dir);
+        let label = if entry.is_dir {
+            format!("{}/", entry.name)
+        } else {
+            entry.name
+        };
+        rows.push_str(&format!(
+            "<a href=\"{href}\">{}</a>  {}  {}\n",
+            html_escape(&label),
+            entry.modified,
+            entry.size,
+        ));
+    }
+
+    let display_path = if segments.is_empty() {
+        "/".to_string()
+    } else {
+        format!("/{}/", segments.join("/"))
+    };
+    let title = format!("Index of {display_path}");
+    let mut body = String::from(
+        "<!doctype html><html><head><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><style>body{box-sizing:border-box;max-width:58rem;margin:0 auto;padding:1.5rem 1rem 2rem;background:#fff;color:#111;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:14px;line-height:1.45}h1{margin:0 0 1rem;font-size:1.25rem;font-weight:600;overflow-wrap:anywhere}.upload{display:grid;gap:.625rem;margin:0 0 1.25rem}.upload input,.upload button{box-sizing:border-box;width:100%;min-height:2.75rem;padding:.625rem;border:1px solid #777;border-radius:0;background:#fff;color:#111;font:inherit}.upload button{background:#1769aa;border-color:#1769aa;color:#fff;font-weight:600}.upload button:disabled{opacity:.6}output{display:grid;gap:.375rem;overflow-wrap:anywhere;color:#555}pre{margin:1rem 0;overflow-x:auto;font:inherit}a{color:#0645ad;text-decoration:none}a:hover{text-decoration:underline}@media (max-width:30rem){body{padding:1rem .75rem 1.5rem;font-size:13px}h1{font-size:1.125rem}}</style><base href=\"",
+    );
+    body.push_str(&html_escape(&web_root_path(web_token)));
+    body.push_str("\"><title>");
+    body.push_str(&html_escape(&title));
+    body.push_str("</title></head><body><h1>");
+    body.push_str(&html_escape(&title));
+    body.push_str("</h1>");
+    body.push_str(web_upload_controls());
+    body.push_str("<hr><pre>Name                             Last modified       Size\n----------------------------------------------------------------\n");
+    body.push_str(&rows);
+    body.push_str("</pre><hr></body></html>");
+    Ok(body)
+}
+
+fn web_directory_modified(metadata: &std::fs::Metadata) -> String {
+    metadata
+        .modified()
+        .ok()
+        .and_then(|time| {
+            OffsetDateTime::from(time)
+                .format(WEB_DIRECTORY_TIME_FORMAT)
+                .ok()
+        })
+        .unwrap_or_else(|| "-".to_string())
+}
+
+fn web_directory_href(segments: &[String], is_dir: bool) -> String {
+    if segments.is_empty() {
+        return "./".to_string();
+    }
+    let mut href = segments
+        .iter()
+        .map(|segment| utf8_percent_encode(segment, NON_ALPHANUMERIC).to_string())
+        .collect::<Vec<_>>()
+        .join("/");
+    if is_dir {
+        href.push('/');
+    }
+    href
+}
+
+fn web_upload_controls() -> &'static str {
+    "<section class=\"upload\"><input id=\"upload\" type=\"file\" multiple aria-label=\"Upload files\"><button id=\"upload-button\" type=\"button\">Upload</button><output id=\"upload-status\" aria-live=\"polite\"></output></section><script>const input=document.getElementById('upload');const button=document.getElementById('upload-button');const status=document.getElementById('upload-status');button.addEventListener('click',async()=>{const files=[...input.files];if(!files.length)return;button.disabled=true;status.textContent='';for(const file of files){const row=document.createElement('div');row.textContent=file.name;status.append(row);try{const response=await fetch('upload?name='+encodeURIComponent(file.name),{method:'POST',body:file});const text=await response.text();row.textContent=response.ok?text:file.name+': '+text;}catch(error){row.textContent=file.name+': '+error;}}button.disabled=false;input.value='';});</script>"
+}
+
+async fn write_web_file(stream: &mut TcpStream, mut file: fs::File, size: u64) -> Result<()> {
+    let header = format!(
+        "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {size}\r\nConnection: close\r\n\r\n"
+    );
+    stream
+        .write_all(header.as_bytes())
+        .await
+        .context("write web file headers")?;
+    io::copy(&mut file, stream)
+        .await
+        .context("write web file")?;
+    stream.shutdown().await.context("finish web file")?;
+    Ok(())
+}
+
+async fn write_web_redirect(stream: &mut TcpStream, location: &str) -> Result<()> {
+    let header = format!(
+        "HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+    );
+    stream
+        .write_all(header.as_bytes())
+        .await
+        .context("write web redirect")?;
+    stream.shutdown().await.context("finish web redirect")?;
     Ok(())
 }
 
@@ -3842,9 +4160,11 @@ mod tests {
         std::fs::write(&source_path, b"web payload").unwrap();
         let upload_dir = dir.path().join("ii");
         let share = Arc::new(WebShare {
-            source: Source::from_file(source_path, None).await.unwrap(),
-            download_name: "hello.txt".to_string(),
-            download_qr_svg: web_qr_svg("http://192.168.1.2:3456/download").unwrap(),
+            content: WebContent::Download {
+                source: Source::from_file(source_path, None).await.unwrap(),
+                download_name: "hello.txt".to_string(),
+                download_qr_svg: web_qr_svg("http://192.168.1.2:3456/download").unwrap(),
+            },
             upload_dir: upload_dir.clone(),
             web_token: None,
         });
@@ -3943,9 +4263,11 @@ mod tests {
         std::fs::write(&source_path, b"web payload").unwrap();
         std::fs::write(&upload_dir, b"blocked").unwrap();
         let share = Arc::new(WebShare {
-            source: Source::from_file(source_path, None).await.unwrap(),
-            download_name: "hello.txt".to_string(),
-            download_qr_svg: web_qr_svg("http://192.168.1.2:3456/download").unwrap(),
+            content: WebContent::Download {
+                source: Source::from_file(source_path, None).await.unwrap(),
+                download_name: "hello.txt".to_string(),
+                download_qr_svg: web_qr_svg("http://192.168.1.2:3456/download").unwrap(),
+            },
             upload_dir,
             web_token: None,
         });
@@ -3965,21 +4287,23 @@ mod tests {
     async fn web_share_token_requires_the_configured_path_prefix() {
         let dir = tempfile::tempdir().unwrap();
         let source_path = dir.path().join("hello.txt");
-        let upload_dir = dir.path().join("ii");
+        let upload_dir = dir.path().join("custom-uploads");
         let token = "A1b2C3d4E5f6G7h8";
         std::fs::write(&source_path, b"web payload").unwrap();
         let share = Arc::new(WebShare {
-            source: Source::from_file(source_path, None).await.unwrap(),
-            download_name: "hello.txt".to_string(),
-            download_qr_svg: web_qr_svg(&format!("http://192.168.1.2:3456/{token}/download"))
-                .unwrap(),
+            content: WebContent::Download {
+                source: Source::from_file(source_path, None).await.unwrap(),
+                download_name: "hello.txt".to_string(),
+                download_qr_svg: web_qr_svg(&format!("http://192.168.1.2:3456/{token}/download"))
+                    .unwrap(),
+            },
             upload_dir: upload_dir.clone(),
             web_token: Some(token.to_string()),
         });
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
         let address = listener.local_addr().unwrap();
         let server = tokio::spawn(async move {
-            for _ in 0..8 {
+            for _ in 0..9 {
                 let (stream, _) = listener.accept().await.unwrap();
                 let share = Arc::clone(&share);
                 tokio::spawn(async move { serve_web_connection(stream, share).await.unwrap() });
@@ -4013,6 +4337,18 @@ mod tests {
             b"token upload"
         );
 
+        let overwrite = web_upload_request_at(
+            address,
+            &format!("/{token}/upload?name=notes.txt"),
+            b"replacement upload",
+        )
+        .await;
+        assert!(overwrite.starts_with(b"HTTP/1.1 201 Created"));
+        assert_eq!(
+            std::fs::read(upload_dir.join("notes.txt")).unwrap(),
+            b"replacement upload"
+        );
+
         for path in ["/", "/download", &format!("/{token}"), "/not-the-token/"] {
             let response = web_request(address, path).await;
             assert!(response.starts_with(b"HTTP/1.1 404 Not Found"), "{path}");
@@ -4028,6 +4364,199 @@ mod tests {
         server.await.unwrap();
     }
 
+    #[tokio::test]
+    async fn web_directory_lists_files_serves_children_and_uploads() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("shared");
+        let nested = root.join("nested");
+        let upload_dir = temp.path().join("uploads");
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(root.join("top file.txt"), b"top").unwrap();
+        std::fs::write(nested.join("child.txt"), b"child payload").unwrap();
+        let share = Arc::new(WebShare {
+            content: WebContent::Directory {
+                root: fs::canonicalize(&root).await.unwrap(),
+            },
+            upload_dir: upload_dir.clone(),
+            web_token: None,
+        });
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            for _ in 0..9 {
+                let (stream, _) = listener.accept().await.unwrap();
+                let share = Arc::clone(&share);
+                tokio::spawn(async move { serve_web_connection(stream, share).await.unwrap() });
+            }
+        });
+
+        let root_page = web_request(address, "/").await;
+        assert!(root_page.starts_with(b"HTTP/1.1 200 OK"));
+        assert!(
+            root_page
+                .windows(b"Index of /".len())
+                .any(|part| part == b"Index of /")
+        );
+        assert!(
+            root_page
+                .windows(b"nested/".len())
+                .any(|part| part == b"nested/")
+        );
+        assert!(
+            root_page
+                .windows(b"top file.txt".len())
+                .any(|part| part == b"top file.txt")
+        );
+        assert!(
+            root_page
+                .windows(b"type=\"file\" multiple".len())
+                .any(|part| part == b"type=\"file\" multiple")
+        );
+        assert!(
+            root_page
+                .windows(b"fetch('upload?name='".len())
+                .any(|part| part == b"fetch('upload?name='")
+        );
+        assert!(!root_page.windows(b"<svg".len()).any(|part| part == b"<svg"));
+
+        let redirect = web_request(address, "/nested").await;
+        assert!(redirect.starts_with(b"HTTP/1.1 302 Found"));
+        assert!(
+            redirect
+                .windows(b"Location: /nested/".len())
+                .any(|part| part == b"Location: /nested/")
+        );
+
+        let nested_page = web_request(address, "/nested/").await;
+        assert!(nested_page.starts_with(b"HTTP/1.1 200 OK"));
+        assert!(
+            nested_page
+                .windows(b"Index of /nested/".len())
+                .any(|part| part == b"Index of /nested/")
+        );
+        assert!(
+            nested_page
+                .windows(b">../</a>".len())
+                .any(|part| part == b">../</a>")
+        );
+
+        let file = web_request(address, "/nested/child.txt").await;
+        assert!(file.starts_with(b"HTTP/1.1 200 OK"));
+        assert!(file.ends_with(b"child payload"));
+        assert!(
+            !file
+                .windows(b"Content-Disposition".len())
+                .any(|part| part == b"Content-Disposition")
+        );
+
+        for path in [
+            "/%2e%2e/secret.txt",
+            "/nested%2fchild.txt",
+            "/nested%5cchild.txt",
+        ] {
+            let response = web_request(address, path).await;
+            assert!(response.starts_with(b"HTTP/1.1 404 Not Found"), "{path}");
+        }
+
+        let first = web_upload_request(address, "notes.bin", b"first upload").await;
+        assert!(first.starts_with(b"HTTP/1.1 201 Created"));
+        let overwrite = web_upload_request(address, "notes.bin", b"replacement upload").await;
+        assert!(overwrite.starts_with(b"HTTP/1.1 201 Created"));
+        assert_eq!(
+            std::fs::read(upload_dir.join("notes.bin")).unwrap(),
+            b"replacement upload"
+        );
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn web_directory_token_scopes_browsing_and_uploads() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("shared");
+        let nested = root.join("nested");
+        let upload_dir = temp.path().join("uploads");
+        let token = "A1b2C3d4E5f6G7h8";
+        std::fs::create_dir_all(&nested).unwrap();
+        std::fs::write(nested.join("child.txt"), b"child").unwrap();
+        let share = Arc::new(WebShare {
+            content: WebContent::Directory {
+                root: fs::canonicalize(&root).await.unwrap(),
+            },
+            upload_dir: upload_dir.clone(),
+            web_token: Some(token.to_string()),
+        });
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            for _ in 0..7 {
+                let (stream, _) = listener.accept().await.unwrap();
+                let share = Arc::clone(&share);
+                tokio::spawn(async move { serve_web_connection(stream, share).await.unwrap() });
+            }
+        });
+
+        let root_page = web_request(address, &format!("/{token}/")).await;
+        assert!(root_page.starts_with(b"HTTP/1.1 200 OK"));
+        assert!(
+            root_page
+                .windows(format!("<base href=\"/{token}/\"").len())
+                .any(|part| part == format!("<base href=\"/{token}/\"").as_bytes())
+        );
+        let nested_page = web_request(address, &format!("/{token}/nested/")).await;
+        assert!(nested_page.starts_with(b"HTTP/1.1 200 OK"));
+        let upload = web_upload_request_at(
+            address,
+            &format!("/{token}/upload?name=notes.txt"),
+            b"token upload",
+        )
+        .await;
+        assert!(upload.starts_with(b"HTTP/1.1 201 Created"));
+        assert_eq!(
+            std::fs::read(upload_dir.join("notes.txt")).unwrap(),
+            b"token upload"
+        );
+        for path in ["/", "/nested/", "/wrong-token/", &format!("/{token}")] {
+            let response = web_request(address, path).await;
+            assert!(response.starts_with(b"HTTP/1.1 404 Not Found"), "{path}");
+        }
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn web_directory_root_requires_an_existing_directory() {
+        let temp = tempfile::tempdir().unwrap();
+        let directory = temp.path().join("directory");
+        let file = temp.path().join("file.txt");
+        std::fs::create_dir(&directory).unwrap();
+        std::fs::write(&file, b"file").unwrap();
+
+        assert_eq!(
+            web_directory_root(temp.path(), None).await.unwrap(),
+            fs::canonicalize(temp.path()).await.unwrap()
+        );
+        assert_eq!(
+            web_directory_root(temp.path(), Some(Path::new("directory")))
+                .await
+                .unwrap(),
+            fs::canonicalize(&directory).await.unwrap()
+        );
+        assert!(web_directory_root(temp.path(), Some(&file)).await.is_err());
+        assert!(
+            web_directory_root(temp.path(), Some(&temp.path().join("missing")))
+                .await
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn web_directory_href_encodes_each_path_segment() {
+        assert_eq!(web_directory_href(&[], true), "./");
+        assert_eq!(
+            web_directory_href(&["nested".to_string(), "two words".to_string()], true),
+            "nested/two%20words/"
+        );
+    }
+
     #[test]
     fn web_root_path_preserves_default_and_token_routes() {
         assert_eq!(web_root_path(None), "/");
@@ -4035,6 +4564,20 @@ mod tests {
             web_root_path(Some("A1b2C3d4E5f6G7h8")),
             "/A1b2C3d4E5f6G7h8/"
         );
+    }
+
+    #[test]
+    fn web_upload_dir_uses_default_relative_and_absolute_paths() {
+        let base = tempfile::tempdir().unwrap();
+        let start_dir = base.path();
+        let absolute = start_dir.join("absolute-uploads");
+
+        assert_eq!(web_upload_dir(start_dir, None), start_dir.join("ii"));
+        assert_eq!(
+            web_upload_dir(start_dir, Some(Path::new("relative-uploads"))),
+            start_dir.join("relative-uploads")
+        );
+        assert_eq!(web_upload_dir(start_dir, Some(&absolute)), absolute,);
     }
 
     #[test]

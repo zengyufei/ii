@@ -22,6 +22,7 @@ pub async fn run_cli() -> Result<()> {
     let cli = Cli::parse();
     match cli.command {
         Command::Send(args) => transfer::send(args).await?,
+        Command::Web(args) => transfer::web(args).await?,
         Command::Recv(args) => transfer::recv(args).await?,
         Command::Relay(args) => relay::run(args).await?,
         Command::Doctor => doctor::run().await?,

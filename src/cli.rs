@@ -10,6 +10,7 @@ pub struct Cli {
 #[derive(Debug)]
 pub enum Command {
     Send(SendArgs),
+    Web(WebArgs),
     Recv(RecvArgs),
     Relay(RelayArgs),
     Doctor,
@@ -31,11 +32,19 @@ pub struct SendArgs {
     pub sftp: bool,
     pub web: bool,
     pub web_token: Option<String>,
+    pub web_upload_dir: Option<PathBuf>,
     pub portable_webdav: bool,
     pub local: bool,
     pub relay: Option<iroh::RelayUrl>,
     pub accept_self_signed_relay: bool,
     pub no_relay: bool,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct WebArgs {
+    pub dir: Option<PathBuf>,
+    pub web_token: Option<String>,
+    pub web_upload_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]
@@ -137,6 +146,7 @@ where
     let rest = args.split_off(1);
     let command = match command.as_str() {
         "send" => Command::Send(parse_send(rest)?),
+        "web" => Command::Web(parse_web(rest)?),
         "recv" => Command::Recv(parse_recv(rest)?),
         "relay" => Command::Relay(parse_relay(rest)?),
         "doctor" => reject_extra("doctor", rest).map(|_| Command::Doctor)?,
@@ -158,6 +168,7 @@ fn parse_send(args: Vec<String>) -> Result<SendArgs, ParseAction> {
             Some(("profile", value)) => out.profile = Some(value.to_string()),
             Some(("relay", value)) => out.relay = Some(parse_relay_url(value)?),
             Some(("token", value)) => out.web_token = Some(value.to_string()),
+            Some(("path", value)) => out.web_upload_dir = Some(PathBuf::from(value)),
             Some((flag, _)) => {
                 return Err(ParseAction::error(format!("unknown option `--{flag}`")));
             }
@@ -175,6 +186,7 @@ fn parse_send(args: Vec<String>) -> Result<SendArgs, ParseAction> {
                 "--sftp" => out.sftp = true,
                 "--web" => out.web = true,
                 "--token" => out.web_token = Some(iter.value("--token")?),
+                "--path" => out.web_upload_dir = Some(PathBuf::from(iter.value("--path")?)),
                 "-p" => out.portable_webdav = true,
                 "--local" => out.local = true,
                 "--relay" => out.relay = Some(parse_relay_url(&iter.value("--relay")?)?),
@@ -193,6 +205,44 @@ fn parse_send(args: Vec<String>) -> Result<SendArgs, ParseAction> {
     }
 
     validate_send(&out)?;
+    Ok(out)
+}
+
+fn parse_web(args: Vec<String>) -> Result<WebArgs, ParseAction> {
+    let mut out = WebArgs::default();
+    let mut iter = ArgsIter::new(args);
+
+    while let Some(arg) = iter.next() {
+        match split_long_value(&arg) {
+            Some(("token", value)) => out.web_token = Some(value.to_string()),
+            Some(("path", value)) => out.web_upload_dir = Some(PathBuf::from(value)),
+            Some((flag, _)) => {
+                return Err(ParseAction::error(format!("unknown option `--{flag}`")));
+            }
+            None => match arg.as_str() {
+                "-h" | "--help" => return Err(ParseAction::help(WEB_HELP)),
+                "--token" => out.web_token = Some(iter.value("--token")?),
+                "--path" => out.web_upload_dir = Some(PathBuf::from(iter.value("--path")?)),
+                _ if arg.starts_with('-') => {
+                    return Err(ParseAction::error(format!("unknown option `{arg}`")));
+                }
+                _ => {
+                    if out.dir.replace(PathBuf::from(&arg)).is_some() {
+                        return Err(ParseAction::error("web accepts only one directory"));
+                    }
+                }
+            },
+        }
+    }
+
+    if let Some(token) = out.web_token.as_deref()
+        && !is_valid_web_token(token)
+    {
+        return Err(ParseAction::error(
+            "--token must contain 16 to 128 ASCII letters, digits, '-' or '_'",
+        ));
+    }
+
     Ok(out)
 }
 
@@ -350,6 +400,9 @@ fn validate_send(args: &SendArgs) -> Result<(), ParseAction> {
     if args.web_token.is_some() && !args.web {
         return Err(ParseAction::error("--token requires --web"));
     }
+    if args.web_upload_dir.is_some() && !args.web {
+        return Err(ParseAction::error("--path requires --web"));
+    }
     if let Some(token) = args.web_token.as_deref()
         && !is_valid_web_token(token)
     {
@@ -473,6 +526,7 @@ ii file transfer
 
 Usage:
   ii send [options] [path]
+  ii web [directory] [--token <value>] [--path <dir>]
   ii recv [options] <ticket>
   ii relay [options]
   ii doctor
@@ -494,6 +548,7 @@ Options:
   --sftp
   --web
   --token <value>
+  --path <dir>
   -p
   -d
   --profile <name>
@@ -501,6 +556,15 @@ Options:
   --relay <url>
   -k
   --no-relay
+";
+
+const WEB_HELP: &str = "\
+Usage:
+  ii web [directory] [--token <value>] [--path <dir>]
+
+Options:
+  --token <value>
+  --path <dir>
 ";
 
 const RECV_HELP: &str = "\
@@ -647,6 +711,67 @@ mod tests {
     }
 
     #[test]
+    fn send_accepts_web_upload_path() {
+        for args in [
+            vec!["ii", "send", "file.txt", "--web", "--path", "uploads"],
+            vec!["ii", "send", "file.txt", "--web", "--path=uploads"],
+        ] {
+            let cli = Cli::parse_from(args);
+            match cli.command {
+                Command::Send(args) => {
+                    assert_eq!(args.web_upload_dir, Some(PathBuf::from("uploads")));
+                }
+                _ => panic!("expected send command"),
+            }
+        }
+    }
+
+    #[test]
+    fn web_accepts_directory_token_and_upload_path() {
+        let token = "A1b2C3d4E5f6G7h8";
+        for args in [
+            vec!["ii", "web"],
+            vec!["ii", "web", "shared", "--token", token, "--path", "uploads"],
+            vec![
+                "ii",
+                "web",
+                "shared",
+                "--token=A1b2C3d4E5f6G7h8",
+                "--path=uploads",
+            ],
+        ] {
+            let cli = Cli::parse_from(args);
+            match cli.command {
+                Command::Web(args) => {
+                    if args.dir.is_some() {
+                        assert_eq!(args.dir, Some(PathBuf::from("shared")));
+                        assert_eq!(args.web_token.as_deref(), Some(token));
+                        assert_eq!(args.web_upload_dir, Some(PathBuf::from("uploads")));
+                    }
+                }
+                _ => panic!("expected web command"),
+            }
+        }
+    }
+
+    #[test]
+    fn web_rejects_invalid_options_and_multiple_directories() {
+        for args in [
+            vec!["ii", "web", "first", "second"],
+            vec!["ii", "web", "-p"],
+            vec!["ii", "web", "--token", "too-short"],
+            vec!["ii", "web", "--token", "A1b2C3d4E5f6G7h!"],
+            vec!["ii", "web", "--token"],
+            vec!["ii", "web", "--path"],
+        ] {
+            assert!(matches!(
+                parse_args(args),
+                Err(ParseAction::Print { code: 2, .. })
+            ));
+        }
+    }
+
+    #[test]
     fn web_token_accepts_hyphen_and_underscore() {
         assert!(is_valid_web_token("A1b2C3d4E5f6G_-h"));
     }
@@ -679,6 +804,14 @@ mod tests {
                 Err(ParseAction::Print { code: 2, .. })
             ));
         }
+    }
+
+    #[test]
+    fn send_rejects_web_upload_path_without_web() {
+        assert!(matches!(
+            parse_args(["ii", "send", "file.txt", "--path", "uploads"]),
+            Err(ParseAction::Print { code: 2, .. })
+        ));
     }
 
     #[test]
