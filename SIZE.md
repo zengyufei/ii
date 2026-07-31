@@ -29,6 +29,7 @@ All measurements use `cargo build -p ii --release --locked` followed by UPX
 | Web-share bidirectional file upload | 5,992,960 | 2,166,784 | +5,632 | `cargo test -p ii --locked` (78 tests), `cargo build -p ii --release --locked`, UPX `5.1.0 --best --lzma`, `upx -t` |
 | Web-share path access token | 6,001,664 | 2,169,344 | +2,560 | `cargo test -p ii --locked` (83 tests), `cargo build -p ii --release --locked`, UPX `5.1.0 --best --lzma`, `upx -t` |
 | Web upload path and `ii web` directory service | 6,038,016 | 2,180,608 | +11,264 | `cargo test -p ii --locked` (92 tests), `cargo build -p ii --release --locked`, UPX `5.1.0 --best --lzma`, `upx -t` |
+| Browser WebRTC LAN signalling and direct page | 6,068,736 | 2,189,824 | +9,216 | `cargo test -p ii --locked` (96 tests), `cargo build -p ii --release --locked`, UPX `5.1.0 --best --lzma`, `upx -t` |
 
 Equivalent release rebuilds have varied by up to `1,536` UPX bytes; the latest
 measurement is recorded with the pinned `5.1.0` packer.

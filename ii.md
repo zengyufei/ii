@@ -4,13 +4,14 @@
 
 ## 一句话
 
-`ii send` 发，`ii recv` 收，`ii web` 开局域网目录，`ii relay` 管中继，`ii doctor` 查问题，`ii version` 看版本。
+`ii send` 发，`ii recv` 收，`ii web` 开局域网目录，`ii webrtc` 开浏览器直传，`ii relay` 管中继，`ii doctor` 查问题，`ii version` 看版本。
 
 ## 命令总览
 
 ```text
 ii send [<path>] [--name <name>] [-t] [-c] [-o <path>] [--web [--token <value>] [--path <dir>] | --s3 | --webdav | --ftp | --sftp] [--profile <name>] [-d] [-p] [--local] [--relay <https-url> [-k]] [--no-relay]
 ii web [<目录>] [--token <value>] [--path <目录>]
+ii webrtc [--token <value>]
 ii recv <ticket> [-o <dir>] [--stdout] [--overwrite] [--resume] [--local] [--trace]
 ii relay (--public <https-url> | --tls <domain> --cert <path> --key <path>) [-H <bind-port>]
 ii doctor
@@ -151,6 +152,19 @@ ii web .\shared --token A1b2C3d4E5f6G7h8 --path .\uploads
 命令行会在主 IPv4 LAN URL 上方打印根页二维码，并在 `other:` 下打印其他物理和虚拟网卡 URL；网页不显示二维码。按 `Ctrl+C` 关闭服务。
 
 `--token <value>` 把目录、文件和上传 URL 固定到 `/<value>/` 下；遗漏或写错返回 `404`。令牌必须为 16 到 128 个 ASCII 字母、数字、`-` 或 `_`。`--path <目录>` 指定网页上传文件直接写入的目录；相对路径按启动目录解析，首次上传才创建目录，未指定时写入启动目录下的 `./ii/`。`-p` 不适用于 `ii web`，仍仅用于 WebDAV、FTP、SFTP 的便携 ticket。
+
+## `ii webrtc`
+
+```powershell
+ii webrtc
+ii webrtc --token A1b2C3d4E5f6G7h8
+```
+
+`ii webrtc` 在 `0.0.0.0` 的随机端口提供局域网页面。命令行在主 IPv4 LAN URL 上方打印二维码，并在 `other:` 下打印其他物理和虚拟网卡 URL；按 `Ctrl+C` 关闭服务。打开同一 URL 的浏览器自动成为临时编号设备，可以选择任一在线设备并发送多个独立文件；对方自动接收并下载。
+
+`ii` 只在 HTTP 上转发 WebRTC 信令，不接收文件，不写入本机磁盘；文件通过浏览器的可靠、有序 DataChannel 点对点传输。页面加入房间前会实际测试浏览器能否创建 ICE host candidate；浏览器禁用或阻止 WebRTC 时会显示 `WebRTC unavailable`，不会加入房间。它只使用局域网 host candidates，不使用公网 STUN/TURN，也不支持目录、断点续传或 CLI 与浏览器直接传输。访客网络隔离、防火墙、跨网段限制或禁用 P2P 时会无法连接。接收浏览器会把单个文件聚合到内存后再下载，大文件会占用相近大小的内存。完整说明见 [webrtc.md](webrtc.md)。
+
+不带 `--token` 时使用根路径；`--token <value>` 将页面和信令接口固定到 `/<value>/` 下，遗漏或写错返回 `404`。令牌必须为 16 到 128 个 ASCII 字母、数字、`-` 或 `_`。`ii webrtc` 不接受路径、`--path` 或 `-p`。
 
 ## `ii recv`
 

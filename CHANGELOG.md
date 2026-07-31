@@ -2,9 +2,20 @@
 
 本文件记录 `ii` 的重要变更。默认中文版本在这里，英文版本见 [CHANGELOG.en.md](CHANGELOG.en.md)。
 
-## Unreleased
+## 0.2.0 - 2026-07-31
 
-暂无。
+### 新增
+
+- 新增 `ii webrtc [--token <value>]`：临时提供局域网浏览器间 WebRTC 文件直传房间，终端输出二维码和全部 IPv4 LAN URL；文件不经过 `ii` 进程，不使用公网 STUN/TURN。
+
+### 修复
+
+- 修复 `ii webrtc` 在移动浏览器之间因 mDNS host candidate 无法解析或 ICE gathering 不结束而无法建立 DataChannel 的问题；信令使用访问服务的客户端局域网 IPv4 并即时转发候选。
+- `ii webrtc` 页面在加入房间前实际验证 ICE host candidate；浏览器禁用或阻止 WebRTC 时明确提示，避免只能发现设备但无法传输。
+
+### 文档
+
+- 新增 [webrtc.md](webrtc.md)，说明局域网范围、浏览器要求、内存限制、路径令牌和不支持的能力。
 
 ## 0.1.19 - 2026-07-31
 

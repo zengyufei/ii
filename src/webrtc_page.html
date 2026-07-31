@@ -1,0 +1,375 @@
+<!doctype html>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ii WebRTC</title>
+<style>
+body { margin: 0; background: #f5f5f5; color: #171717; font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+main { box-sizing: border-box; width: min(100%, 38rem); margin: 0 auto; padding: 2rem 1.25rem 2.5rem; }
+h1 { margin: 0 0 .5rem; font-size: 1.5rem; line-height: 1.3; }
+p { margin: .5rem 0 1.5rem; color: #555; line-height: 1.5; }
+.controls { display: grid; gap: .75rem; border-top: 1px solid #ccc; padding-top: 1.5rem; }
+label { font-weight: 600; }
+select, input, button { box-sizing: border-box; width: 100%; min-height: 3rem; padding: .625rem; border: 1px solid #999; border-radius: .25rem; background: #fff; color: #171717; font: inherit; }
+button { border: 0; background: #1769aa; color: #fff; font-weight: 600; }
+button:disabled { opacity: .6; }
+output { display: block; min-height: 1.5rem; overflow-wrap: anywhere; color: #555; font-size: .875rem; line-height: 1.4; }
+output a { color: #1769aa; font-weight: 600; }
+@media (max-width: 30rem) { main { padding: 1.5rem 1rem 2rem; } h1 { font-size: 1.25rem; } }
+</style>
+<main>
+  <h1>ii WebRTC</h1>
+  <p id="self">Joining local room...</p>
+  <div class="controls">
+    <label for="peer">Send to</label>
+    <select id="peer" disabled><option>No other devices</option></select>
+    <input id="files" type="file" multiple aria-label="Choose files">
+    <button id="send" type="button" disabled>Send</button>
+    <output id="status" aria-live="polite">Direct LAN transfer only. Large received files use browser memory before download.</output>
+  </div>
+</main>
+<script>
+const CHUNK_SIZE = 16 * 1024;
+const MAX_BUFFERED = 512 * 1024;
+const II_CLIENT_IP = '__II_CLIENT_IP__';
+const peerSelect = document.getElementById('peer');
+const filesInput = document.getElementById('files');
+const sendButton = document.getElementById('send');
+const selfLabel = document.getElementById('self');
+const status = document.getElementById('status');
+let peerId = 0;
+const connections = new Map();
+const incoming = new WeakMap();
+
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+function show(message) {
+  status.replaceChildren(document.createTextNode(message));
+}
+
+async function webRtcAvailabilityError() {
+  const disabledMessage = 'WebRTC is disabled or blocked in this browser. Enable WebRTC and reload. / 当前浏览器已关闭或阻止 WebRTC，请启用后刷新页面。';
+  if (typeof window.RTCPeerConnection !== 'function') {
+    return disabledMessage;
+  }
+  try {
+    const pc = new RTCPeerConnection({ iceServers: [] });
+    pc.createDataChannel('ii-check');
+    const offer = await pc.createOffer();
+    await pc.setLocalDescription(offer);
+    return await new Promise(resolve => {
+      let settled = false;
+      const finish = error => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        pc.onicecandidate = null;
+        pc.close();
+        resolve(error);
+      };
+      const timeout = setTimeout(() => finish(disabledMessage), 3000);
+      pc.onicecandidate = event => {
+        if (event.candidate) finish(null);
+      };
+    });
+  } catch {
+    return disabledMessage;
+  }
+}
+
+function updateSendButton() {
+  const connection = connections.get(Number(peerSelect.value));
+  sendButton.disabled = !connection || !connection.channel || connection.channel.readyState !== 'open';
+}
+
+async function request(path, options = {}) {
+  const response = await fetch(path, { cache: 'no-store', ...options });
+  if (!response.ok) throw new Error((await response.text()) || response.statusText);
+  return response;
+}
+
+function renderPeers(ids) {
+  const current = [...peerSelect.options]
+    .map(option => Number(option.value))
+    .filter(id => Number.isSafeInteger(id) && id > 0);
+  if (current.length === ids.length && current.every((id, index) => id === ids[index])) {
+    updateSendButton();
+    return;
+  }
+  const previous = peerSelect.value;
+  peerSelect.replaceChildren();
+  if (!ids.length) {
+    peerSelect.add(new Option('No other devices', ''));
+    peerSelect.disabled = true;
+    updateSendButton();
+    return;
+  }
+  for (const id of ids) peerSelect.add(new Option(`Device ${id}`, String(id)));
+  peerSelect.disabled = false;
+  if (ids.includes(Number(previous))) peerSelect.value = previous;
+  updateSendButton();
+}
+
+function closeConnection(remote) {
+  const connection = connections.get(remote);
+  if (!connection) return;
+  connections.delete(remote);
+  connection.pc.close();
+  updateSendButton();
+}
+
+function setChannel(remote, connection, channel) {
+  connection.channel = channel;
+  channel.binaryType = 'arraybuffer';
+  channel.onopen = () => {
+    show(`Connected to Device ${remote}`);
+    updateSendButton();
+  };
+  channel.onclose = () => {
+    show(`Device ${remote} disconnected`);
+    updateSendButton();
+  };
+  channel.onerror = () => show(`Connection to Device ${remote} failed`);
+  channel.onmessage = event => receiveFile(channel, event);
+}
+
+function createConnection(remote, initiator) {
+  let connection = connections.get(remote);
+  if (connection) return connection;
+
+  const pc = new RTCPeerConnection({ iceServers: [] });
+  connection = { pc, channel: null, offering: false, candidates: [] };
+  connections.set(remote, connection);
+  pc.onicecandidate = event => {
+    if (!event.candidate) return;
+    sendSignal(remote, { type: 'candidate', candidate: candidateForSignal(event.candidate) })
+      .catch(error => show(`Signal failed: ${error.message}`));
+  };
+  pc.ondatachannel = event => setChannel(remote, connection, event.channel);
+  pc.onconnectionstatechange = () => {
+    if (pc.connectionState === 'failed') {
+      show(`Device ${remote}: direct LAN connection failed`);
+      closeConnection(remote);
+    } else if (pc.connectionState === 'disconnected') {
+      show(`Device ${remote}: connection lost`);
+      updateSendButton();
+    }
+  };
+  pc.oniceconnectionstatechange = () => {
+    if (['checking', 'disconnected', 'failed'].includes(pc.iceConnectionState)) {
+      show(`Device ${remote}: ICE ${pc.iceConnectionState}`);
+    }
+  };
+  if (initiator) setChannel(remote, connection, pc.createDataChannel('ii', { ordered: true }));
+  return connection;
+}
+
+async function sendSignal(to, message) {
+  await request(`signal?from=${peerId}&to=${to}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(message),
+  });
+}
+
+function descriptionForSignal(description) {
+  if (!II_CLIENT_IP) return { type: description.type, sdp: description.sdp };
+  const sdp = description.sdp.replace(
+    /(a=candidate:[^\r\n]*\s)[A-Za-z0-9-]+\.local(\s+\d+\s+typ host)/g,
+    `$1${II_CLIENT_IP}$2`,
+  );
+  return { type: description.type, sdp };
+}
+
+function candidateForSignal(candidate) {
+  const message = {
+    candidate: candidate.candidate,
+    sdpMid: candidate.sdpMid,
+    sdpMLineIndex: candidate.sdpMLineIndex,
+    usernameFragment: candidate.usernameFragment,
+  };
+  if (II_CLIENT_IP) {
+    message.candidate = message.candidate.replace(
+      /(candidate:[^\r\n]*\s)[A-Za-z0-9-]+\.local(\s+\d+\s+typ host)/g,
+      `$1${II_CLIENT_IP}$2`,
+    );
+  }
+  return message;
+}
+
+async function flushCandidates(connection) {
+  const pending = connection.candidates.splice(0);
+  await Promise.all(pending.map(candidate => connection.pc.addIceCandidate(candidate)));
+}
+
+async function startOffer(remote) {
+  const connection = createConnection(remote, true);
+  if (connection.offering) return;
+  connection.offering = true;
+  try {
+    show(`Connecting to Device ${remote}`);
+    const offer = await connection.pc.createOffer();
+    await connection.pc.setLocalDescription(offer);
+    await sendSignal(remote, { type: 'offer', description: descriptionForSignal(connection.pc.localDescription) });
+  } catch (error) {
+    closeConnection(remote);
+    throw error;
+  } finally {
+    connection.offering = false;
+  }
+}
+
+async function handleSignal(from, message) {
+  if (!message || typeof message.type !== 'string') return;
+  const connection = createConnection(from, false);
+  if (message.type === 'candidate') {
+    if (!message.candidate) return;
+    if (connection.pc.remoteDescription) await connection.pc.addIceCandidate(message.candidate);
+    else connection.candidates.push(message.candidate);
+    return;
+  }
+  if (!message.description) return;
+  if (message.type === 'offer') {
+    await connection.pc.setRemoteDescription(message.description);
+    await flushCandidates(connection);
+    const answer = await connection.pc.createAnswer();
+    await connection.pc.setLocalDescription(answer);
+    await sendSignal(from, { type: 'answer', description: descriptionForSignal(connection.pc.localDescription) });
+    return;
+  }
+  if (message.type === 'answer') {
+    await connection.pc.setRemoteDescription(message.description);
+    await flushCandidates(connection);
+  }
+}
+
+async function pollSignals() {
+  try {
+    const response = await fetch(`signal?id=${peerId}`, { cache: 'no-store' });
+    if (response.status === 404) {
+      show('This room session expired. Reloading...');
+      setTimeout(() => location.reload(), 1000);
+      return;
+    }
+    if (!response.ok) throw new Error((await response.text()) || response.statusText);
+    if (response.status !== 204) {
+      const from = Number(response.headers.get('X-II-From'));
+      await handleSignal(from, JSON.parse(await response.text()));
+    }
+    setTimeout(pollSignals, 0);
+  } catch (error) {
+    show(`Signal failed: ${error.message}`);
+    setTimeout(pollSignals, 500);
+  }
+}
+
+async function refreshPeers() {
+  try {
+    const response = await request(`peers?id=${peerId}`);
+    const peers = await response.json();
+    const active = new Set(peers);
+    for (const [id] of connections) if (!active.has(id)) closeConnection(id);
+    renderPeers(peers);
+    for (const id of peers) {
+      if (peerId < id && !connections.has(id)) {
+        startOffer(id).catch(error => show(`Connect Device ${id}: ${error.message}`));
+      }
+    }
+  } catch (error) {
+    show(`Room unavailable: ${error.message}`);
+  }
+}
+
+function receiveFile(channel, event) {
+  if (typeof event.data === 'string') {
+    let message;
+    try { message = JSON.parse(event.data); } catch { return; }
+    if (message.type === 'file' && typeof message.name === 'string' && Number.isSafeInteger(message.size) && message.size >= 0) {
+      incoming.set(channel, { name: message.name, size: message.size, received: 0, chunks: [] });
+      show(`Receiving ${message.name}`);
+    } else if (message.type === 'end') {
+      const file = incoming.get(channel);
+      if (!file || file.received !== file.size) {
+        show('Received file was incomplete');
+        return;
+      }
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(new Blob(file.chunks));
+      link.download = file.name || 'download';
+      link.textContent = `Download ${file.name}`;
+      link.addEventListener('click', () => setTimeout(() => URL.revokeObjectURL(link.href), 1000), { once: true });
+      status.replaceChildren(document.createTextNode(`Received ${file.name}. `), link);
+      link.click();
+      incoming.delete(channel);
+    }
+    return;
+  }
+  const file = incoming.get(channel);
+  if (!file || !(event.data instanceof ArrayBuffer)) return;
+  file.chunks.push(event.data);
+  file.received += event.data.byteLength;
+  if (file.received > file.size) {
+    incoming.delete(channel);
+    show('Received file exceeded its announced size');
+  }
+}
+
+async function waitForBuffer(channel) {
+  while (channel.readyState === 'open' && channel.bufferedAmount > MAX_BUFFERED) await sleep(15);
+  if (channel.readyState !== 'open') throw new Error('data channel closed');
+}
+
+async function sendFiles() {
+  const remote = Number(peerSelect.value);
+  const files = [...filesInput.files];
+  const connection = connections.get(remote);
+  if (!remote || !files.length) return;
+  if (!connection || !connection.channel || connection.channel.readyState !== 'open') {
+    show(`Device ${remote} is not connected yet`);
+    updateSendButton();
+    return;
+  }
+  sendButton.disabled = true;
+  try {
+    for (const file of files) {
+      show(`Sending ${file.name} to Device ${remote}`);
+      connection.channel.send(JSON.stringify({ type: 'file', name: file.name, size: file.size }));
+      for (let offset = 0; offset < file.size; offset += CHUNK_SIZE) {
+        await waitForBuffer(connection.channel);
+        connection.channel.send(await file.slice(offset, offset + CHUNK_SIZE).arrayBuffer());
+      }
+      connection.channel.send(JSON.stringify({ type: 'end' }));
+      show(`Sent ${file.name} to Device ${remote}`);
+    }
+  } catch (error) {
+    show(`Send failed: ${error.message}`);
+  } finally {
+    filesInput.value = '';
+    updateSendButton();
+  }
+}
+
+async function join() {
+  const webRtcError = await webRtcAvailabilityError();
+  if (webRtcError) {
+    selfLabel.textContent = 'WebRTC unavailable';
+    show(webRtcError);
+    return;
+  }
+  try {
+    const response = await request('join', { method: 'POST' });
+    peerId = Number(await response.text());
+    if (!Number.isSafeInteger(peerId) || peerId < 1) throw new Error('invalid peer ID');
+    selfLabel.textContent = `You are Device ${peerId}`;
+    await refreshPeers();
+    pollSignals();
+    setInterval(refreshPeers, 1000);
+    setInterval(() => request(`heartbeat?id=${peerId}`, { method: 'POST' }).catch(() => {}), 10000);
+  } catch (error) {
+    show(`Join failed: ${error.message}`);
+  }
+}
+
+peerSelect.addEventListener('change', updateSendButton);
+sendButton.addEventListener('click', sendFiles);
+join();
+</script>

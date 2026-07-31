@@ -2,9 +2,20 @@
 
 All notable changes to `ii` are documented here. The default Chinese version is [CHANGELOG.md](CHANGELOG.md).
 
-## Unreleased
+## 0.2.0 - 2026-07-31
 
-Nothing yet.
+### Added
+
+- Added `ii webrtc [--token <value>]` for temporary LAN browser-to-browser WebRTC file transfer rooms; it prints a QR code and all IPv4 LAN URLs, keeps file bytes out of the `ii` process, and uses no public STUN/TURN.
+
+### Fixed
+
+- Fixed `ii webrtc` DataChannel setup between mobile browsers when mDNS host candidates could not be resolved or ICE gathering did not finish; signalling now uses the client's LAN IPv4 and trickles candidates immediately.
+- `ii webrtc` now verifies an ICE host candidate before joining; browsers with disabled or blocked WebRTC receive an explicit message instead of only discovering peers without being able to transfer.
+
+### Documentation
+
+- Added [webrtc.md](webrtc.md) covering LAN scope, browser requirements, memory limits, the path token, and unsupported capabilities.
 
 ## 0.1.19 - 2026-07-31
 

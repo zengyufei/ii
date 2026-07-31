@@ -11,6 +11,7 @@ pub struct Cli {
 pub enum Command {
     Send(SendArgs),
     Web(WebArgs),
+    Webrtc(WebrtcArgs),
     Recv(RecvArgs),
     Relay(RelayArgs),
     Doctor,
@@ -45,6 +46,11 @@ pub struct WebArgs {
     pub dir: Option<PathBuf>,
     pub web_token: Option<String>,
     pub web_upload_dir: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct WebrtcArgs {
+    pub web_token: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -147,6 +153,7 @@ where
     let command = match command.as_str() {
         "send" => Command::Send(parse_send(rest)?),
         "web" => Command::Web(parse_web(rest)?),
+        "webrtc" => Command::Webrtc(parse_webrtc(rest)?),
         "recv" => Command::Recv(parse_recv(rest)?),
         "relay" => Command::Relay(parse_relay(rest)?),
         "doctor" => reject_extra("doctor", rest).map(|_| Command::Doctor)?,
@@ -230,6 +237,42 @@ fn parse_web(args: Vec<String>) -> Result<WebArgs, ParseAction> {
                     if out.dir.replace(PathBuf::from(&arg)).is_some() {
                         return Err(ParseAction::error("web accepts only one directory"));
                     }
+                }
+            },
+        }
+    }
+
+    if let Some(token) = out.web_token.as_deref()
+        && !is_valid_web_token(token)
+    {
+        return Err(ParseAction::error(
+            "--token must contain 16 to 128 ASCII letters, digits, '-' or '_'",
+        ));
+    }
+
+    Ok(out)
+}
+
+fn parse_webrtc(args: Vec<String>) -> Result<WebrtcArgs, ParseAction> {
+    let mut out = WebrtcArgs::default();
+    let mut iter = ArgsIter::new(args);
+
+    while let Some(arg) = iter.next() {
+        match split_long_value(&arg) {
+            Some(("token", value)) => out.web_token = Some(value.to_string()),
+            Some((flag, _)) => {
+                return Err(ParseAction::error(format!("unknown option `--{flag}`")));
+            }
+            None => match arg.as_str() {
+                "-h" | "--help" => return Err(ParseAction::help(WEBRTC_HELP)),
+                "--token" => out.web_token = Some(iter.value("--token")?),
+                _ if arg.starts_with('-') => {
+                    return Err(ParseAction::error(format!("unknown option `{arg}`")));
+                }
+                _ => {
+                    return Err(ParseAction::error(
+                        "webrtc does not accept positional arguments",
+                    ));
                 }
             },
         }
@@ -527,6 +570,7 @@ ii file transfer
 Usage:
   ii send [options] [path]
   ii web [directory] [--token <value>] [--path <dir>]
+  ii webrtc [--token <value>]
   ii recv [options] <ticket>
   ii relay [options]
   ii doctor
@@ -565,6 +609,14 @@ Usage:
 Options:
   --token <value>
   --path <dir>
+";
+
+const WEBRTC_HELP: &str = "\
+Usage:
+  ii webrtc [--token <value>]
+
+Options:
+  --token <value>
 ";
 
 const RECV_HELP: &str = "\
@@ -812,6 +864,42 @@ mod tests {
             parse_args(["ii", "send", "file.txt", "--path", "uploads"]),
             Err(ParseAction::Print { code: 2, .. })
         ));
+    }
+
+    #[test]
+    fn webrtc_accepts_optional_token() {
+        let token = "A1b2C3d4E5f6G7h8";
+        for args in [
+            vec!["ii", "webrtc"],
+            vec!["ii", "webrtc", "--token", token],
+            vec!["ii", "webrtc", "--token=A1b2C3d4E5f6G7h8"],
+        ] {
+            let cli = Cli::parse_from(args);
+            match cli.command {
+                Command::Webrtc(args) => {
+                    if args.web_token.is_some() {
+                        assert_eq!(args.web_token.as_deref(), Some(token));
+                    }
+                }
+                _ => panic!("expected webrtc command"),
+            }
+        }
+    }
+
+    #[test]
+    fn webrtc_rejects_invalid_or_unrelated_arguments() {
+        for args in [
+            vec!["ii", "webrtc", "shared"],
+            vec!["ii", "webrtc", "-p"],
+            vec!["ii", "webrtc", "--path", "uploads"],
+            vec!["ii", "webrtc", "--token", "too-short"],
+            vec!["ii", "webrtc", "--token"],
+        ] {
+            assert!(matches!(
+                parse_args(args),
+                Err(ParseAction::Print { code: 2, .. })
+            ));
+        }
     }
 
     #[test]
