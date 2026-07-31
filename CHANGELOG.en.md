@@ -2,6 +2,46 @@
 
 All notable changes to `ii` are documented here. The default Chinese version is [CHANGELOG.md](CHANGELOG.md).
 
+## Unreleased
+
+Nothing yet.
+
+## 0.1.18 - 2026-07-30
+
+### Added
+
+- Added multi-file uploads to the `--web` page, streaming files into `./ii/` under the startup directory and overwriting same-name files.
+- Added the `ii send ... --web --token <value>` path access token; page, download, upload, terminal URLs, and QR codes use the path, while missing or incorrect paths return `404`.
+
+### Documentation
+
+- Updated the Chinese and English READMEs and command manual for web uploads and `--token` usage and limits.
+
+## 0.1.17 - 2026-07-30
+
+### Added
+
+- Added `ii send <file-or-folder> --web` for a temporary LAN HTTP sharing page; terminal and page QR codes are included, and folders download as `.tar` archives.
+- Print the primary LAN URL and remaining physical and virtual adapter IPv4 URLs, with a responsive phone layout.
+
+## 0.1.16 - 2026-07-30
+
+### Fixed
+
+- Fixed platform-specific UPX release handling: clear a stale Windows extraction directory, and pass `--force-macos` when compressing macOS Mach-O binaries.
+
+## 0.1.15 - 2026-07-30
+
+### Changed
+
+- The release workflow continues to report UPX-compressed CLI sizes for all targets, without blocking publication on a size limit.
+
+## 0.1.14 - 2026-07-30
+
+### Changed
+
+- Restricted the release workflow to the three CLI artifacts; fixed Linux and macOS UPX path handling, which had overwritten UPX's reserved environment variable.
+
 ## 0.1.13 - 2026-07-30
 
 ### Added
@@ -18,46 +58,6 @@ All notable changes to `ii` are documented here. The default Chinese version is 
 ### Documentation
 
 - Added FTP and SFTP backend guides and synchronized the English README and full command manual.
-
-## 0.1.14 - 2026-07-30
-
-### Changed
-
-- Restricted the release workflow to the three CLI artifacts; fixed Linux and macOS UPX path handling, which had overwritten UPX's reserved environment variable.
-
-## 0.1.15 - 2026-07-30
-
-### Changed
-
-- The release workflow continues to report UPX-compressed CLI sizes for all targets, without blocking publication on a size limit.
-
-## 0.1.16 - 2026-07-30
-
-### Fixed
-
-- Fixed platform-specific UPX release handling: clear a stale Windows extraction directory, and pass `--force-macos` when compressing macOS Mach-O binaries.
-
-## 0.1.17 - 2026-07-30
-
-### Added
-
-- Added `ii send <file-or-folder> --web` for a temporary LAN HTTP sharing page; terminal and page QR codes are included, and folders download as `.tar` archives.
-- Print the primary LAN URL and remaining physical and virtual adapter IPv4 URLs, with a responsive phone layout.
-
-## 0.1.18 - 2026-07-30
-
-### Added
-
-- Added multi-file uploads to the `--web` page, streaming files into `./ii/` under the startup directory and overwriting same-name files.
-- Added the `ii send ... --web --token <value>` path access token; page, download, upload, terminal URLs, and QR codes use the path, while missing or incorrect paths return `404`.
-
-### Documentation
-
-- Updated the Chinese and English READMEs and command manual for web uploads and `--token` usage and limits.
-
-## Unreleased
-
-Nothing yet.
 
 ## 0.1.12 - 2026-07-17
 
