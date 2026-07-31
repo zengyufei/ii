@@ -37,6 +37,24 @@ All notable changes to `ii` are documented here. The default Chinese version is 
 
 - Fixed platform-specific UPX release handling: clear a stale Windows extraction directory, and pass `--force-macos` when compressing macOS Mach-O binaries.
 
+## 0.1.17 - 2026-07-30
+
+### Added
+
+- Added `ii send <file-or-folder> --web` for a temporary LAN HTTP sharing page; terminal and page QR codes are included, and folders download as `.tar` archives.
+- Print the primary LAN URL and remaining physical and virtual adapter IPv4 URLs, with a responsive phone layout.
+
+## 0.1.18 - 2026-07-30
+
+### Added
+
+- Added multi-file uploads to the `--web` page, streaming files into `./ii/` under the startup directory and overwriting same-name files.
+- Added the `ii send ... --web --token <value>` path access token; page, download, upload, terminal URLs, and QR codes use the path, while missing or incorrect paths return `404`.
+
+### Documentation
+
+- Updated the Chinese and English READMEs and command manual for web uploads and `--token` usage and limits.
+
 ## Unreleased
 
 Nothing yet.
