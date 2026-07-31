@@ -3514,7 +3514,7 @@ dependencies = [
 
 [[package]]
 name = "ii"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "attohttpc",
@@ -3553,7 +3553,7 @@ dependencies = [
 
 [[package]]
 name = "ii-gui"
-version = "0.2.0"
+version = "0.2.1"
 dependencies = [
  "anyhow",
  "ii",

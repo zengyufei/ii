@@ -26,7 +26,7 @@ use rustls::{
 use std::{
     collections::{BTreeMap, VecDeque},
     ffi::OsStr,
-    io::{IsTerminal, Read, Write},
+    io::{IsTerminal, Read, SeekFrom, Write},
     net::{Ipv4Addr, SocketAddr, UdpSocket},
     path::{Component, Path, PathBuf},
     process::{Command, Stdio},
@@ -437,7 +437,20 @@ struct WebRequest {
     method: String,
     target: String,
     content_length: Option<u64>,
+    range: WebRange,
     body: Vec<u8>,
+}
+
+enum WebRange {
+    None,
+    Header(String),
+    Invalid,
+}
+
+enum WebFileRange {
+    Full,
+    Partial { start: u64, end: u64 },
+    Unsatisfiable,
 }
 
 struct WebDirectoryEntry {
@@ -967,8 +980,27 @@ async fn serve_web_connection(mut stream: TcpStream, share: Arc<WebShare>) -> Re
                     share.web_token.as_deref(),
                     path,
                     &request.target,
+                    &request.range,
+                    false,
                 )
                 .await
+            }
+        },
+        "HEAD" => match &share.content {
+            WebContent::Directory { root } => {
+                write_web_directory(
+                    &mut stream,
+                    root,
+                    share.web_token.as_deref(),
+                    path,
+                    &request.target,
+                    &request.range,
+                    true,
+                )
+                .await
+            }
+            WebContent::Download { .. } => {
+                write_web_error(&mut stream, "405 Method Not Allowed", "method not allowed").await
             }
         },
         "POST" if path.starts_with("upload?name=") => {
@@ -1260,6 +1292,7 @@ async fn read_web_request(stream: &mut TcpStream) -> Result<WebRequest> {
     }
 
     let mut content_length = None;
+    let mut range = WebRange::None;
     for line in lines {
         let (name, value) = line.split_once(':').context("request header is invalid")?;
         if name.eq_ignore_ascii_case("content-length") {
@@ -1270,6 +1303,11 @@ async fn read_web_request(stream: &mut TcpStream) -> Result<WebRequest> {
             if content_length.replace(length).is_some() {
                 bail!("Content-Length is duplicated");
             }
+        } else if name.eq_ignore_ascii_case("range") {
+            range = match range {
+                WebRange::None => WebRange::Header(value.trim().to_string()),
+                WebRange::Header(_) | WebRange::Invalid => WebRange::Invalid,
+            };
         }
     }
 
@@ -1277,6 +1315,7 @@ async fn read_web_request(stream: &mut TcpStream) -> Result<WebRequest> {
         method,
         target,
         content_length,
+        range,
         body: request.split_off(header_end),
     })
 }
@@ -1330,6 +1369,8 @@ async fn write_web_directory(
     web_token: Option<&str>,
     path: &str,
     request_target: &str,
+    range: &WebRange,
+    head: bool,
 ) -> Result<()> {
     let Some((target, segments, trailing_slash)) = web_directory_target(root, path).await else {
         return write_web_error(stream, "404 Not Found", "not found").await;
@@ -1347,11 +1388,13 @@ async fn write_web_directory(
             Ok(body) => body,
             Err(_) => return write_web_error(stream, "404 Not Found", "not found").await,
         };
-        return write_web_response(
+        return write_web_response_for_method(
             stream,
             "200 OK",
             "text/html; charset=utf-8",
+            "",
             body.as_bytes(),
+            head,
         )
         .await;
     }
@@ -1363,7 +1406,7 @@ async fn write_web_directory(
         Ok(file) => file,
         Err(_) => return write_web_error(stream, "404 Not Found", "not found").await,
     };
-    write_web_file(stream, file, metadata.len()).await
+    write_web_file(stream, file, &target, metadata.len(), range, head).await
 }
 
 async fn web_directory_target(root: &Path, path: &str) -> Option<(PathBuf, Vec<String>, bool)> {
@@ -1520,19 +1563,145 @@ fn web_upload_controls() -> &'static str {
     "<section class=\"upload\"><input id=\"upload\" type=\"file\" multiple aria-label=\"Upload files\"><button id=\"upload-button\" type=\"button\">Upload</button><output id=\"upload-status\" aria-live=\"polite\"></output></section><script>const input=document.getElementById('upload');const button=document.getElementById('upload-button');const status=document.getElementById('upload-status');button.addEventListener('click',async()=>{const files=[...input.files];if(!files.length)return;button.disabled=true;status.textContent='';for(const file of files){const row=document.createElement('div');row.textContent=file.name;status.append(row);try{const response=await fetch('upload?name='+encodeURIComponent(file.name),{method:'POST',body:file});const text=await response.text();row.textContent=response.ok?text:file.name+': '+text;}catch(error){row.textContent=file.name+': '+error;}}button.disabled=false;input.value='';});</script>"
 }
 
-async fn write_web_file(stream: &mut TcpStream, mut file: fs::File, size: u64) -> Result<()> {
+async fn write_web_file(
+    stream: &mut TcpStream,
+    mut file: fs::File,
+    path: &Path,
+    size: u64,
+    range: &WebRange,
+    head: bool,
+) -> Result<()> {
+    let (status, start, length, range_header) = match web_file_range(range, size) {
+        WebFileRange::Full => ("200 OK", 0, size, String::new()),
+        WebFileRange::Partial { start, end } => (
+            "206 Partial Content",
+            start,
+            end - start + 1,
+            format!("Content-Range: bytes {start}-{end}/{size}\r\n"),
+        ),
+        WebFileRange::Unsatisfiable => {
+            return write_web_response_for_method(
+                stream,
+                "416 Range Not Satisfiable",
+                "text/plain; charset=utf-8",
+                &format!("Accept-Ranges: bytes\r\nContent-Range: bytes */{size}\r\n"),
+                b"",
+                head,
+            )
+            .await;
+        }
+    };
+    file.seek(SeekFrom::Start(start))
+        .await
+        .context("seek web file")?;
+    let headers = format!("Accept-Ranges: bytes\r\n{range_header}");
     let header = format!(
-        "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {size}\r\nConnection: close\r\n\r\n"
+        "HTTP/1.1 {status}\r\nContent-Type: {}\r\n{headers}Content-Length: {length}\r\nConnection: close\r\n\r\n",
+        web_file_content_type(path),
     );
     stream
         .write_all(header.as_bytes())
         .await
         .context("write web file headers")?;
-    io::copy(&mut file, stream)
-        .await
-        .context("write web file")?;
+    if !head {
+        let mut file = file.take(length);
+        io::copy(&mut file, stream)
+            .await
+            .context("write web file")?;
+    }
     stream.shutdown().await.context("finish web file")?;
     Ok(())
+}
+
+fn web_file_range(range: &WebRange, size: u64) -> WebFileRange {
+    let WebRange::Header(value) = range else {
+        return if matches!(range, WebRange::None) {
+            WebFileRange::Full
+        } else {
+            WebFileRange::Unsatisfiable
+        };
+    };
+    let Some(spec) = value.strip_prefix("bytes=") else {
+        return WebFileRange::Unsatisfiable;
+    };
+    if size == 0 || spec.contains(',') {
+        return WebFileRange::Unsatisfiable;
+    }
+    let Some((start, end)) = spec.split_once('-') else {
+        return WebFileRange::Unsatisfiable;
+    };
+    if start.is_empty() {
+        let Ok(suffix) = end.parse::<u64>() else {
+            return WebFileRange::Unsatisfiable;
+        };
+        if suffix == 0 {
+            return WebFileRange::Unsatisfiable;
+        }
+        let start = size.saturating_sub(suffix);
+        return WebFileRange::Partial {
+            start,
+            end: size - 1,
+        };
+    }
+    let Ok(start) = start.parse::<u64>() else {
+        return WebFileRange::Unsatisfiable;
+    };
+    if start >= size {
+        return WebFileRange::Unsatisfiable;
+    }
+    let end = if end.is_empty() {
+        size - 1
+    } else {
+        let Ok(end) = end.parse::<u64>() else {
+            return WebFileRange::Unsatisfiable;
+        };
+        if start > end {
+            return WebFileRange::Unsatisfiable;
+        }
+        end.min(size - 1)
+    };
+    WebFileRange::Partial { start, end }
+}
+
+fn web_file_content_type(path: &Path) -> &'static str {
+    let extension = path.extension().and_then(OsStr::to_str).unwrap_or_default();
+    if extension.eq_ignore_ascii_case("mp4") || extension.eq_ignore_ascii_case("m4v") {
+        "video/mp4"
+    } else if extension.eq_ignore_ascii_case("mov") {
+        "video/quicktime"
+    } else if extension.eq_ignore_ascii_case("webm") {
+        "video/webm"
+    } else if extension.eq_ignore_ascii_case("ogv") {
+        "video/ogg"
+    } else if extension.eq_ignore_ascii_case("ogg") {
+        "audio/ogg"
+    } else if extension.eq_ignore_ascii_case("mp3") {
+        "audio/mpeg"
+    } else if extension.eq_ignore_ascii_case("m4a") {
+        "audio/mp4"
+    } else if extension.eq_ignore_ascii_case("aac") {
+        "audio/aac"
+    } else if extension.eq_ignore_ascii_case("wav") {
+        "audio/wav"
+    } else if extension.eq_ignore_ascii_case("opus") {
+        "audio/opus"
+    } else if extension.eq_ignore_ascii_case("pdf") {
+        "application/pdf"
+    } else if extension.eq_ignore_ascii_case("png") {
+        "image/png"
+    } else if extension.eq_ignore_ascii_case("jpg") || extension.eq_ignore_ascii_case("jpeg") {
+        "image/jpeg"
+    } else if extension.eq_ignore_ascii_case("gif") {
+        "image/gif"
+    } else if extension.eq_ignore_ascii_case("webp") {
+        "image/webp"
+    } else if extension.eq_ignore_ascii_case("svg") {
+        "image/svg+xml"
+    } else if extension.eq_ignore_ascii_case("avif") {
+        "image/avif"
+    } else {
+        "application/octet-stream"
+    }
 }
 
 async fn write_web_redirect(stream: &mut TcpStream, location: &str) -> Result<()> {
@@ -1672,6 +1841,30 @@ async fn write_web_response(
     body: &[u8],
 ) -> Result<()> {
     write_web_response_with_headers(stream, status, content_type, "", body).await
+}
+
+async fn write_web_response_for_method(
+    stream: &mut TcpStream,
+    status: &str,
+    content_type: &str,
+    headers: &str,
+    body: &[u8],
+    head: bool,
+) -> Result<()> {
+    if head {
+        let header = format!(
+            "HTTP/1.1 {status}\r\nContent-Type: {content_type}\r\n{headers}Content-Length: {}\r\nConnection: close\r\n\r\n",
+            body.len(),
+        );
+        stream
+            .write_all(header.as_bytes())
+            .await
+            .context("write web headers")?;
+        stream.shutdown().await.context("finish web response")?;
+        Ok(())
+    } else {
+        write_web_response_with_headers(stream, status, content_type, headers, body).await
+    }
 }
 
 async fn write_web_response_with_headers(
@@ -4641,6 +4834,7 @@ mod tests {
         let download = web_request(address, "/download").await;
         assert!(download.starts_with(b"HTTP/1.1 200 OK"));
         assert!(download.ends_with(b"web payload"));
+        assert_eq!(web_response_header(&download, "Accept-Ranges"), None);
         server.await.unwrap();
     }
 
@@ -4859,6 +5053,113 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn web_directory_files_support_ranges_head_and_token_routes() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("shared");
+        let upload_dir = temp.path().join("uploads");
+        let token = "A1b2C3d4E5f6G7h8";
+        std::fs::create_dir(&root).unwrap();
+        std::fs::write(root.join("range.mp4"), b"0123456789").unwrap();
+        std::fs::write(root.join("empty.bin"), b"").unwrap();
+        let share = Arc::new(WebShare {
+            content: WebContent::Directory {
+                root: fs::canonicalize(&root).await.unwrap(),
+            },
+            upload_dir,
+            web_token: Some(token.to_string()),
+        });
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            for _ in 0..13 {
+                let (stream, _) = listener.accept().await.unwrap();
+                let share = Arc::clone(&share);
+                tokio::spawn(async move { serve_web_connection(stream, share).await.unwrap() });
+            }
+        });
+        let path = format!("/{token}/range.mp4");
+
+        let full = web_request(address, &path).await;
+        assert!(full.starts_with(b"HTTP/1.1 200 OK"));
+        assert_eq!(
+            web_response_header(&full, "Content-Type"),
+            Some("video/mp4")
+        );
+        assert_eq!(web_response_header(&full, "Accept-Ranges"), Some("bytes"));
+        assert_eq!(web_response_header(&full, "Content-Length"), Some("10"));
+        assert_eq!(web_response_body(&full), b"0123456789");
+
+        let head = web_request_with_headers(address, "HEAD", &path, "").await;
+        assert!(head.starts_with(b"HTTP/1.1 200 OK"));
+        assert_eq!(web_response_header(&head, "Content-Length"), Some("10"));
+        assert_eq!(web_response_body(&head), b"");
+
+        let fixed = web_request_with_headers(address, "GET", &path, "Range: bytes=2-5\r\n").await;
+        assert!(fixed.starts_with(b"HTTP/1.1 206 Partial Content"));
+        assert_eq!(web_response_header(&fixed, "Content-Length"), Some("4"));
+        assert_eq!(
+            web_response_header(&fixed, "Content-Range"),
+            Some("bytes 2-5/10")
+        );
+        assert_eq!(web_response_body(&fixed), b"2345");
+
+        let partial_head =
+            web_request_with_headers(address, "HEAD", &path, "Range: bytes=2-5\r\n").await;
+        assert!(partial_head.starts_with(b"HTTP/1.1 206 Partial Content"));
+        assert_eq!(
+            web_response_header(&partial_head, "Content-Range"),
+            Some("bytes 2-5/10")
+        );
+        assert_eq!(web_response_body(&partial_head), b"");
+
+        for (range, content_range, body) in [
+            ("bytes=7-", "bytes 7-9/10", b"789".as_slice()),
+            ("bytes=-3", "bytes 7-9/10", b"789".as_slice()),
+            ("bytes=8-99", "bytes 8-9/10", b"89".as_slice()),
+        ] {
+            let response =
+                web_request_with_headers(address, "GET", &path, &format!("Range: {range}\r\n"))
+                    .await;
+            assert!(
+                response.starts_with(b"HTTP/1.1 206 Partial Content"),
+                "{range}"
+            );
+            assert_eq!(
+                web_response_header(&response, "Content-Range"),
+                Some(content_range)
+            );
+            assert_eq!(web_response_body(&response), body);
+        }
+
+        let empty_path = format!("/{token}/empty.bin");
+        for (path, headers, size) in [
+            (&path, "Range: bytes=10-10\r\n", "10"),
+            (&path, "Range: bytes=6-5\r\n", "10"),
+            (&path, "Range: bytes=bad-\r\n", "10"),
+            (&path, "Range: bytes=0-1,2-3\r\n", "10"),
+            (&path, "Range: bytes=0-1\r\nRange: bytes=2-3\r\n", "10"),
+            (&empty_path, "Range: bytes=0-0\r\n", "0"),
+        ] {
+            let response = web_request_with_headers(address, "GET", path, headers).await;
+            assert!(
+                response.starts_with(b"HTTP/1.1 416 Range Not Satisfiable"),
+                "{headers}"
+            );
+            let content_range = format!("bytes */{size}");
+            assert_eq!(
+                web_response_header(&response, "Content-Range"),
+                Some(content_range.as_str())
+            );
+            assert_eq!(
+                web_response_header(&response, "Accept-Ranges"),
+                Some("bytes")
+            );
+            assert_eq!(web_response_body(&response), b"");
+        }
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
     async fn web_directory_token_scopes_browsing_and_uploads() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join("shared");
@@ -5063,6 +5364,20 @@ mod tests {
             web_directory_href(&["nested".to_string(), "two words".to_string()], true),
             "nested/two%20words/"
         );
+    }
+
+    #[test]
+    fn web_file_content_types_cover_media_documents_and_images() {
+        for (path, content_type) in [
+            ("movie.MP4", "video/mp4"),
+            ("movie.webm", "video/webm"),
+            ("song.mp3", "audio/mpeg"),
+            ("document.pdf", "application/pdf"),
+            ("image.png", "image/png"),
+            ("unknown.data", "application/octet-stream"),
+        ] {
+            assert_eq!(web_file_content_type(Path::new(path)), content_type);
+        }
     }
 
     #[test]
@@ -5285,9 +5600,18 @@ mod tests {
     }
 
     async fn web_request(address: SocketAddr, path: &str) -> Vec<u8> {
+        web_request_with_headers(address, "GET", path, "").await
+    }
+
+    async fn web_request_with_headers(
+        address: SocketAddr,
+        method: &str,
+        path: &str,
+        headers: &str,
+    ) -> Vec<u8> {
         web_raw_request(
             address,
-            format!("GET {path} HTTP/1.1\r\nHost: test\r\n\r\n").as_bytes(),
+            format!("{method} {path} HTTP/1.1\r\nHost: test\r\n{headers}\r\n").as_bytes(),
         )
         .await
     }
@@ -5327,6 +5651,30 @@ mod tests {
         })
         .await
         .unwrap()
+    }
+
+    fn web_response_header<'a>(response: &'a [u8], name: &str) -> Option<&'a str> {
+        let header_end = response
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")?;
+        std::str::from_utf8(&response[..header_end])
+            .ok()?
+            .split("\r\n")
+            .skip(1)
+            .find_map(|line| {
+                let (header_name, value) = line.split_once(':')?;
+                header_name
+                    .eq_ignore_ascii_case(name)
+                    .then_some(value.trim())
+            })
+    }
+
+    fn web_response_body(response: &[u8]) -> &[u8] {
+        let header_end = response
+            .windows(4)
+            .position(|window| window == b"\r\n\r\n")
+            .expect("response headers");
+        &response[header_end + 4..]
     }
 
     #[derive(Default)]

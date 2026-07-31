@@ -2,6 +2,12 @@
 
 All notable changes to `ii` are documented here. The default Chinese version is [CHANGELOG.md](CHANGELOG.md).
 
+## 0.2.1 - 2026-07-31
+
+### Added
+
+- Added HTTP single-range, `HEAD`, and common media/PDF/image MIME responses for normal `ii web` files, enabling native browser playback and resumable downloads.
+
 ## 0.2.0 - 2026-07-31
 
 ### Added
