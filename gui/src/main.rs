@@ -7,8 +7,8 @@ use ii::{
     transfer::TransferEvent,
 };
 use queue::{QueueDb, QueueTask, gui_data_dir, unix_time};
-use slint::{ComponentHandle, Model, ModelRc, SharedString, Timer, TimerMode, VecModel};
 use slint::winit_030::{EventResult, WinitWindowAccessor, winit};
+use slint::{ComponentHandle, Model, ModelRc, SharedString, Timer, TimerMode, VecModel};
 use std::{
     cell::RefCell,
     collections::BTreeMap,
@@ -149,65 +149,67 @@ fn install_titlebar_drag(window: &MainWindow) {
     let last_pointer = Rc::new(RefCell::new(None::<winit::dpi::PhysicalPosition<f64>>));
     let pointer_for_events = Rc::clone(&last_pointer);
 
-    window.window().on_winit_window_event(move |slint_window, event| {
-        match event {
-            winit::event::WindowEvent::CursorMoved { position, .. } => {
-                *pointer_for_events.borrow_mut() = Some(*position);
-                let _ = slint_window.with_winit_window(|native| {
-                    let direction = (!native.is_maximized())
-                        .then(|| {
-                            resize_direction_at(
-                                *position,
-                                native.inner_size(),
-                                native.scale_factor(),
-                            )
-                        })
-                        .flatten();
-                    native.set_cursor(
-                        direction
-                            .map(winit::window::CursorIcon::from)
-                            .unwrap_or(winit::window::CursorIcon::Default),
-                    );
-                });
-            }
-            winit::event::WindowEvent::MouseInput {
-                state: winit::event::ElementState::Pressed,
-                button: winit::event::MouseButton::Left,
-                ..
-            } => {
-                let Some(pointer) = *pointer_for_events.borrow() else {
-                    return EventResult::Propagate;
-                };
-                let started = slint_window
-                    .with_winit_window(|native| {
-                        if native.is_maximized() {
-                            return false;
-                        }
-                        let scale_factor = native.scale_factor();
-                        if let Some(direction) =
-                            resize_direction_at(pointer, native.inner_size(), scale_factor)
-                        {
-                            return native.drag_resize_window(direction).is_ok();
-                        }
-                        let width = f64::from(native.inner_size().width);
-                        if pointer.y <= 48.0 * scale_factor
-                            && pointer.x >= 330.0 * scale_factor
-                            && pointer.x < width - 430.0 * scale_factor
-                        {
-                            native.drag_window().is_ok()
-                        } else {
-                            false
-                        }
-                    })
-                    .unwrap_or(false);
-                if started {
-                    return EventResult::PreventDefault;
+    window
+        .window()
+        .on_winit_window_event(move |slint_window, event| {
+            match event {
+                winit::event::WindowEvent::CursorMoved { position, .. } => {
+                    *pointer_for_events.borrow_mut() = Some(*position);
+                    let _ = slint_window.with_winit_window(|native| {
+                        let direction = (!native.is_maximized())
+                            .then(|| {
+                                resize_direction_at(
+                                    *position,
+                                    native.inner_size(),
+                                    native.scale_factor(),
+                                )
+                            })
+                            .flatten();
+                        native.set_cursor(
+                            direction
+                                .map(winit::window::CursorIcon::from)
+                                .unwrap_or(winit::window::CursorIcon::Default),
+                        );
+                    });
                 }
+                winit::event::WindowEvent::MouseInput {
+                    state: winit::event::ElementState::Pressed,
+                    button: winit::event::MouseButton::Left,
+                    ..
+                } => {
+                    let Some(pointer) = *pointer_for_events.borrow() else {
+                        return EventResult::Propagate;
+                    };
+                    let started = slint_window
+                        .with_winit_window(|native| {
+                            if native.is_maximized() {
+                                return false;
+                            }
+                            let scale_factor = native.scale_factor();
+                            if let Some(direction) =
+                                resize_direction_at(pointer, native.inner_size(), scale_factor)
+                            {
+                                return native.drag_resize_window(direction).is_ok();
+                            }
+                            let width = f64::from(native.inner_size().width);
+                            if pointer.y <= 48.0 * scale_factor
+                                && pointer.x >= 330.0 * scale_factor
+                                && pointer.x < width - 430.0 * scale_factor
+                            {
+                                native.drag_window().is_ok()
+                            } else {
+                                false
+                            }
+                        })
+                        .unwrap_or(false);
+                    if started {
+                        return EventResult::PreventDefault;
+                    }
+                }
+                _ => {}
             }
-            _ => {}
-        }
-        EventResult::Propagate
-    });
+            EventResult::Propagate
+        });
 }
 
 fn resize_direction_at(
@@ -260,7 +262,9 @@ fn install_file_dialogs(window: &MainWindow) {
 
 fn send_source_summary(path: &Path) -> String {
     match path.metadata() {
-        Ok(metadata) if metadata.is_file() => format!("{} · 已选择", format_file_size(metadata.len())),
+        Ok(metadata) if metadata.is_file() => {
+            format!("{} · 已选择", format_file_size(metadata.len()))
+        }
         Ok(metadata) if metadata.is_dir() => "文件夹 · 已选择".into(),
         _ => "已选择".into(),
     }
@@ -387,14 +391,14 @@ fn install_queue_handlers(window: &MainWindow, state: Rc<RefCell<AppState>>) {
                 Ok(tasks) => match tasks.into_iter().find(|task| task.id == id.as_str()) {
                     Some(task) => {
                         window.set_detail_name(task.name.into());
-                        window.set_detail_text(format!("{} · {}", task.direction, task.status).into());
-                        window.set_detail_ticket(
-                            if task.ticket.is_empty() {
-                                "传输码尚未创建".into()
-                            } else {
-                                task.ticket.into()
-                            },
+                        window.set_detail_text(
+                            format!("{} · {}", task.direction, task.status).into(),
                         );
+                        window.set_detail_ticket(if task.ticket.is_empty() {
+                            "传输码尚未创建".into()
+                        } else {
+                            task.ticket.into()
+                        });
                         window.set_detail_method(task.method.into());
                         window.set_detail_progress(task.progress.into());
                         window.set_detail_time(format!("创建于 {}", task.created_at).into());
@@ -518,11 +522,8 @@ fn install_transfer_handlers(
             window.set_status_text("请选择发送内容和发送方式。".into());
             return;
         }
-        let args = match build_send_args(
-            &state_for_send.borrow().config,
-            path.clone(),
-            &selection,
-        ) {
+        let args = match build_send_args(&state_for_send.borrow().config, path.clone(), &selection)
+        {
             Ok(args) => args,
             Err(err) => {
                 window.set_status_text(format!("无法创建发送任务：{err:#}").into());
@@ -1216,11 +1217,18 @@ mod tests {
         let definition = ui
             .split("component TitleBarButton inherits Rectangle {")
             .nth(1)
-            .and_then(|rest| rest.split("component ListButton inherits Rectangle {").next())
+            .and_then(|rest| {
+                rest.split("component ListButton inherits Rectangle {")
+                    .next()
+            })
             .expect("title bar control component");
 
         assert!(definition.lines().any(|line| line.trim() == "Text {"));
-        assert!(definition.lines().any(|line| line.trim() == "touch := TouchArea {"));
+        assert!(
+            definition
+                .lines()
+                .any(|line| line.trim() == "touch := TouchArea {")
+        );
         assert!(definition.matches("width: parent.width;").count() >= 2);
         assert!(definition.contains("Rectangle { x: 0px; y: 0px; width: 1px;"));
         assert!(!definition.contains("x: parent.width"));
@@ -1237,7 +1245,10 @@ mod tests {
         let label = ui
             .split("component SendFormLabel inherits Text {")
             .nth(1)
-            .and_then(|rest| rest.split("component SendProfileField inherits Rectangle {").next())
+            .and_then(|rest| {
+                rest.split("component SendProfileField inherits Rectangle {")
+                    .next()
+            })
             .expect("shared compact send form label");
 
         assert!(label.contains("width: 70px;"));
