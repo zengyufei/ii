@@ -5678,6 +5678,20 @@ mod tests {
             page.windows(b"type=\"file\" multiple".len())
                 .any(|part| part == b"type=\"file\" multiple")
         );
+        for marker in [
+            b"id=\"message\"".as_slice(),
+            b"id=\"received-messages\"".as_slice(),
+            b"Send message".as_slice(),
+            b"message-copy".as_slice(),
+            b"TEXT_CHUNK_SIZE = 8 * 1024".as_slice(),
+            b"type: 'text'".as_slice(),
+            b"type: 'text-end'".as_slice(),
+            b"TextDecoder('utf-8', { fatal: true })".as_slice(),
+            b"navigator.clipboard".as_slice(),
+            b"document.execCommand('copy')".as_slice(),
+        ] {
+            assert!(page.windows(marker.len()).any(|part| part == marker));
+        }
         assert!(
             page.windows(b"signal?from=${peerId}&to=${to}".len())
                 .any(|part| part == b"signal?from=${peerId}&to=${to}")

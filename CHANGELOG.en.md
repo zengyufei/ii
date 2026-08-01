@@ -2,6 +2,12 @@
 
 All notable changes to `ii` are documented here. The default Chinese version is [CHANGELOG.md](CHANGELOG.md).
 
+## 0.2.3 - 2026-08-01
+
+### Added
+
+- `ii webrtc` now sends text to the selected device; long text is split into UTF-8 byte chunks no larger than 1 MiB, reassembled as one received message, and can be copied without storing chat history.
+
 ## 0.2.2 - 2026-08-01
 
 ### Added

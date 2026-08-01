@@ -146,7 +146,7 @@ ii tunnel -s 127.0.0.1:22
 
 `ii web` 不带路径时服务启动命令的当前目录；带路径时只接受已有目录。网页提供 nginx 风格的递归目录浏览、普通文件访问和多文件上传，终端输出同样有二维码、主 IPv4 LAN URL 与 `other:` 网卡 URL，但目录网页不显示二维码。`--token` 与 `--path` 的规则和 `ii send ... --web` 相同，`-p` 不适用于 `ii web`。
 
-`ii webrtc` 开一个局域网浏览器直传房间。终端输出二维码、主 IPv4 LAN URL 与 `other:` 网卡 URL；打开同一 URL 的浏览器会自动显示为临时设备编号，可选择另一个在线设备并发送多个独立文件。文件通过浏览器 WebRTC DataChannel 两端直传，不经过 `ii` 进程，也不会写入启动机器。页面会先实际测试浏览器能否创建 ICE host candidate；浏览器禁用或阻止 WebRTC 时会显示 `WebRTC unavailable`，不会加入房间。它只交换局域网 host candidates，不使用公网 STUN/TURN；网络隔离、防火墙或禁止 P2P 时会连接失败。接收端自动下载，但会先把单个文件聚合在浏览器内存中，因此不适合超出设备可用内存的大文件。可选 `--token <value>` 将页面和信令 URL 固定到路径令牌下。完整说明见 [webrtc.md](webrtc.md)。
+`ii webrtc` 开一个局域网浏览器直传房间。终端输出二维码、主 IPv4 LAN URL 与 `other:` 网卡 URL；打开同一 URL 的浏览器会自动显示为临时设备编号，可选择另一个在线设备并发送多个独立文件或文本消息。文本只发送给当前选中的设备，长文本按 UTF-8 字节以不超过 1 MiB 的分片传输，接收端重组后在当前页面列表显示，并可逐条复制；刷新页面后列表清空，不保存聊天记录。文件通过浏览器 WebRTC DataChannel 两端直传，不经过 `ii` 进程，也不会写入启动机器。页面会先实际测试浏览器能否创建 ICE host candidate；浏览器禁用或阻止 WebRTC 时会显示 `WebRTC unavailable`，不会加入房间。它只交换局域网 host candidates，不使用公网 STUN/TURN；网络隔离、防火墙或禁止 P2P 时会连接失败。接收端自动下载，但会先把单个文件聚合在浏览器内存中，因此不适合超出设备可用内存的大文件。可选 `--token <value>` 将页面和信令 URL 固定到路径令牌下。完整说明见 [webrtc.md](webrtc.md)。
 
 临时转发服务端可访问的 TCP 端口：
 

@@ -9,11 +9,18 @@ h1 { margin: 0 0 .5rem; font-size: 1.5rem; line-height: 1.3; }
 p { margin: .5rem 0 1.5rem; color: #555; line-height: 1.5; }
 .controls { display: grid; gap: .75rem; border-top: 1px solid #ccc; padding-top: 1.5rem; }
 label { font-weight: 600; }
-select, input, button { box-sizing: border-box; width: 100%; min-height: 3rem; padding: .625rem; border: 1px solid #999; border-radius: .25rem; background: #fff; color: #171717; font: inherit; }
+select, input, textarea, button { box-sizing: border-box; width: 100%; min-height: 3rem; padding: .625rem; border: 1px solid #999; border-radius: .25rem; background: #fff; color: #171717; font: inherit; }
+textarea { min-height: 7rem; resize: vertical; }
 button { border: 0; background: #1769aa; color: #fff; font-weight: 600; }
 button:disabled { opacity: .6; }
 output { display: block; min-height: 1.5rem; overflow-wrap: anywhere; color: #555; font-size: .875rem; line-height: 1.4; }
 output a { color: #1769aa; font-weight: 600; }
+.messages { display: grid; gap: .75rem; margin-top: 1.5rem; border-top: 1px solid #ccc; padding-top: 1.5rem; }
+.message-list { display: grid; gap: .75rem; max-height: 24rem; overflow-y: auto; }
+.message { display: grid; gap: .5rem; border: 1px solid #ccc; padding: .75rem; background: #fff; }
+.message-meta { color: #555; font-size: .875rem; }
+.message-text { margin: 0; overflow-wrap: anywhere; white-space: pre-wrap; font: inherit; }
+.message-copy { width: auto; min-height: 2.25rem; justify-self: start; padding: .4rem .75rem; }
 @media (max-width: 30rem) { main { padding: 1.5rem 1rem 2rem; } h1 { font-size: 1.25rem; } }
 </style>
 <main>
@@ -24,21 +31,34 @@ output a { color: #1769aa; font-weight: 600; }
     <select id="peer" disabled><option>No other devices</option></select>
     <input id="files" type="file" multiple aria-label="Choose files">
     <button id="send" type="button" disabled>Send</button>
+    <label for="message">Text message</label>
+    <textarea id="message" rows="4" placeholder="Write a message" aria-label="Text message"></textarea>
+    <button id="send-message" type="button" disabled>Send message</button>
     <output id="status" aria-live="polite">Direct LAN transfer only. Large received files use browser memory before download.</output>
   </div>
+  <section class="messages" aria-labelledby="messages-title">
+    <label id="messages-title" for="received-messages">Received messages</label>
+    <div id="received-messages" class="message-list" role="log" aria-live="polite"></div>
+  </section>
 </main>
 <script>
 const CHUNK_SIZE = 16 * 1024;
+const TEXT_CHUNK_SIZE = 8 * 1024;
 const MAX_BUFFERED = 512 * 1024;
 const II_CLIENT_IP = '__II_CLIENT_IP__';
 const peerSelect = document.getElementById('peer');
 const filesInput = document.getElementById('files');
 const sendButton = document.getElementById('send');
+const messageInput = document.getElementById('message');
+const sendMessageButton = document.getElementById('send-message');
 const selfLabel = document.getElementById('self');
 const status = document.getElementById('status');
+const receivedMessages = document.getElementById('received-messages');
 let peerId = 0;
+let textSequence = 0;
 const connections = new Map();
 const incoming = new WeakMap();
+const incomingText = new WeakMap();
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
@@ -78,7 +98,10 @@ async function webRtcAvailabilityError() {
 
 function updateSendButton() {
   const connection = connections.get(Number(peerSelect.value));
-  sendButton.disabled = !connection || !connection.channel || connection.channel.readyState !== 'open';
+  const ready = connection && connection.channel && connection.channel.readyState === 'open';
+  const busy = connection && connection.sending;
+  sendButton.disabled = !ready || busy;
+  sendMessageButton.disabled = !ready || busy || !messageInput.value.length;
 }
 
 async function request(path, options = {}) {
@@ -129,7 +152,7 @@ function setChannel(remote, connection, channel) {
     updateSendButton();
   };
   channel.onerror = () => show(`Connection to Device ${remote} failed`);
-  channel.onmessage = event => receiveFile(channel, event);
+  channel.onmessage = event => receiveChannelMessage(remote, channel, event);
 }
 
 function createConnection(remote, initiator) {
@@ -137,7 +160,7 @@ function createConnection(remote, initiator) {
   if (connection) return connection;
 
   const pc = new RTCPeerConnection({ iceServers: [] });
-  connection = { pc, channel: null, offering: false, candidates: [] };
+  connection = { pc, channel: null, offering: false, candidates: [], sending: false };
   connections.set(remote, connection);
   pc.onicecandidate = event => {
     if (!event.candidate) return;
@@ -279,11 +302,96 @@ async function refreshPeers() {
   }
 }
 
-function receiveFile(channel, event) {
+function appendReceivedMessage(remote, text) {
+  const item = document.createElement('article');
+  item.className = 'message';
+  const meta = document.createElement('div');
+  meta.className = 'message-meta';
+  meta.textContent = `From Device ${remote}`;
+  const content = document.createElement('pre');
+  content.className = 'message-text';
+  content.textContent = text;
+  const copyButton = document.createElement('button');
+  copyButton.className = 'message-copy';
+  copyButton.type = 'button';
+  copyButton.textContent = 'Copy';
+  copyButton.title = 'Copy this message';
+  copyButton.addEventListener('click', async () => {
+    try {
+      await copyText(text);
+      copyButton.textContent = 'Copied';
+      setTimeout(() => { copyButton.textContent = 'Copy'; }, 1500);
+    } catch {
+      copyButton.textContent = 'Copy failed';
+      setTimeout(() => { copyButton.textContent = 'Copy'; }, 1500);
+    }
+  });
+  item.append(meta, content, copyButton);
+  receivedMessages.append(item);
+  receivedMessages.scrollTop = receivedMessages.scrollHeight;
+}
+
+async function copyText(text) {
+  if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
+    try {
+      await navigator.clipboard.writeText(text);
+      return;
+    } catch {}
+  }
+  const helper = document.createElement('textarea');
+  helper.value = text;
+  helper.setAttribute('readonly', '');
+  helper.style.position = 'fixed';
+  helper.style.opacity = '0';
+  document.body.append(helper);
+  helper.select();
+  const copied = document.execCommand('copy');
+  helper.remove();
+  if (!copied) throw new Error('clipboard unavailable');
+}
+
+function finishReceivedText(remote, channel, message) {
+  const text = incomingText.get(channel);
+  if (!text || text.id !== message.id) {
+    show('Received text was incomplete');
+    return;
+  }
+  incomingText.delete(channel);
+  if (text.received !== text.size) {
+    show('Received text was incomplete');
+    return;
+  }
+  try {
+    const bytes = new Uint8Array(text.size);
+    let offset = 0;
+    for (const chunk of text.chunks) {
+      bytes.set(chunk, offset);
+      offset += chunk.byteLength;
+    }
+    appendReceivedMessage(remote, new TextDecoder('utf-8', { fatal: true }).decode(bytes));
+  } catch {
+    show('Received text was not valid UTF-8');
+  }
+}
+
+function receiveChannelMessage(remote, channel, event) {
   if (typeof event.data === 'string') {
     let message;
     try { message = JSON.parse(event.data); } catch { return; }
-    if (message.type === 'file' && typeof message.name === 'string' && Number.isSafeInteger(message.size) && message.size >= 0) {
+    if (message.type === 'text' && typeof message.id === 'string' && Number.isSafeInteger(message.size) && message.size >= 0) {
+      if (incoming.get(channel) || incomingText.get(channel)) {
+        show('Received text while another transfer is active');
+        return;
+      }
+      incomingText.set(channel, { id: message.id, size: message.size, received: 0, chunks: [] });
+      show(`Receiving text from Device ${remote}`);
+    } else if (message.type === 'text-end') {
+      finishReceivedText(remote, channel, message);
+    } else if (message.type === 'file' && typeof message.name === 'string' && Number.isSafeInteger(message.size) && message.size >= 0) {
+      if (incomingText.get(channel)) {
+        show('Received file while another transfer is active');
+        return;
+      }
       incoming.set(channel, { name: message.name, size: message.size, received: 0, chunks: [] });
       show(`Receiving ${message.name}`);
     } else if (message.type === 'end') {
@@ -301,6 +409,18 @@ function receiveFile(channel, event) {
       link.click();
       incoming.delete(channel);
     }
+    return;
+  }
+  const text = incomingText.get(channel);
+  if (text && event.data instanceof ArrayBuffer) {
+    const chunk = new Uint8Array(event.data);
+    if (text.received + chunk.byteLength > text.size) {
+      incomingText.delete(channel);
+      show('Received text exceeded its announced size');
+      return;
+    }
+    text.chunks.push(chunk);
+    text.received += chunk.byteLength;
     return;
   }
   const file = incoming.get(channel);
@@ -328,7 +448,8 @@ async function sendFiles() {
     updateSendButton();
     return;
   }
-  sendButton.disabled = true;
+  connection.sending = true;
+  updateSendButton();
   try {
     for (const file of files) {
       show(`Sending ${file.name} to Device ${remote}`);
@@ -344,6 +465,38 @@ async function sendFiles() {
     show(`Send failed: ${error.message}`);
   } finally {
     filesInput.value = '';
+    connection.sending = false;
+    updateSendButton();
+  }
+}
+
+async function sendText() {
+  const remote = Number(peerSelect.value);
+  const value = messageInput.value;
+  const connection = connections.get(remote);
+  if (!remote || !value.length) return;
+  if (!connection || !connection.channel || connection.channel.readyState !== 'open') {
+    show(`Device ${remote} is not connected yet`);
+    updateSendButton();
+    return;
+  }
+  connection.sending = true;
+  updateSendButton();
+  const id = `${peerId}-${Date.now()}-${++textSequence}`;
+  try {
+    const bytes = new TextEncoder().encode(value);
+    connection.channel.send(JSON.stringify({ type: 'text', id, size: bytes.byteLength }));
+    for (let offset = 0; offset < bytes.byteLength; offset += TEXT_CHUNK_SIZE) {
+      await waitForBuffer(connection.channel);
+      connection.channel.send(bytes.slice(offset, offset + TEXT_CHUNK_SIZE));
+    }
+    connection.channel.send(JSON.stringify({ type: 'text-end', id }));
+    messageInput.value = '';
+    show(`Sent text to Device ${remote}`);
+  } catch (error) {
+    show(`Text send failed: ${error.message}`);
+  } finally {
+    connection.sending = false;
     updateSendButton();
   }
 }
@@ -370,6 +523,8 @@ async function join() {
 }
 
 peerSelect.addEventListener('change', updateSendButton);
+messageInput.addEventListener('input', updateSendButton);
 sendButton.addEventListener('click', sendFiles);
+sendMessageButton.addEventListener('click', sendText);
 join();
 </script>

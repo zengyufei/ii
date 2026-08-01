@@ -31,6 +31,7 @@ All measurements use `cargo build -p ii --release --locked` followed by UPX
 | Web upload path and `ii web` directory service | 6,038,016 | 2,180,608 | +11,264 | `cargo test -p ii --locked` (92 tests), `cargo build -p ii --release --locked`, UPX `5.1.0 --best --lzma`, `upx -t` |
 | Browser WebRTC LAN signalling and direct page | 6,068,736 | 2,189,824 | +9,216 | `cargo test -p ii --locked` (96 tests), `cargo build -p ii --release --locked`, UPX `5.1.0 --best --lzma`, `upx -t` |
 | `ii web` Range, media MIME, and HEAD responses | 6,078,464 | 2,194,432 | +4,608 | `cargo test -p ii --locked` (98 tests), `cargo build -p ii --release --locked`, UPX `5.1.0 --best --lzma`, `upx -t` |
+| `ii webrtc` text messages | 6,124,544 | 2,204,672 | +512 | Compared with the same `0.2.2` tunnel baseline (6,120,448 / 2,204,160); `cargo test -p ii --locked` (104 tests), `cargo build -p ii --release --locked`, UPX `5.1.0 --best --lzma`, `upx -t` |
 
 Equivalent release rebuilds have varied by up to `1,536` UPX bytes; the latest
 measurement is recorded with the pinned `5.1.0` packer.
