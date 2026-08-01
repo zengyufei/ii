@@ -15,6 +15,8 @@ use state::{load_or_create as load_or_create_state, paths as relay_paths};
 mod tests {
     use super::*;
     use std::fs;
+    #[cfg(not(target_os = "windows"))]
+    use std::path::PathBuf;
     use tracing::{Level, level_filters::LevelFilter};
     fn unused_local_port() -> u16 {
         std::net::TcpListener::bind("127.0.0.1:0")

@@ -2,6 +2,12 @@
 
 All notable changes to `ii` are documented here. The default Chinese version is [CHANGELOG.md](CHANGELOG.md).
 
+## 0.2.5 - 2026-08-01
+
+### Fixed
+
+- Fixed the missing `PathBuf` import when compiling tests on Unix platforms.
+
 ## 0.2.4 - 2026-08-01
 
 ### Changed
