@@ -4,7 +4,7 @@
 
 ## 一句话
 
-`ii send` 发，`ii recv` 收，`ii web` 开局域网目录，`ii webrtc` 开浏览器直传，`ii relay` 管中继，`ii doctor` 查问题，`ii version` 看版本。
+`ii send` 发，`ii recv` 收，`ii web` 开局域网目录，`ii webrtc` 开浏览器直传，`ii tunnel` 转发 TCP，`ii relay` 管中继，`ii doctor` 查问题，`ii version` 看版本。
 
 ## 命令总览
 
@@ -12,6 +12,8 @@
 ii send [<path>] [--name <name>] [-t] [-c] [-o <path>] [--web [--token <value>] [--path <dir>] | --s3 | --webdav | --ftp | --sftp] [--profile <name>] [-d] [-p] [--local] [--relay <https-url> [-k]] [--no-relay]
 ii web [<目录>] [--token <value>] [--path <目录>]
 ii webrtc [--token <value>]
+ii tunnel -s <target-host:port> [--relay <https-url> [-k]]
+ii tunnel -c <ticket> [--listen <ip:port>]
 ii recv <ticket> [-o <dir>] [--stdout] [--overwrite] [--resume] [--local] [--trace]
 ii relay (--public <https-url> | --tls <domain> --cert <path> --key <path>) [-H <bind-port>]
 ii doctor
@@ -165,6 +167,31 @@ ii webrtc --token A1b2C3d4E5f6G7h8
 `ii` 只在 HTTP 上转发 WebRTC 信令，不接收文件，不写入本机磁盘；文件通过浏览器的可靠、有序 DataChannel 点对点传输。页面加入房间前会实际测试浏览器能否创建 ICE host candidate；浏览器禁用或阻止 WebRTC 时会显示 `WebRTC unavailable`，不会加入房间。它只使用局域网 host candidates，不使用公网 STUN/TURN，也不支持目录、断点续传或 CLI 与浏览器直接传输。访客网络隔离、防火墙、跨网段限制或禁用 P2P 时会无法连接。接收浏览器会把单个文件聚合到内存后再下载，大文件会占用相近大小的内存。完整说明见 [webrtc.md](webrtc.md)。
 
 不带 `--token` 时使用根路径；`--token <value>` 将页面和信令接口固定到 `/<value>/` 下，遗漏或写错返回 `404`。令牌必须为 16 到 128 个 ASCII 字母、数字、`-` 或 `_`。`ii webrtc` 不接受路径、`--path` 或 `-p`。
+
+## `ii tunnel`
+
+```powershell
+# A: A 可访问目标 TCP 服务
+ii tunnel -s 127.0.0.1:22
+
+# B: 使用 A 输出的 ticket
+ii tunnel -c ii1k7v...x9a
+```
+
+`-s <target-host:port>` 在 A 上持续等待连接。目标可以是 A 本机服务、A 所在局域网的 NAS，或 A 能解析的 DNS 主机；目标地址不会写入 ticket。A 会输出 `ii tunnel -c <ticket>`，B 执行它后，本机 TCP 客户端连接 B 的监听地址即可通过加密 Iroh 连接访问 A 的目标服务。每条本地 TCP 连接对应一条 Iroh 双向 stream，同时最多转发 64 条。
+
+`-c <ticket>` 默认监听 `127.0.0.1:8080`；端口不可用时按顺序尝试 `8081` 至 `65535`，并打印实际监听地址。`--listen <ip:port>` 明确指定监听地址，失败直接报错，不自动换端口。默认只允许 B 本机访问；需要让 B 所在局域网设备接入时，显式使用 `--listen 0.0.0.0:端口`。
+
+默认先尝试直连和局域网路径，必要时使用 Iroh 默认 relay。指定 relay 时只在 A 上使用：
+
+```powershell
+ii relay --public https://公网IP:8443
+ii tunnel -s 192.168.1.10:5000 --relay https://公网IP:8443 -k
+```
+
+`--relay <url>` 必须为 `https://主机[:端口]`，使本次 tunnel 强制走该 HTTPS relay；`-k` 仅和 `-s --relay` 同用，接受自签 relay。ticket 会把 relay URL 和自签信任策略带给 B，B 不需要再次配置。relay 只转发加密 Iroh 流量，不会把目标 TCP 端口直接暴露到公网。
+
+ticket 内有一次随机访问密钥。持有 ticket 的设备可以接入，直到 A 按 `Ctrl+C` 停止 tunnel；不要泄露 ticket。首版不支持 UDP、SOCKS、反向 tunnel 或后台守护。
 
 ## `ii recv`
 

@@ -1,6 +1,6 @@
-use std::fmt;
 use std::path::PathBuf;
 use std::process;
+use std::{fmt, net::SocketAddr};
 
 #[derive(Debug)]
 pub struct Cli {
@@ -12,6 +12,7 @@ pub enum Command {
     Send(SendArgs),
     Web(WebArgs),
     Webrtc(WebrtcArgs),
+    Tunnel(TunnelArgs),
     Recv(RecvArgs),
     Relay(RelayArgs),
     Doctor,
@@ -51,6 +52,19 @@ pub struct WebArgs {
 #[derive(Debug, Clone, Default)]
 pub struct WebrtcArgs {
     pub web_token: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub enum TunnelArgs {
+    Serve {
+        target: String,
+        relay: Option<iroh::RelayUrl>,
+        accept_self_signed_relay: bool,
+    },
+    Connect {
+        ticket: String,
+        listen: Option<SocketAddr>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -154,6 +168,7 @@ where
         "send" => Command::Send(parse_send(rest)?),
         "web" => Command::Web(parse_web(rest)?),
         "webrtc" => Command::Webrtc(parse_webrtc(rest)?),
+        "tunnel" => Command::Tunnel(parse_tunnel(rest)?),
         "recv" => Command::Recv(parse_recv(rest)?),
         "relay" => Command::Relay(parse_relay(rest)?),
         "doctor" => reject_extra("doctor", rest).map(|_| Command::Doctor)?,
@@ -287,6 +302,79 @@ fn parse_webrtc(args: Vec<String>) -> Result<WebrtcArgs, ParseAction> {
     }
 
     Ok(out)
+}
+
+fn parse_tunnel(args: Vec<String>) -> Result<TunnelArgs, ParseAction> {
+    let mut serve_target = None;
+    let mut connect_ticket = None;
+    let mut listen = None;
+    let mut relay = None;
+    let mut accept_self_signed_relay = false;
+    let mut iter = ArgsIter::new(args);
+
+    while let Some(arg) = iter.next() {
+        match split_long_value(&arg) {
+            Some(("listen", value)) => listen = Some(parse_listen_addr("--listen", value)?),
+            Some(("relay", value)) => relay = Some(parse_relay_url(value)?),
+            Some((flag, _)) => {
+                return Err(ParseAction::error(format!("unknown option `--{flag}`")));
+            }
+            None => match arg.as_str() {
+                "-h" | "--help" => return Err(ParseAction::help(TUNNEL_HELP)),
+                "-s" => {
+                    if serve_target
+                        .replace(parse_tunnel_target(&iter.value("-s")?)?)
+                        .is_some()
+                    {
+                        return Err(ParseAction::error("tunnel accepts only one -s target"));
+                    }
+                }
+                "-c" => {
+                    if connect_ticket.replace(iter.value("-c")?).is_some() {
+                        return Err(ParseAction::error("tunnel accepts only one -c ticket"));
+                    }
+                }
+                "--listen" => {
+                    listen = Some(parse_listen_addr("--listen", &iter.value("--listen")?)?)
+                }
+                "--relay" => relay = Some(parse_relay_url(&iter.value("--relay")?)?),
+                "-k" => accept_self_signed_relay = true,
+                _ if arg.starts_with('-') => {
+                    return Err(ParseAction::error(format!("unknown option `{arg}`")));
+                }
+                _ => return Err(ParseAction::error(format!("unexpected argument `{arg}`"))),
+            },
+        }
+    }
+
+    match (serve_target, connect_ticket) {
+        (Some(_), Some(_)) => Err(ParseAction::error("-s conflicts with -c")),
+        (Some(target), None) => {
+            if listen.is_some() {
+                return Err(ParseAction::error("--listen requires -c <ticket>"));
+            }
+            if accept_self_signed_relay && relay.is_none() {
+                return Err(ParseAction::error("-k requires -s --relay <https-url>"));
+            }
+            Ok(TunnelArgs::Serve {
+                target,
+                relay,
+                accept_self_signed_relay,
+            })
+        }
+        (None, Some(ticket)) => {
+            if relay.is_some() {
+                return Err(ParseAction::error("--relay requires -s <target-host:port>"));
+            }
+            if accept_self_signed_relay {
+                return Err(ParseAction::error("-k requires -s --relay <https-url>"));
+            }
+            Ok(TunnelArgs::Connect { ticket, listen })
+        }
+        (None, None) => Err(ParseAction::error(
+            "tunnel requires -s <target-host:port> or -c <ticket>",
+        )),
+    }
 }
 
 fn parse_recv(args: Vec<String>) -> Result<RecvArgs, ParseAction> {
@@ -535,6 +623,47 @@ fn parse_port(flag: &str, value: &str) -> Result<u16, ParseAction> {
     Ok(port)
 }
 
+fn parse_listen_addr(flag: &str, value: &str) -> Result<SocketAddr, ParseAction> {
+    let address: SocketAddr = value
+        .parse()
+        .map_err(|_| ParseAction::error(format!("{flag} expects an IP address and port")))?;
+    if address.port() == 0 {
+        return Err(ParseAction::error(format!(
+            "{flag} expects a port from 1 to 65535"
+        )));
+    }
+    Ok(address)
+}
+
+fn parse_tunnel_target(value: &str) -> Result<String, ParseAction> {
+    let (host, port) = if let Some(value) = value.strip_prefix('[') {
+        let (host, port) = value
+            .split_once("]:")
+            .ok_or_else(|| ParseAction::error("-s expects host:port or [IPv6]:port"))?;
+        if host.parse::<std::net::Ipv6Addr>().is_err() {
+            return Err(ParseAction::error("-s has an invalid IPv6 address"));
+        }
+        (host, port)
+    } else {
+        let (host, port) = value
+            .rsplit_once(':')
+            .ok_or_else(|| ParseAction::error("-s expects host:port or [IPv6]:port"))?;
+        if host.contains(':') {
+            return Err(ParseAction::error("IPv6 targets must use [address]:port"));
+        }
+        (host, port)
+    };
+    if host.is_empty()
+        || host
+            .bytes()
+            .any(|byte| byte.is_ascii_whitespace() || byte == b'/')
+    {
+        return Err(ParseAction::error("-s has an invalid target host"));
+    }
+    parse_port("-s", port)?;
+    Ok(value.to_string())
+}
+
 fn split_long_value(arg: &str) -> Option<(&str, &str)> {
     arg.strip_prefix("--")?.split_once('=')
 }
@@ -571,6 +700,7 @@ Usage:
   ii send [options] [path]
   ii web [directory] [--token <value>] [--path <dir>]
   ii webrtc [--token <value>]
+  ii tunnel (-s <target-host:port> | -c <ticket>) [--listen <ip:port>] [--relay <https-url> [-k]]
   ii recv [options] <ticket>
   ii relay [options]
   ii doctor
@@ -617,6 +747,19 @@ Usage:
 
 Options:
   --token <value>
+";
+
+const TUNNEL_HELP: &str = "\
+Usage:
+  ii tunnel -s <target-host:port> [--relay <https-url> [-k]]
+  ii tunnel -c <ticket> [--listen <ip:port>]
+
+Options:
+  -s <target-host:port>  Serve a TCP target reachable from this computer
+  -c <ticket>            Listen locally and connect to a tunnel ticket
+  --listen <ip:port>     Local listener for -c; defaults to the first free 127.0.0.1 port from 8080
+  --relay <https-url>    Force the serving endpoint through this relay
+  -k                     Accept a self-signed --relay certificate
 ";
 
 const RECV_HELP: &str = "\
@@ -899,6 +1042,86 @@ mod tests {
                 parse_args(args),
                 Err(ParseAction::Print { code: 2, .. })
             ));
+        }
+    }
+
+    #[test]
+    fn tunnel_parses_serve_and_connect_modes() {
+        let serve = Cli::parse_from([
+            "ii",
+            "tunnel",
+            "-s",
+            "nas.example.com:22",
+            "--relay",
+            "https://relay.example.com:8443",
+            "-k",
+        ]);
+        match serve.command {
+            Command::Tunnel(TunnelArgs::Serve {
+                target,
+                relay,
+                accept_self_signed_relay,
+            }) => {
+                assert_eq!(target, "nas.example.com:22");
+                assert_eq!(
+                    relay.unwrap().to_string(),
+                    "https://relay.example.com:8443/"
+                );
+                assert!(accept_self_signed_relay);
+            }
+            _ => panic!("expected tunnel serve command"),
+        }
+
+        let connect = Cli::parse_from(["ii", "tunnel", "-c", "ii1ticket", "--listen=0.0.0.0:8022"]);
+        match connect.command {
+            Command::Tunnel(TunnelArgs::Connect { ticket, listen }) => {
+                assert_eq!(ticket, "ii1ticket");
+                assert_eq!(listen.unwrap(), "0.0.0.0:8022".parse().unwrap());
+            }
+            _ => panic!("expected tunnel connect command"),
+        }
+    }
+
+    #[test]
+    fn tunnel_rejects_invalid_mode_combinations_and_addresses() {
+        for args in [
+            vec!["ii", "tunnel"],
+            vec!["ii", "tunnel", "-s", "host:22", "-c", "ii1ticket"],
+            vec![
+                "ii",
+                "tunnel",
+                "-c",
+                "ii1ticket",
+                "--relay",
+                "https://relay.example.com",
+            ],
+            vec![
+                "ii",
+                "tunnel",
+                "-s",
+                "host:22",
+                "--listen",
+                "127.0.0.1:8080",
+            ],
+            vec!["ii", "tunnel", "-s", "host:22", "-k"],
+            vec!["ii", "tunnel", "-s", "::1:22"],
+            vec!["ii", "tunnel", "-s", "host:0"],
+            vec![
+                "ii",
+                "tunnel",
+                "-c",
+                "ii1ticket",
+                "--listen",
+                "localhost:8080",
+            ],
+        ] {
+            assert!(
+                matches!(
+                    parse_args(args.clone()),
+                    Err(ParseAction::Print { code: 2, .. })
+                ),
+                "expected rejection for {args:?}"
+            );
         }
     }
 

@@ -25,7 +25,7 @@
 
 自动找路 / 局域网优先 / 可公网中继或 `--s3` / `--webdav` / `--ftp` / `--sftp` 中继
 
-也可用 `ii send <文件或文件夹> --web` 临时开下载页、`ii web [目录]` 浏览局域网目录，或用 `ii webrtc` 让浏览器局域网直传文件
+也可用 `ii send <文件或文件夹> --web` 临时开下载页、`ii web [目录]` 浏览局域网目录、`ii webrtc` 让浏览器局域网直传文件，或用 `ii tunnel` 临时转发 TCP 端口
 
 断点续收 / 秒传跳过 / 冲突覆盖 / 支持传完清理中转
 
@@ -139,6 +139,7 @@ ii web
 ii web .\shared --token A1b2C3d4E5f6G7h8 --path .\uploads
 ii webrtc
 ii webrtc --token A1b2C3d4E5f6G7h8
+ii tunnel -s 127.0.0.1:22
 ```
 
 命令行会在主局域网 URL 上方显示进入下载页的二维码，并在 `other:` 下列出其余物理和虚拟网卡的 IPv4 URL；下载页顶部的二维码则直达 `/download`，方便手机扫码下载。网页也可以一次上传多个文件，默认写到启动命令当前目录的 `./ii/`；可用 `--path <目录>` 改为直接写入指定目录，相对路径仍以启动目录为基准，目录会在首次上传时创建。不支持上传目录。目录会下载为 `.tar`。按 `Ctrl+C` 关闭服务。可选 `--token <value>` 为网页、下载和上传加路径访问令牌，令牌只能是 16 到 128 个 ASCII 字母、数字、`-` 或 `_`；不带时保持无令牌 URL。该模式没有账号鉴权，只适合临时、可信的局域网。
@@ -146,6 +147,28 @@ ii webrtc --token A1b2C3d4E5f6G7h8
 `ii web` 不带路径时服务启动命令的当前目录；带路径时只接受已有目录。网页提供 nginx 风格的递归目录浏览、普通文件访问和多文件上传，终端输出同样有二维码、主 IPv4 LAN URL 与 `other:` 网卡 URL，但目录网页不显示二维码。`--token` 与 `--path` 的规则和 `ii send ... --web` 相同，`-p` 不适用于 `ii web`。
 
 `ii webrtc` 开一个局域网浏览器直传房间。终端输出二维码、主 IPv4 LAN URL 与 `other:` 网卡 URL；打开同一 URL 的浏览器会自动显示为临时设备编号，可选择另一个在线设备并发送多个独立文件。文件通过浏览器 WebRTC DataChannel 两端直传，不经过 `ii` 进程，也不会写入启动机器。页面会先实际测试浏览器能否创建 ICE host candidate；浏览器禁用或阻止 WebRTC 时会显示 `WebRTC unavailable`，不会加入房间。它只交换局域网 host candidates，不使用公网 STUN/TURN；网络隔离、防火墙或禁止 P2P 时会连接失败。接收端自动下载，但会先把单个文件聚合在浏览器内存中，因此不适合超出设备可用内存的大文件。可选 `--token <value>` 将页面和信令 URL 固定到路径令牌下。完整说明见 [webrtc.md](webrtc.md)。
+
+临时转发服务端可访问的 TCP 端口：
+
+```powershell
+# A: 让持有 ticket 的设备访问 A 可连接的 SSH、NAS 或开发服务
+ii tunnel -s 127.0.0.1:22
+
+# B: 使用 A 输出的 ticket；默认监听 127.0.0.1:8080，8080 被占用会自动试下一个端口
+ii tunnel -c ii1k7v...x9a
+
+# B: 明确暴露给 B 所在局域网的其他设备
+ii tunnel -c ii1k7v...x9a --listen 0.0.0.0:8022
+```
+
+本机连接 B 的监听端口，流量会经 Iroh 加密连接送到 A，再由 A 连接目标 TCP 端口。直连失败时默认可用 Iroh relay；自建公网 relay 时，在 A 上指定它，ticket 会把 relay 和自签信任策略带给 B：
+
+```powershell
+ii relay --public https://公网IP:8443
+ii tunnel -s 192.168.1.10:5000 --relay https://公网IP:8443 -k
+```
+
+relay 只转发加密 Iroh 流量，不会把目标 TCP 端口直接开放到公网。ticket 内含本次 tunnel 的访问密钥，持有者可接入直到 A 停止服务，不要泄露。首版只支持 TCP。
 
 局域网优先，不走公网中继：
 

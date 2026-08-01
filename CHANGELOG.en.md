@@ -2,6 +2,12 @@
 
 All notable changes to `ii` are documented here. The default Chinese version is [CHANGELOG.md](CHANGELOG.md).
 
+## 0.2.2 - 2026-08-01
+
+### Added
+
+- Added `ii tunnel -s <target-host:port>` and `ii tunnel -c <ticket>` for temporary TCP forwarding over existing Iroh direct or relay paths; tickets carry an access key and any explicit relay TLS trust policy.
+
 ## 0.2.1 - 2026-07-31
 
 ### Added

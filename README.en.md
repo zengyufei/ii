@@ -23,7 +23,7 @@
 
 - The sender serves one successful receive by default, then exits
 - It briefly probes for a usable path through complex networks, with S3, WebDAV, FTP, and SFTP backend options
-- `ii send <file-or-folder> --web` opens a temporary LAN download page, `ii web [directory]` browses a LAN directory, and `ii webrtc` transfers files directly between LAN browsers
+- `ii send <file-or-folder> --web` opens a temporary LAN download page, `ii web [directory]` browses a LAN directory, `ii webrtc` transfers files directly between LAN browsers, and `ii tunnel` temporarily forwards TCP ports
 - Receives resume automatically by default
 - Existing files with the same MD5 are skipped
 - Folders can be sent directly
@@ -136,6 +136,7 @@ ii web
 ii web .\shared --token A1b2C3d4E5f6G7h8 --path .\uploads
 ii webrtc
 ii webrtc --token A1b2C3d4E5f6G7h8
+ii tunnel -s 127.0.0.1:22
 ```
 
 The command displays a QR code directly above the primary LAN URL for opening the download page, then lists the remaining physical and virtual adapter IPv4 URLs under `other:`. The QR code at the top of that page points directly to `/download` for phone downloads. The page can also upload multiple files into `./ii/` under the directory where the command started. Use `--path <dir>` to write directly into a different directory; relative paths are based on the startup directory, and the directory is created on the first upload. Directory uploads are not supported. Folders download as `.tar` archives. Press `Ctrl+C` to stop the server. Optional `--token <value>` adds a path access token to the page, download, and upload URLs; it must be 16 to 128 ASCII letters, digits, `-`, or `_`, and omitting it keeps the unprotected URLs. This mode has no account authentication and is intended only for short-lived, trusted LAN sharing.
@@ -143,6 +144,28 @@ The command displays a QR code directly above the primary LAN URL for opening th
 Without a path, `ii web` serves the directory where the command starts; with a path, it accepts only an existing directory. Its page provides recursive nginx-style directory browsing, normal file responses, and multi-file uploads. The terminal still shows the QR code, primary IPv4 LAN URL, and `other:` adapter URLs, but the directory page has no QR code. `--token` and `--path` follow the same rules as `ii send ... --web`; `-p` does not apply to `ii web`.
 
 `ii webrtc` opens a LAN browser-to-browser transfer room. The terminal prints a QR code, the primary IPv4 LAN URL, and `other:` adapter URLs. Browsers that open the same URL receive temporary device numbers, choose another online device, and send multiple independent files. Files travel directly between browser WebRTC DataChannels, never through the `ii` process or its disk. Before joining, the page verifies that the browser can create an ICE host candidate; if WebRTC is disabled or blocked it shows `WebRTC unavailable` and does not join the room. It exchanges host candidates only and has no public STUN/TURN fallback, so client isolation, firewalls, or blocked P2P can prevent connection. Receivers download automatically after buffering each file in browser memory, so it is unsuitable for files larger than the available browser memory. Optional `--token <value>` scopes the page and signalling URLs to a path token. See [webrtc.md](webrtc.md) for details.
+
+Temporarily forward a TCP port that the serving computer can reach:
+
+```powershell
+# A: expose an SSH, NAS, or development service reachable from A
+ii tunnel -s 127.0.0.1:22
+
+# B: use A's ticket. It listens on 127.0.0.1:8080 by default and tries the next port when occupied.
+ii tunnel -c ii1k7v...x9a
+
+# B: deliberately expose B's local listener to its LAN
+ii tunnel -c ii1k7v...x9a --listen 0.0.0.0:8022
+```
+
+Connections to B's listener travel over an encrypted Iroh connection to A, where A connects to the target TCP port. Direct paths are preferred and the default Iroh relay remains available. For a self-hosted public relay, specify it on A; the ticket carries the relay and self-signed trust policy to B:
+
+```powershell
+ii relay --public https://PUBLIC_IP:8443
+ii tunnel -s 192.168.1.10:5000 --relay https://PUBLIC_IP:8443 -k
+```
+
+The relay forwards encrypted Iroh traffic only. It does not expose the target TCP port to the public Internet. The ticket contains this tunnel's bearer access key, so anyone holding it can connect until A stops the service. The first release supports TCP only.
 
 Prefer local network paths and avoid public relays:
 

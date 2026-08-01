@@ -105,6 +105,21 @@ pub struct SftpTicket {
     pub common: TicketCommon,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+pub enum TunnelRelayMode {
+    Default,
+    SelfSignedRelayOnly,
+    TrustedRelayOnly,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct TunnelTicket {
+    pub version: u8,
+    pub endpoint: EndpointAddr,
+    pub access_key: [u8; 32],
+    pub relay_mode: TunnelRelayMode,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum Ticket {
     Peer(PeerTicket),
@@ -114,6 +129,7 @@ pub enum Ticket {
     TrustedRelayOnly(RelayOnlyTicket),
     Ftp(FtpTicket),
     Sftp(SftpTicket),
+    Tunnel(TunnelTicket),
 }
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
@@ -285,6 +301,19 @@ impl Ticket {
         })
     }
 
+    pub fn tunnel(
+        endpoint: EndpointAddr,
+        access_key: [u8; 32],
+        relay_mode: TunnelRelayMode,
+    ) -> Self {
+        Ticket::Tunnel(TunnelTicket {
+            version: 9,
+            endpoint,
+            access_key,
+            relay_mode,
+        })
+    }
+
     pub fn encode(&self) -> Result<String> {
         let bytes = postcard::to_stdvec(self).context("serialize ticket")?;
         Ok(format!("{PREFIX}{}", URL_SAFE_NO_PAD.encode(bytes)))
@@ -306,6 +335,7 @@ impl Ticket {
                 Ticket::TrustedRelayOnly(relay) if relay.version == 6 => return Ok(ticket),
                 Ticket::Ftp(ftp) if ftp.version == 7 => return Ok(ticket),
                 Ticket::Sftp(sftp) if sftp.version == 8 => return Ok(ticket),
+                Ticket::Tunnel(tunnel) if tunnel.version == 9 => return Ok(ticket),
                 Ticket::Peer(peer) if peer.version != 2 => {
                     bail!("unsupported peer ticket version {}", peer.version)
                 }
@@ -329,6 +359,9 @@ impl Ticket {
                 }
                 Ticket::Sftp(sftp) if sftp.version != 8 => {
                     bail!("unsupported sftp ticket version {}", sftp.version)
+                }
+                Ticket::Tunnel(tunnel) if tunnel.version != 9 => {
+                    bail!("unsupported tunnel ticket version {}", tunnel.version)
                 }
                 _ => {}
             }
@@ -366,6 +399,7 @@ impl Ticket {
             Ticket::TrustedRelayOnly(ticket) => &ticket.common,
             Ticket::Ftp(ticket) => &ticket.common,
             Ticket::Sftp(ticket) => &ticket.common,
+            Ticket::Tunnel(_) => unreachable!("tunnel tickets have no file metadata"),
         }
     }
 
@@ -374,6 +408,7 @@ impl Ticket {
             Ticket::Peer(ticket) => Some(&ticket.endpoint),
             Ticket::RelayOnly(ticket) => Some(&ticket.endpoint),
             Ticket::TrustedRelayOnly(ticket) => Some(&ticket.endpoint),
+            Ticket::Tunnel(ticket) => Some(&ticket.endpoint),
             Ticket::S3(_) | Ticket::WebDav(_) | Ticket::Ftp(_) | Ticket::Sftp(_) => None,
         }
     }
@@ -385,7 +420,8 @@ impl Ticket {
             | Ticket::RelayOnly(_)
             | Ticket::TrustedRelayOnly(_)
             | Ticket::Ftp(_)
-            | Ticket::Sftp(_) => None,
+            | Ticket::Sftp(_)
+            | Ticket::Tunnel(_) => None,
             Ticket::S3(ticket) => Some(ticket),
         }
     }
@@ -397,7 +433,8 @@ impl Ticket {
             | Ticket::RelayOnly(_)
             | Ticket::TrustedRelayOnly(_)
             | Ticket::Ftp(_)
-            | Ticket::Sftp(_) => None,
+            | Ticket::Sftp(_)
+            | Ticket::Tunnel(_) => None,
             Ticket::WebDav(ticket) => Some(ticket),
         }
     }
@@ -410,7 +447,8 @@ impl Ticket {
             | Ticket::WebDav(_)
             | Ticket::RelayOnly(_)
             | Ticket::TrustedRelayOnly(_)
-            | Ticket::Sftp(_) => None,
+            | Ticket::Sftp(_)
+            | Ticket::Tunnel(_) => None,
         }
     }
 
@@ -422,7 +460,8 @@ impl Ticket {
             | Ticket::WebDav(_)
             | Ticket::RelayOnly(_)
             | Ticket::TrustedRelayOnly(_)
-            | Ticket::Ftp(_) => None,
+            | Ticket::Ftp(_)
+            | Ticket::Tunnel(_) => None,
         }
     }
 
@@ -432,6 +471,19 @@ impl Ticket {
 
     pub fn is_self_signed_relay_only(&self) -> bool {
         matches!(self, Ticket::RelayOnly(_))
+    }
+
+    pub fn tunnel_route(&self) -> Option<&TunnelTicket> {
+        match self {
+            Ticket::Tunnel(ticket) => Some(ticket),
+            Ticket::Peer(_)
+            | Ticket::S3(_)
+            | Ticket::WebDav(_)
+            | Ticket::RelayOnly(_)
+            | Ticket::TrustedRelayOnly(_)
+            | Ticket::Ftp(_)
+            | Ticket::Sftp(_) => None,
+        }
     }
 
     pub fn name(&self) -> &str {
@@ -648,6 +700,20 @@ mod tests {
             private_key,
             Ticket::decode(&private_key.encode().unwrap()).unwrap()
         );
+    }
+
+    #[test]
+    fn tunnel_ticket_round_trip_preserves_access_key_and_relay_mode() {
+        let endpoint = EndpointAddr::from_parts(
+            SecretKey::generate().public(),
+            [TransportAddr::Relay(
+                "https://relay.example.com:8443".parse().unwrap(),
+            )],
+        );
+        let ticket = Ticket::tunnel(endpoint, [9; 32], TunnelRelayMode::SelfSignedRelayOnly);
+        let decoded = Ticket::decode(&ticket.encode().unwrap()).unwrap();
+        assert_eq!(decoded, ticket);
+        assert!(decoded.tunnel_route().is_some());
     }
 
     #[test]

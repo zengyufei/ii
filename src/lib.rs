@@ -24,6 +24,7 @@ pub async fn run_cli() -> Result<()> {
         Command::Send(args) => transfer::send(args).await?,
         Command::Web(args) => transfer::web(args).await?,
         Command::Webrtc(args) => transfer::webrtc(args).await?,
+        Command::Tunnel(args) => transfer::tunnel(args).await?,
         Command::Recv(args) => transfer::recv(args).await?,
         Command::Relay(args) => relay::run(args).await?,
         Command::Doctor => doctor::run().await?,

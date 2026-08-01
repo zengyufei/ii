@@ -2,6 +2,12 @@
 
 本文件记录 `ii` 的重要变更。默认中文版本在这里，英文版本见 [CHANGELOG.en.md](CHANGELOG.en.md)。
 
+## 0.2.2 - 2026-08-01
+
+### 新增
+
+- 新增 `ii tunnel -s <target-host:port>` 与 `ii tunnel -c <ticket>`，通过现有 Iroh 直连或 relay 临时转发 TCP；ticket 内含访问密钥和指定 relay 的 TLS 信任策略。
+
 ## 0.2.1 - 2026-07-31
 
 ### 新增
