@@ -1,14 +1,19 @@
+pub mod backend;
 pub mod cli;
+pub mod command;
 pub mod doctor;
 pub mod relay;
 pub mod s3;
+pub mod service;
 pub mod storage;
 pub mod ticket;
 pub mod transfer;
+pub mod transport;
+pub mod web;
 pub mod webdav;
 
 use anyhow::Result;
-use cli::{Cli, Command};
+use command::{Cli, Command};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -21,11 +26,11 @@ pub async fn run_cli() -> Result<()> {
 
     let cli = Cli::parse();
     match cli.command {
-        Command::Send(args) => transfer::send(args).await?,
-        Command::Web(args) => transfer::web(args).await?,
-        Command::Webrtc(args) => transfer::webrtc(args).await?,
-        Command::Tunnel(args) => transfer::tunnel(args).await?,
-        Command::Recv(args) => transfer::recv(args).await?,
+        Command::Send(args) => service::send(args).await?,
+        Command::Web(args) => service::web(args).await?,
+        Command::Webrtc(args) => service::webrtc(args).await?,
+        Command::Tunnel(args) => service::tunnel(args).await?,
+        Command::Recv(args) => service::recv(args).await?,
         Command::Relay(args) => relay::run(args).await?,
         Command::Doctor => doctor::run().await?,
         Command::Version => println!("{}", env!("CARGO_PKG_VERSION")),

@@ -2,6 +2,12 @@
 
 All notable changes to `ii` are documented here. The default Chinese version is [CHANGELOG.md](CHANGELOG.md).
 
+## 0.2.4 - 2026-08-01
+
+### Changed
+
+- Split the CLI core into focused command, service, transport, backend, web, ticket, storage, and relay modules while preserving CLI behavior, the GUI facade, ticket encoding, and network protocols.
+
 ## 0.2.3 - 2026-08-01
 
 ### Added
