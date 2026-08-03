@@ -19,18 +19,26 @@ async fn uploads_stream_overwrite_and_reject_invalid_requests() {
             download_name: "hello.txt".to_string(),
             download_qr_svg: web_qr_svg("http://192.168.1.2:3456/download").unwrap(),
         },
-        upload_dir: upload_dir.clone(),
+        upload_dir: Some(upload_dir.clone()),
         web_token: None,
     });
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
     let address = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
-        for _ in 0..5 {
+        for _ in 0..6 {
             let (stream, _) = listener.accept().await.unwrap();
             let share = Arc::clone(&share);
             tokio::spawn(async move { serve_web_connection(stream, share).await.unwrap() });
         }
     });
+
+    let page = request(address, "/").await;
+    for marker in [
+        b"type=\"file\" multiple".as_slice(),
+        b"fetch('upload?name='".as_slice(),
+    ] {
+        assert!(page.windows(marker.len()).any(|part| part == marker));
+    }
 
     for body in [b"first upload".as_slice(), b"second upload".as_slice()] {
         let response = upload_request(address, "notes.txt", body).await;
@@ -81,7 +89,7 @@ async fn upload_reports_directory_creation_failure() {
             download_name: "hello.txt".to_string(),
             download_qr_svg: web_qr_svg("http://192.168.1.2:3456/download").unwrap(),
         },
-        upload_dir: upload_path,
+        upload_dir: Some(upload_path),
         web_token: None,
     });
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();

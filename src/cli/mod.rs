@@ -215,18 +215,78 @@ mod tests {
     }
 
     #[test]
-    fn send_accepts_web_upload_path() {
+    fn bare_web_tokens_are_random_and_preserve_following_options() {
+        let send = Cli::parse_from([
+            "ii", "send", "file.txt", "--web", "--token", "--port", "45123",
+        ]);
+        match send.command {
+            Command::Send(args) => {
+                assert_eq!(args.web_port, Some(45123));
+                assert!(is_valid_web_token(args.web_token.as_deref().unwrap()));
+                assert_eq!(args.web_token.as_deref().unwrap().len(), 32);
+            }
+            _ => panic!("expected send command"),
+        }
+
+        let web = Cli::parse_from(["ii", "web", "shared", "--token", "--path", "uploads"]);
+        match web.command {
+            Command::Web(args) => {
+                assert_eq!(args.dir, Some(PathBuf::from("shared")));
+                assert_eq!(args.web_upload_dir, Some(PathBuf::from("uploads")));
+                assert!(is_valid_web_token(args.web_token.as_deref().unwrap()));
+                assert_eq!(args.web_token.as_deref().unwrap().len(), 32);
+            }
+            _ => panic!("expected web command"),
+        }
+
+        let webrtc = Cli::parse_from(["ii", "webrtc", "--token"]);
+        match webrtc.command {
+            Command::Webrtc(args) => {
+                assert!(is_valid_web_token(args.web_token.as_deref().unwrap()));
+                assert_eq!(args.web_token.as_deref().unwrap().len(), 32);
+            }
+            _ => panic!("expected webrtc command"),
+        }
+    }
+
+    #[test]
+    fn web_upload_is_explicit_and_path_without_it_is_ignored() {
         for args in [
-            vec!["ii", "send", "file.txt", "--web", "--path", "uploads"],
-            vec!["ii", "send", "file.txt", "--web", "--path=uploads"],
+            vec![
+                "ii", "send", "file.txt", "--web", "--upload", "--path", "uploads",
+            ],
+            vec![
+                "ii",
+                "send",
+                "file.txt",
+                "--web",
+                "--upload",
+                "--path=uploads",
+            ],
         ] {
             let cli = Cli::parse_from(args);
             match cli.command {
                 Command::Send(args) => {
+                    assert!(args.web_upload);
                     assert_eq!(args.web_upload_dir, Some(PathBuf::from("uploads")));
                 }
                 _ => panic!("expected send command"),
             }
+        }
+
+        let cli = Cli::parse_from(["ii", "send", "file.txt", "--web", "--path", "uploads"]);
+        match cli.command {
+            Command::Send(args) => {
+                assert!(!args.web_upload);
+                assert_eq!(args.web_upload_dir, Some(PathBuf::from("uploads")));
+            }
+            _ => panic!("expected send command"),
+        }
+
+        let cli = Cli::parse_from(["ii", "web", "shared", "--upload"]);
+        match cli.command {
+            Command::Web(args) => assert!(args.web_upload),
+            _ => panic!("expected web command"),
         }
     }
 
@@ -272,7 +332,8 @@ mod tests {
         for args in [
             vec!["ii", "web"],
             vec![
-                "ii", "web", "shared", "--port", "45123", "--token", token, "--path", "uploads",
+                "ii", "web", "shared", "--port", "45123", "--token", token, "--upload", "--path",
+                "uploads",
             ],
             vec![
                 "ii",
@@ -280,6 +341,7 @@ mod tests {
                 "shared",
                 "--port=45123",
                 "--token=A1b2C3d4E5f6G7h8",
+                "--upload",
                 "--path=uploads",
             ],
         ] {
@@ -290,6 +352,7 @@ mod tests {
                         assert_eq!(args.dir, Some(PathBuf::from("shared")));
                         assert_eq!(args.web_port, Some(45123));
                         assert_eq!(args.web_token.as_deref(), Some(token));
+                        assert!(args.web_upload);
                         assert_eq!(args.web_upload_dir, Some(PathBuf::from("uploads")));
                     }
                 }
@@ -305,7 +368,9 @@ mod tests {
             vec!["ii", "web", "-p"],
             vec!["ii", "web", "--token", "too-short"],
             vec!["ii", "web", "--token", "A1b2C3d4E5f6G7h!"],
-            vec!["ii", "web", "--token"],
+            vec!["ii", "web", "--token="],
+            vec!["ii", "web", "--upload=uploads"],
+            vec!["ii", "web", "--upload", "--upload"],
             vec!["ii", "web", "--path"],
             vec!["ii", "web", "--port"],
             vec!["ii", "web", "--port=0"],
@@ -329,7 +394,6 @@ mod tests {
     fn send_rejects_invalid_web_tokens() {
         for args in [
             vec!["ii", "send", "file.txt", "--token", "A1b2C3d4E5f6G7h8"],
-            vec!["ii", "send", "file.txt", "--web", "--token"],
             vec!["ii", "send", "file.txt", "--web", "--token", "too-short"],
             vec![
                 "ii",
@@ -359,6 +423,8 @@ mod tests {
     fn send_rejects_web_upload_path_without_web() {
         for args in [
             vec!["ii", "send", "file.txt", "--path", "uploads"],
+            vec!["ii", "send", "file.txt", "--upload"],
+            vec!["ii", "send", "file.txt", "--upload=uploads"],
             vec!["ii", "send", "file.txt", "--port", "45123"],
             vec!["ii", "send", "file.txt", "--web", "--port=0"],
             vec!["ii", "send", "file.txt", "--web", "--port=-1"],
@@ -406,7 +472,6 @@ mod tests {
             vec!["ii", "webrtc", "--port=65536"],
             vec!["ii", "webrtc", "--port=nope"],
             vec!["ii", "webrtc", "--token", "too-short"],
-            vec!["ii", "webrtc", "--token"],
         ] {
             assert!(matches!(
                 parse_args(args),

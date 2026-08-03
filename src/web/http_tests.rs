@@ -24,13 +24,13 @@ async fn download_share_serves_page_download_and_token_routes() {
             download_qr_svg: web_qr_svg(&format!("http://192.168.1.2:3456/{token}/download"))
                 .unwrap(),
         },
-        upload_dir,
+        upload_dir: None,
         web_token: Some(token.to_string()),
     });
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
     let address = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
-        for _ in 0..4 {
+        for _ in 0..5 {
             let (stream, _) = listener.accept().await.unwrap();
             let share = Arc::clone(&share);
             tokio::spawn(async move { serve_web_connection(stream, share).await.unwrap() });
@@ -45,16 +45,30 @@ async fn download_share_serves_page_download_and_token_routes() {
         b"name=\"viewport\"".as_slice(),
         b"width:min(82vw,17.5rem)".as_slice(),
         b"href=\"download\"".as_slice(),
+    ] {
+        assert!(page.windows(marker.len()).any(|part| part == marker));
+    }
+    for marker in [
         b"type=\"file\" multiple".as_slice(),
         b"fetch('upload?name='".as_slice(),
     ] {
-        assert!(page.windows(marker.len()).any(|part| part == marker));
+        assert!(!page.windows(marker.len()).any(|part| part == marker));
     }
 
     let download = request(address, &format!("/{token}/download")).await;
     assert!(download.starts_with(b"HTTP/1.1 200 OK"));
     assert!(download.ends_with(b"web payload"));
     assert_eq!(response_header(&download, "Accept-Ranges"), None);
+    assert!(
+        upload_request_at(
+            address,
+            &format!("/{token}/upload?name=notes.txt"),
+            b"blocked upload",
+        )
+        .await
+        .starts_with(b"HTTP/1.1 404 Not Found")
+    );
+    assert!(!upload_dir.exists());
 
     for path in ["/", "/download"] {
         assert!(

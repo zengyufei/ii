@@ -4,8 +4,8 @@ ii file transfer
 Usage:
   ii help [command]
   ii send [options] [path]
-  ii web [directory] [--port <port>] [--token <value>] [--path <dir>]
-  ii webrtc [--port <port>] [--token <value>]
+  ii web [directory] [--port <port>] [--token [value]] [--upload] [--path <dir>]
+  ii webrtc [--port <port>] [--token [value]]
   ii tunnel (-s <target-host:port> | -c <ticket>) [--listen <ip:port>] [--relay <https-url> [-k]]
   ii recv [options] <ticket>
   ii relay [options]
@@ -28,7 +28,8 @@ Options:
   --sftp
   --web
   --port <port>
-  --token <value>
+  --token [value]
+  --upload
   --path <dir>
   -p
   -d
@@ -41,21 +42,22 @@ Options:
 
 pub(crate) const WEB_HELP: &str = "\
 Usage:
-  ii web [directory] [--port <port>] [--token <value>] [--path <dir>]
+  ii web [directory] [--port <port>] [--token [value]] [--upload] [--path <dir>]
 
 Options:
   --port <port>
-  --token <value>
+  --token [value]
+  --upload
   --path <dir>
 ";
 
 pub(crate) const WEBRTC_HELP: &str = "\
 Usage:
-  ii webrtc [--port <port>] [--token <value>]
+  ii webrtc [--port <port>] [--token [value]]
 
 Options:
   --port <port>
-  --token <value>
+  --token [value]
 ";
 
 pub(crate) const TUNNEL_HELP: &str = "\

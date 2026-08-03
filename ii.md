@@ -10,9 +10,9 @@
 
 ```text
 ii help [<command>]
-ii send [<path>] [--name <name>] [-t] [-c] [-o <path>] [--web [--port <port>] [--token <value>] [--path <dir>] | --s3 | --webdav | --ftp | --sftp] [--profile <name>] [-d] [-p] [--local] [--relay <https-url> [-k]] [--no-relay]
-ii web [<目录>] [--port <port>] [--token <value>] [--path <目录>]
-ii webrtc [--port <port>] [--token <value>]
+ii send [<path>] [--name <name>] [-t] [-c] [-o <path>] [--web [--port <port>] [--token [<value>]] [--upload] [--path <dir>] | --s3 | --webdav | --ftp | --sftp] [--profile <name>] [-d] [-p] [--local] [--relay <https-url> [-k]] [--no-relay]
+ii web [<目录>] [--port <port>] [--token [<value>]] [--upload] [--path <目录>]
+ii webrtc [--port <port>] [--token [<value>]]
 ii tunnel -s <target-host:port> [--relay <https-url> [-k]]
 ii tunnel -c <ticket> [--listen <ip:port>]
 ii recv <ticket> [-o <dir>] [--stdout] [--overwrite] [--resume] [--local] [--trace]
@@ -85,16 +85,19 @@ tar czf - .\project | ii send --name project.tar.gz
   如果文件已存在，会覆盖。这个 `-o` 属于 `ii send`，不影响 `ii recv -o <dir>` 的保存目录语义。
 
 `--web`
-: 在局域网内临时开放一个无账号鉴权 HTTP 下载页。执行后会在主 URL 上方展示进入下载页的二维码，随后在 `other:` 下列出其余物理和虚拟网卡的 IPv4 URL；下载页顶部二维码直达 `/download`。网页可一次上传多个文件，默认写到启动命令当前目录的 `./ii/`，不支持上传目录。按 `Ctrl+C` 停止服务。文件直接下载；文件夹会按原目录名打包为 `.tar` 下载。它不生成 ticket，不能和 `-c`、`-o`、`--s3`、`--webdav`、`--ftp`、`--sftp`、`--local`、`--relay`、`--no-relay` 同时使用。
+: 在局域网内临时开放一个无账号鉴权 HTTP 下载页。执行后会在主 URL 上方展示进入下载页的二维码，随后在 `other:` 下列出其余物理和虚拟网卡的 IPv4 URL；下载页顶部二维码直达 `/download`。默认只提供下载；传入 `--upload` 后才开放多文件上传。按 `Ctrl+C` 停止服务。文件直接下载；文件夹会按原目录名打包为 `.tar` 下载。它不生成 ticket，不能和 `-c`、`-o`、`--s3`、`--webdav`、`--ftp`、`--sftp`、`--local`、`--relay`、`--no-relay` 同时使用。
 
 `--port <port>`
 : 仅和 `--web` 同用，指定 `1` 到 `65535` 的 HTTP 监听端口。未提供时由系统随机选择；`0`、非数字、超范围或已占用端口会报错。
 
-`--token <value>`
-: 仅和 `--web` 同用，把网页、下载和上传 URL 固定到 `/<value>/` 路径下；遗漏或写错路径会返回 `404`。`value` 必须为 16 到 128 个 ASCII 字母、数字、`-` 或 `_`。不提供时仍使用原来的无令牌 URL。
+`--token [value]`
+: 仅和 `--web` 同用。裸 `--token` 自动生成 32 字符路径令牌，并把真实 URL 打印到终端；`--token <value>` 或 `--token=<value>` 使用指定令牌。令牌会把网页、下载和已启用的上传 URL 固定到 `/<value>/` 路径下；遗漏或写错路径会返回 `404`。显式 `value` 必须为 16 到 128 个 ASCII 字母、数字、`-` 或 `_`。不提供 `--token` 时仍使用原来的无令牌 URL。
+
+`--upload`
+: 仅和 `--web` 同用，显示网页多文件上传控件并开放上传接口。默认上传目录是启动命令当前目录的 `./ii/`，不支持上传目录。
 
 `--path <dir>`
-: 仅和 `--web` 同用，指定网页上传文件直接写入的目录。相对路径以启动命令当前目录为基准；目录在首次上传时创建。不提供时仍写入当前目录的 `./ii/`。`-p` 仍是 FTP/SFTP/WebDAV 的便携 ticket 参数。
+: 仅和 `--web --upload` 同用，指定网页上传文件直接写入的目录。相对路径以启动命令当前目录为基准；目录在首次上传时创建。不提供时仍写入当前目录的 `./ii/`。未提供 `--upload` 时本参数会被忽略。`-p` 仍是 FTP/SFTP/WebDAV 的便携 ticket 参数。
 
 `--local`
 : 只走局域网优先路径，不走公网发现，不走公网 relay。
@@ -152,14 +155,14 @@ tar czf - .\project | ii send --name project.tar.gz
 ```powershell
 ii web
 ii web .\shared
-ii web .\shared --port 8080 --token A1b2C3d4E5f6G7h8 --path .\uploads
+ii web .\shared --port 8080 --token A1b2C3d4E5f6G7h8 --upload --path .\uploads
 ```
 
-`ii web` 不带路径时服务启动命令当前目录；带路径时必须是已有目录，文件路径会报错。网页提供 nginx 风格的递归目录浏览：目录可继续进入、`../` 返回父目录、每项显示名称、修改时间和大小；普通文件直接响应，不强制下载。网页顶部可一次上传多个独立文件，不支持上传目录。
+`ii web` 不带路径时服务启动命令当前目录；带路径时必须是已有目录，文件路径会报错。网页默认提供 nginx 风格的递归目录浏览：目录可继续进入、`../` 返回父目录、每项显示名称、修改时间和大小；普通文件直接响应，不强制下载。传入 `--upload` 后网页顶部才显示多文件上传控件，不支持上传目录。
 
 命令行会在主 IPv4 LAN URL 上方打印根页二维码，并在 `other:` 下打印其他物理和虚拟网卡 URL；网页不显示二维码。按 `Ctrl+C` 关闭服务。
 
-`--port <port>` 指定 `1` 到 `65535` 的 HTTP 监听端口，未提供时随机选择。`--token <value>` 把目录、文件和上传 URL 固定到 `/<value>/` 下；遗漏或写错返回 `404`。令牌必须为 16 到 128 个 ASCII 字母、数字、`-` 或 `_`。`--path <目录>` 指定网页上传文件直接写入的目录；相对路径按启动目录解析，首次上传才创建目录，未指定时写入启动目录下的 `./ii/`。`-p` 不适用于 `ii web`，仍仅用于 WebDAV、FTP、SFTP 的便携 ticket。
+`--port <port>` 指定 `1` 到 `65535` 的 HTTP 监听端口，未提供时随机选择。裸 `--token` 自动生成 32 字符路径令牌；`--token <value>` 或 `--token=<value>` 使用指定令牌，把目录、文件和已启用的上传 URL 固定到 `/<value>/` 下；遗漏或写错返回 `404`。显式令牌必须为 16 到 128 个 ASCII 字母、数字、`-` 或 `_`。`--upload` 才显示上传控件并开放上传接口；`--path <目录>` 指定上传文件直接写入的目录，相对路径按启动目录解析，首次上传才创建目录，未指定时写入启动目录下的 `./ii/`，未提供 `--upload` 时会被忽略。`-p` 不适用于 `ii web`，仍仅用于 WebDAV、FTP、SFTP 的便携 ticket。
 
 ## `ii webrtc`
 
@@ -174,7 +177,7 @@ ii webrtc --port 8080 --token A1b2C3d4E5f6G7h8
 
 `ii` 只在 HTTP 上转发 WebRTC 信令，不接收文件，不写入本机磁盘；文件通过浏览器的可靠、有序 DataChannel 点对点传输。页面加入房间前会实际测试浏览器能否创建 ICE host candidate；浏览器禁用或阻止 WebRTC 时会显示 `WebRTC unavailable`，不会加入房间。它只使用局域网 host candidates，不使用公网 STUN/TURN，也不支持目录、断点续传或 CLI 与浏览器直接传输。访客网络隔离、防火墙、跨网段限制或禁用 P2P 时会无法连接。接收浏览器会把单个文件聚合到内存后再下载，大文件会占用相近大小的内存。完整说明见 [webrtc.md](webrtc.md)。
 
-不带 `--token` 时使用根路径；`--token <value>` 将页面和信令接口固定到 `/<value>/` 下，遗漏或写错返回 `404`。令牌必须为 16 到 128 个 ASCII 字母、数字、`-` 或 `_`。`ii webrtc` 不接受路径、`--path` 或 `-p`。
+不带 `--token` 时使用根路径；裸 `--token` 自动生成 32 字符路径令牌，`--token <value>` 或 `--token=<value>` 将页面和信令接口固定到 `/<value>/` 下，遗漏或写错返回 `404`。显式令牌必须为 16 到 128 个 ASCII 字母、数字、`-` 或 `_`。`ii webrtc` 不接受路径、`--path` 或 `-p`。
 
 ## `ii tunnel`
 

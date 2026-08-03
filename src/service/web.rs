@@ -16,8 +16,11 @@ pub(super) async fn send_web(args: SendArgs) -> Result<()> {
         PayloadKind::Dir => format!("{}.tar", source.name()),
         PayloadKind::File | PayloadKind::Stdin => source.name().to_string(),
     };
-    let start_dir = std::env::current_dir().context("read current directory for web uploads")?;
-    let upload_dir = web_upload_dir(&start_dir, args.web_upload_dir.as_deref());
+    let upload_dir = args
+        .web_upload
+        .then(|| std::env::current_dir().context("read current directory for web uploads"))
+        .transpose()?
+        .map(|start_dir| web_upload_dir(&start_dir, args.web_upload_dir.as_deref()));
     serve_web(
         WebContent::Download {
             source,
@@ -33,7 +36,9 @@ pub(super) async fn send_web(args: SendArgs) -> Result<()> {
 async fn run_impl(args: WebArgs) -> Result<()> {
     let start_dir = std::env::current_dir().context("read current directory for web service")?;
     let root = directory_root(&start_dir, args.dir.as_deref()).await?;
-    let upload_dir = web_upload_dir(&start_dir, args.web_upload_dir.as_deref());
+    let upload_dir = args
+        .web_upload
+        .then(|| web_upload_dir(&start_dir, args.web_upload_dir.as_deref()));
     serve_web(
         WebContent::Directory { root },
         upload_dir,

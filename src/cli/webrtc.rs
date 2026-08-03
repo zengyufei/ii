@@ -14,7 +14,7 @@ pub(super) fn parse(args: Vec<String>) -> Result<WebrtcArgs, ParseAction> {
             None => match arg.as_str() {
                 "-h" | "--help" => return Err(ParseAction::help(WEBRTC_HELP)),
                 "--port" => out.web_port = Some(parse_port("--port", &iter.value("--port")?)?),
-                "--token" => out.web_token = Some(iter.value("--token")?),
+                "--token" => out.web_token = Some(web_token(&mut iter)),
                 _ if arg.starts_with('-') => {
                     return Err(ParseAction::error(format!("unknown option `{arg}`")));
                 }

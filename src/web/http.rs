@@ -31,7 +31,7 @@ pub(crate) enum WebContent {
 
 pub(crate) struct WebShare {
     pub(crate) content: WebContent,
-    pub(crate) upload_dir: PathBuf,
+    pub(crate) upload_dir: Option<PathBuf>,
     pub(crate) web_token: Option<String>,
 }
 
@@ -62,7 +62,7 @@ pub(crate) struct LanWebServer {
 
 pub(crate) async fn serve_web(
     mut content: WebContent,
-    upload_dir: PathBuf,
+    upload_dir: Option<PathBuf>,
     web_port: Option<u16>,
     web_token: Option<String>,
 ) -> Result<()> {
@@ -393,7 +393,16 @@ pub(crate) async fn serve_web_connection(
                 download_name,
                 download_qr_svg,
             } => match path {
-                "" => write_web_page(&mut stream, source, download_name, download_qr_svg).await,
+                "" => {
+                    write_web_page(
+                        &mut stream,
+                        source,
+                        download_name,
+                        download_qr_svg,
+                        share.upload_dir.is_some(),
+                    )
+                    .await
+                }
                 "download" => write_web_download(&mut stream, source, download_name).await,
                 _ => write_web_error(&mut stream, "404 Not Found", "not found").await,
             },
@@ -406,6 +415,7 @@ pub(crate) async fn serve_web_connection(
                     &request.target,
                     &request.range,
                     false,
+                    share.upload_dir.is_some(),
                 )
                 .await
             }
@@ -420,6 +430,7 @@ pub(crate) async fn serve_web_connection(
                     &request.target,
                     &request.range,
                     true,
+                    share.upload_dir.is_some(),
                 )
                 .await
             }
@@ -427,16 +438,19 @@ pub(crate) async fn serve_web_connection(
                 write_web_error(&mut stream, "405 Method Not Allowed", "method not allowed").await
             }
         },
-        "POST" if path.starts_with("upload?name=") => {
-            upload::write_upload(
-                &mut stream,
-                &share.upload_dir,
-                path,
-                request.content_length,
-                &request.body,
-            )
-            .await
-        }
+        "POST" if path.starts_with("upload?name=") => match &share.upload_dir {
+            Some(upload_dir) => {
+                upload::write_upload(
+                    &mut stream,
+                    upload_dir,
+                    path,
+                    request.content_length,
+                    &request.body,
+                )
+                .await
+            }
+            None => write_web_error(&mut stream, "404 Not Found", "not found").await,
+        },
         "POST" => write_web_error(&mut stream, "404 Not Found", "not found").await,
         _ => write_web_error(&mut stream, "405 Method Not Allowed", "method not allowed").await,
     }
@@ -523,10 +537,12 @@ async fn write_web_page(
     source: &Source,
     download_name: &str,
     download_qr_svg: &str,
+    upload_enabled: bool,
 ) -> Result<()> {
     let name = html_escape(download_name);
+    let upload_controls = upload_enabled.then_some("<div class=\"upload\"><input id=\"upload\" type=\"file\" multiple aria-label=\"Upload files\"><button id=\"upload-button\" type=\"button\">Upload</button><output id=\"upload-status\" aria-live=\"polite\"></output></div><script>const input=document.getElementById('upload');const button=document.getElementById('upload-button');const status=document.getElementById('upload-status');button.addEventListener('click',async()=>{const files=[...input.files];if(!files.length)return;button.disabled=true;status.textContent='';for(const file of files){const row=document.createElement('div');row.textContent=file.name;status.append(row);try{const response=await fetch('upload?name='+encodeURIComponent(file.name),{method:'POST',body:file});const text=await response.text();row.textContent=response.ok?text:file.name+': '+text;}catch(error){row.textContent=file.name+': '+error;}}button.disabled=false;input.value='';});</script>").unwrap_or_default();
     let body = format!(
-        "<!doctype html><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>{name}</title><style>body{{margin:0;background:#f5f5f5;color:#171717;font-family:system-ui,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif}}main{{box-sizing:border-box;width:min(100%,32rem);margin:0 auto;padding:2rem 1.25rem 2.5rem;text-align:center}}svg{{display:block;width:min(72vw,17.5rem);height:auto;margin:0 auto 1.5rem;background:#fff}}h1{{margin:0;overflow-wrap:anywhere;font-size:1.5rem;line-height:1.3}}.meta{{margin:0.75rem 0 1.5rem;color:#555;font-size:1rem}}a,button{{box-sizing:border-box;display:block;width:100%;min-height:3rem;padding:0.75rem 1rem;border:0;border-radius:0.25rem;background:#1769aa;color:#fff;font:inherit;font-weight:600;line-height:1.5;text-align:center;text-decoration:none}}button:disabled{{opacity:.6}}.upload{{display:grid;gap:.75rem;margin-top:1.5rem;padding-top:1.5rem;border-top:1px solid #ccc;text-align:left}}input{{box-sizing:border-box;width:100%;min-height:3rem;padding:.625rem;border:1px solid #999;border-radius:.25rem;background:#fff;color:#171717;font:inherit}}output{{display:grid;gap:.375rem;overflow-wrap:anywhere;color:#555;font-size:.875rem;line-height:1.4}}@media (max-width:30rem){{main{{padding:1.5rem 1rem 2rem}}svg{{width:min(82vw,17.5rem);margin-bottom:1.25rem}}h1{{font-size:1.25rem}}.meta{{margin:0.625rem 0 1.25rem}}}}</style><main>{}<h1>{name}</h1><p class=\"meta\">{}</p><a href=\"download\">Download</a><div class=\"upload\"><input id=\"upload\" type=\"file\" multiple aria-label=\"Upload files\"><button id=\"upload-button\" type=\"button\">Upload</button><output id=\"upload-status\" aria-live=\"polite\"></output></div></main><script>const input=document.getElementById('upload');const button=document.getElementById('upload-button');const status=document.getElementById('upload-status');button.addEventListener('click',async()=>{{const files=[...input.files];if(!files.length)return;button.disabled=true;status.textContent='';for(const file of files){{const row=document.createElement('div');row.textContent=file.name;status.append(row);try{{const response=await fetch('upload?name='+encodeURIComponent(file.name),{{method:'POST',body:file}});const text=await response.text();row.textContent=response.ok?text:file.name+': '+text;}}catch(error){{row.textContent=file.name+': '+error;}}}}button.disabled=false;input.value='';}});</script>",
+        "<!doctype html><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>{name}</title><style>body{{margin:0;background:#f5f5f5;color:#171717;font-family:system-ui,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif}}main{{box-sizing:border-box;width:min(100%,32rem);margin:0 auto;padding:2rem 1.25rem 2.5rem;text-align:center}}svg{{display:block;width:min(72vw,17.5rem);height:auto;margin:0 auto 1.5rem;background:#fff}}h1{{margin:0;overflow-wrap:anywhere;font-size:1.5rem;line-height:1.3}}.meta{{margin:0.75rem 0 1.5rem;color:#555;font-size:1rem}}a,button{{box-sizing:border-box;display:block;width:100%;min-height:3rem;padding:0.75rem 1rem;border:0;border-radius:0.25rem;background:#1769aa;color:#fff;font:inherit;font-weight:600;line-height:1.5;text-align:center;text-decoration:none}}button:disabled{{opacity:.6}}.upload{{display:grid;gap:.75rem;margin-top:1.5rem;padding-top:1.5rem;border-top:1px solid #ccc;text-align:left}}input{{box-sizing:border-box;width:100%;min-height:3rem;padding:.625rem;border:1px solid #999;border-radius:.25rem;background:#fff;color:#171717;font:inherit}}output{{display:grid;gap:.375rem;overflow-wrap:anywhere;color:#555;font-size:.875rem;line-height:1.4}}@media (max-width:30rem){{main{{padding:1.5rem 1rem 2rem}}svg{{width:min(82vw,17.5rem);margin-bottom:1.25rem}}h1{{font-size:1.25rem}}.meta{{margin:0.625rem 0 1.25rem}}}}</style><main>{}<h1>{name}</h1><p class=\"meta\">{}</p><a href=\"download\">Download</a>{upload_controls}</main>",
         download_qr_svg,
         fmt_bytes(source.size),
     );

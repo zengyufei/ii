@@ -8,6 +8,9 @@ pub(super) fn parse(args: Vec<String>) -> Result<WebArgs, ParseAction> {
         match split_long_value(&arg) {
             Some(("port", value)) => out.web_port = Some(parse_port("--port", value)?),
             Some(("token", value)) => out.web_token = Some(value.to_string()),
+            Some(("upload", _)) => {
+                return Err(ParseAction::error("--upload does not take a value"));
+            }
             Some(("path", value)) => out.web_upload_dir = Some(PathBuf::from(value)),
             Some((flag, _)) => {
                 return Err(ParseAction::error(format!("unknown option `--{flag}`")));
@@ -15,7 +18,11 @@ pub(super) fn parse(args: Vec<String>) -> Result<WebArgs, ParseAction> {
             None => match arg.as_str() {
                 "-h" | "--help" => return Err(ParseAction::help(WEB_HELP)),
                 "--port" => out.web_port = Some(parse_port("--port", &iter.value("--port")?)?),
-                "--token" => out.web_token = Some(iter.value("--token")?),
+                "--token" => out.web_token = Some(web_token(&mut iter)),
+                "--upload" if out.web_upload => {
+                    return Err(ParseAction::error("--upload may be specified only once"));
+                }
+                "--upload" => out.web_upload = true,
                 "--path" => out.web_upload_dir = Some(PathBuf::from(iter.value("--path")?)),
                 _ if arg.starts_with('-') => {
                     return Err(ParseAction::error(format!("unknown option `{arg}`")));

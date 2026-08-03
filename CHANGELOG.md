@@ -2,6 +2,13 @@
 
 本文件记录 `ii` 的重要变更。默认中文版本在这里，英文版本见 [CHANGELOG.en.md](CHANGELOG.en.md)。
 
+## 0.2.7 - 2026-08-03
+
+### 变更
+
+- `ii send ... --web` 与 `ii web` 默认关闭网页上传；只有 `--upload` 才显示上传控件并开放上传接口，未配 `--upload` 的 `--path` 会被忽略。
+- `ii send ... --web`、`ii web` 与 `ii webrtc` 的裸 `--token` 自动生成并打印 32 字符路径访问令牌；`--token <value>` 与 `--token=<value>` 保持可用。
+
 ## 0.2.6 - 2026-08-03
 
 ### 新增

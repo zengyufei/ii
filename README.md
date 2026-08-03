@@ -134,20 +134,21 @@ ii recv ii1k7v...x9a --stdout > project.tar.gz
 ii send .\video.mp4 --web
 ii send .\my-folder --web
 ii send .\video.mp4 --web --port 8080
+ii send .\video.mp4 --web --token
 ii send .\video.mp4 --web --token A1b2C3d4E5f6G7h8
-ii send .\video.mp4 --web --path .\uploads
+ii send .\video.mp4 --web --upload --path .\uploads
 ii web
-ii web .\shared --port 8080 --token A1b2C3d4E5f6G7h8 --path .\uploads
+ii web .\shared --port 8080 --token A1b2C3d4E5f6G7h8 --upload --path .\uploads
 ii webrtc
 ii webrtc --port 8080 --token A1b2C3d4E5f6G7h8
 ii tunnel -s 127.0.0.1:22
 ```
 
-命令行会在主局域网 URL 上方显示进入下载页的二维码，并在 `other:` 下列出其余物理和虚拟网卡的 IPv4 URL；下载页顶部的二维码则直达 `/download`，方便手机扫码下载。网页也可以一次上传多个文件，默认写到启动命令当前目录的 `./ii/`；可用 `--path <目录>` 改为直接写入指定目录，相对路径仍以启动目录为基准，目录会在首次上传时创建。不支持上传目录。目录会下载为 `.tar`。按 `Ctrl+C` 关闭服务。`--port <端口>` 指定 `1` 到 `65535` 的监听端口；不带时由系统随机选择。可选 `--token <value>` 为网页、下载和上传加路径访问令牌，令牌只能是 16 到 128 个 ASCII 字母、数字、`-` 或 `_`；不带时保持无令牌 URL。该模式没有账号鉴权，只适合临时、可信的局域网。
+命令行会在主局域网 URL 上方显示进入下载页的二维码，并在 `other:` 下列出其余物理和虚拟网卡的 IPv4 URL；下载页顶部的二维码则直达 `/download`，方便手机扫码下载。网页默认只读；传入 `--upload` 后才显示多文件上传并开放上传接口，默认写到启动命令当前目录的 `./ii/`。可用 `--path <目录>` 改为直接写入指定目录，相对路径仍以启动目录为基准，目录会在首次上传时创建；不带 `--upload` 的 `--path` 会被忽略。不支持上传目录。目录会下载为 `.tar`。按 `Ctrl+C` 关闭服务。`--port <端口>` 指定 `1` 到 `65535` 的监听端口；不带时由系统随机选择。裸 `--token` 会生成并在终端 URL 中打印 32 字符路径访问令牌；也可用 `--token <value>` 或 `--token=<value>` 指定令牌，值只能是 16 到 128 个 ASCII 字母、数字、`-` 或 `_`。不带 `--token` 时保持无令牌 URL。该模式没有账号鉴权，只适合临时、可信的局域网。
 
-`ii web` 不带路径时服务启动命令的当前目录；带路径时只接受已有目录。网页提供 nginx 风格的递归目录浏览、普通文件访问和多文件上传，终端输出同样有二维码、主 IPv4 LAN URL 与 `other:` 网卡 URL，但目录网页不显示二维码。`--port`、`--token` 与 `--path` 的规则和 `ii send ... --web` 相同，`-p` 不适用于 `ii web`。
+`ii web` 不带路径时服务启动命令的当前目录；带路径时只接受已有目录。网页默认提供 nginx 风格的递归目录浏览和普通文件访问；传入 `--upload` 后才提供多文件上传。终端输出同样有二维码、主 IPv4 LAN URL 与 `other:` 网卡 URL，但目录网页不显示二维码。`--port`、`--token`、`--upload` 与 `--path` 的规则和 `ii send ... --web` 相同，`-p` 不适用于 `ii web`。
 
-`ii webrtc` 开一个局域网浏览器直传房间。终端输出二维码、主 IPv4 LAN URL 与 `other:` 网卡 URL；打开同一 URL 的浏览器会自动显示为临时设备编号，可选择另一个在线设备并发送多个独立文件或文本消息。文本只发送给当前选中的设备，长文本按 UTF-8 字节以不超过 1 MiB 的分片传输，接收端重组后在当前页面列表显示，并可逐条复制；刷新页面后列表清空，不保存聊天记录。文件通过浏览器 WebRTC DataChannel 两端直传，不经过 `ii` 进程，也不会写入启动机器。页面会先实际测试浏览器能否创建 ICE host candidate；浏览器禁用或阻止 WebRTC 时会显示 `WebRTC unavailable`，不会加入房间。它只交换局域网 host candidates，不使用公网 STUN/TURN；网络隔离、防火墙或禁止 P2P 时会连接失败。接收端自动下载，但会先把单个文件聚合在浏览器内存中，因此不适合超出设备可用内存的大文件。可选 `--port <端口>` 指定 `1` 到 `65535` 的监听端口，不带时随机选择；`--token <value>` 将页面和信令 URL 固定到路径令牌下。完整说明见 [webrtc.md](webrtc.md)。
+`ii webrtc` 开一个局域网浏览器直传房间。终端输出二维码、主 IPv4 LAN URL 与 `other:` 网卡 URL；打开同一 URL 的浏览器会自动显示为临时设备编号，可选择另一个在线设备并发送多个独立文件或文本消息。文本只发送给当前选中的设备，长文本按 UTF-8 字节以不超过 1 MiB 的分片传输，接收端重组后在当前页面列表显示，并可逐条复制；刷新页面后列表清空，不保存聊天记录。文件通过浏览器 WebRTC DataChannel 两端直传，不经过 `ii` 进程，也不会写入启动机器。页面会先实际测试浏览器能否创建 ICE host candidate；浏览器禁用或阻止 WebRTC 时会显示 `WebRTC unavailable`，不会加入房间。它只交换局域网 host candidates，不使用公网 STUN/TURN；网络隔离、防火墙或禁止 P2P 时会连接失败。接收端自动下载，但会先把单个文件聚合在浏览器内存中，因此不适合超出设备可用内存的大文件。可选 `--port <端口>` 指定 `1` 到 `65535` 的监听端口，不带时随机选择；裸 `--token` 自动生成路径令牌，也可用 `--token <value>` 指定。完整说明见 [webrtc.md](webrtc.md)。
 
 临时转发服务端可访问的 TCP 端口：
 

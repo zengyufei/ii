@@ -1,4 +1,5 @@
 use super::{SendArgs, help::*};
+use rand::RngExt;
 use std::{fmt, net::SocketAddr};
 
 pub(crate) enum ParseAction {
@@ -64,6 +65,9 @@ pub(crate) fn validate_send(args: &SendArgs) -> Result<(), ParseAction> {
     if args.web_token.is_some() && !args.web {
         return Err(ParseAction::error("--token requires --web"));
     }
+    if args.web_upload && !args.web {
+        return Err(ParseAction::error("--upload requires --web"));
+    }
     if args.web_upload_dir.is_some() && !args.web {
         return Err(ParseAction::error("--path requires --web"));
     }
@@ -86,6 +90,21 @@ pub(crate) fn is_valid_web_token(token: &str) -> bool {
         && token
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+}
+
+pub(crate) fn web_token(iter: &mut ArgsIter) -> String {
+    match iter.peek() {
+        Some(value) if !value.starts_with('-') => iter.next().expect("peeked token value"),
+        _ => random_web_token(),
+    }
+}
+
+fn random_web_token() -> String {
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+    let mut rng = rand::rng();
+    (0..32)
+        .map(|_| ALPHABET[rng.random_range(0..ALPHABET.len())] as char)
+        .collect()
 }
 
 pub(crate) fn reject_extra(command: &str, args: Vec<String>) -> Result<(), ParseAction> {
@@ -209,18 +228,22 @@ pub(crate) fn is_help(arg: &str) -> bool {
 }
 
 pub(crate) struct ArgsIter {
-    args: std::vec::IntoIter<String>,
+    args: std::iter::Peekable<std::vec::IntoIter<String>>,
 }
 
 impl ArgsIter {
     pub(crate) fn new(args: Vec<String>) -> Self {
         Self {
-            args: args.into_iter(),
+            args: args.into_iter().peekable(),
         }
     }
 
     pub(crate) fn next(&mut self) -> Option<String> {
         self.args.next()
+    }
+
+    pub(crate) fn peek(&mut self) -> Option<&String> {
+        self.args.peek()
     }
 
     pub(crate) fn value(&mut self, flag: &str) -> Result<String, ParseAction> {

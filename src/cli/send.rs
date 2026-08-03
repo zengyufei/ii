@@ -12,6 +12,9 @@ pub(super) fn parse(args: Vec<String>) -> Result<SendArgs, ParseAction> {
             Some(("relay", value)) => out.relay = Some(parse_relay_url(value)?),
             Some(("port", value)) => out.web_port = Some(parse_port("--port", value)?),
             Some(("token", value)) => out.web_token = Some(value.to_string()),
+            Some(("upload", _)) => {
+                return Err(ParseAction::error("--upload does not take a value"));
+            }
             Some(("path", value)) => out.web_upload_dir = Some(PathBuf::from(value)),
             Some((flag, _)) => {
                 return Err(ParseAction::error(format!("unknown option `--{flag}`")));
@@ -30,7 +33,11 @@ pub(super) fn parse(args: Vec<String>) -> Result<SendArgs, ParseAction> {
                 "--sftp" => out.sftp = true,
                 "--web" => out.web = true,
                 "--port" => out.web_port = Some(parse_port("--port", &iter.value("--port")?)?),
-                "--token" => out.web_token = Some(iter.value("--token")?),
+                "--token" => out.web_token = Some(web_token(&mut iter)),
+                "--upload" if out.web_upload => {
+                    return Err(ParseAction::error("--upload may be specified only once"));
+                }
+                "--upload" => out.web_upload = true,
                 "--path" => out.web_upload_dir = Some(PathBuf::from(iter.value("--path")?)),
                 "-p" => out.portable_webdav = true,
                 "--local" => out.local = true,

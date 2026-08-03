@@ -2,6 +2,13 @@
 
 All notable changes to `ii` are documented here. The default Chinese version is [CHANGELOG.md](CHANGELOG.md).
 
+## 0.2.7 - 2026-08-03
+
+### Changed
+
+- Web uploads for `ii send ... --web` and `ii web` are disabled by default; only `--upload` renders controls and opens the upload endpoint, while `--path` without it is ignored.
+- Bare `--token` for `ii send ... --web`, `ii web`, and `ii webrtc` now generates and prints a 32-character path access token; `--token <value>` and `--token=<value>` remain supported.
+
 ## 0.2.6 - 2026-08-03
 
 ### Added

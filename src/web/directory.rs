@@ -56,6 +56,7 @@ pub(crate) async fn write_directory(
     request_target: &str,
     range: &WebRange,
     head: bool,
+    upload_enabled: bool,
 ) -> Result<()> {
     let Some((target, segments, trailing_slash)) = web_directory_target(root, path).await else {
         return write_web_error(stream, "404 Not Found", "not found").await;
@@ -69,7 +70,15 @@ pub(crate) async fn write_directory(
         if !path.is_empty() && !trailing_slash {
             return write_web_redirect(stream, &format!("{request_target}/")).await;
         }
-        let body = match web_directory_page_body(root, &target, web_token, &segments).await {
+        let body = match web_directory_page_body(
+            root,
+            &target,
+            web_token,
+            &segments,
+            upload_enabled,
+        )
+        .await
+        {
             Ok(body) => body,
             Err(_) => return write_web_error(stream, "404 Not Found", "not found").await,
         };
@@ -138,6 +147,7 @@ async fn web_directory_page_body(
     directory: &Path,
     web_token: Option<&str>,
     segments: &[String],
+    upload_enabled: bool,
 ) -> Result<String> {
     let mut entries = fs::read_dir(directory)
         .await
@@ -210,7 +220,9 @@ async fn web_directory_page_body(
     body.push_str("</title></head><body><h1>");
     body.push_str(&html_escape(&title));
     body.push_str("</h1>");
-    body.push_str(web_upload_controls());
+    if upload_enabled {
+        body.push_str(web_upload_controls());
+    }
     body.push_str("<hr><pre>Name                             Last modified       Size\n----------------------------------------------------------------\n");
     body.push_str(&rows);
     body.push_str("</pre><hr></body></html>");

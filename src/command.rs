@@ -33,6 +33,7 @@ pub struct SendArgs {
     pub web: bool,
     pub web_port: Option<u16>,
     pub web_token: Option<String>,
+    pub web_upload: bool,
     pub web_upload_dir: Option<PathBuf>,
     pub portable_webdav: bool,
     pub local: bool,
@@ -46,6 +47,7 @@ pub struct WebArgs {
     pub dir: Option<PathBuf>,
     pub web_port: Option<u16>,
     pub web_token: Option<String>,
+    pub web_upload: bool,
     pub web_upload_dir: Option<PathBuf>,
 }
 

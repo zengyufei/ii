@@ -19,7 +19,7 @@ async fn directory_lists_children_rejects_traversal_and_uploads() {
         content: WebContent::Directory {
             root: fs::canonicalize(&root).await.unwrap(),
         },
-        upload_dir: upload_dir.clone(),
+        upload_dir: Some(upload_dir.clone()),
         web_token: None,
     });
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
@@ -87,13 +87,13 @@ async fn directory_files_support_ranges_and_token_scoping() {
         content: WebContent::Directory {
             root: fs::canonicalize(&root).await.unwrap(),
         },
-        upload_dir,
+        upload_dir: None,
         web_token: Some(token.to_string()),
     });
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
     let address = listener.local_addr().unwrap();
     let server = tokio::spawn(async move {
-        for _ in 0..6 {
+        for _ in 0..8 {
             let (stream, _) = listener.accept().await.unwrap();
             let share = Arc::clone(&share);
             tokio::spawn(async move { serve_web_connection(stream, share).await.unwrap() });
@@ -111,6 +111,22 @@ async fn directory_files_support_ranges_and_token_scoping() {
         Some("bytes 2-5/10")
     );
     assert_eq!(response_body(&range), b"2345");
+    let page = request(address, &format!("/{token}/")).await;
+    assert!(
+        !page
+            .windows(b"type=\"file\" multiple".len())
+            .any(|part| part == b"type=\"file\" multiple")
+    );
+    assert!(
+        upload_request_at(
+            address,
+            &format!("/{token}/upload?name=notes.txt"),
+            b"blocked upload",
+        )
+        .await
+        .starts_with(b"HTTP/1.1 404 Not Found")
+    );
+    assert!(!upload_dir.exists());
     let invalid = request_with_headers(address, "GET", &path, "Range: bytes=10-10\r\n").await;
     assert!(invalid.starts_with(b"HTTP/1.1 416 Range Not Satisfiable"));
     assert_eq!(
