@@ -54,7 +54,15 @@ pub(crate) fn validate_send(args: &SendArgs) -> Result<(), ParseAction> {
         return Err(ParseAction::error("-p requires --webdav, --ftp or --sftp"));
     }
     if args.accept_self_signed_relay && args.relay.is_none() {
-        return Err(ParseAction::error("-k requires --relay <https-url>"));
+        return Err(ParseAction::error("-k requires --relay <url>"));
+    }
+    if args.accept_self_signed_relay
+        && args
+            .relay
+            .as_ref()
+            .is_some_and(|url| url.scheme() != "https")
+    {
+        return Err(ParseAction::error("-k requires an https:// relay URL"));
     }
     if args.web && args.path.is_none() {
         return Err(ParseAction::error("--web requires a file or folder path"));
@@ -124,14 +132,10 @@ pub(crate) fn reject_extra(command: &str, args: Vec<String>) -> Result<(), Parse
 }
 
 pub(crate) fn parse_relay_url(value: &str) -> Result<iroh::RelayUrl, ParseAction> {
-    parse_public_relay_url(value)
-}
-
-pub(crate) fn parse_public_relay_url(value: &str) -> Result<iroh::RelayUrl, ParseAction> {
     let url = url::Url::parse(value)
         .map_err(|err| ParseAction::error(format!("invalid relay URL `{value}`: {err}")))?;
-    if url.scheme() != "https" {
-        return Err(ParseAction::error("relay URL must use https://"));
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err(ParseAction::error("relay URL must use http:// or https://"));
     }
     if url.host_str().is_none() {
         return Err(ParseAction::error("relay URL must include a host"));
@@ -143,7 +147,7 @@ pub(crate) fn parse_public_relay_url(value: &str) -> Result<iroh::RelayUrl, Pars
         || url.fragment().is_some()
     {
         return Err(ParseAction::error(
-            "relay URL may contain only https://host[:port]",
+            "relay URL may contain only http://host[:port] or https://host[:port]",
         ));
     }
     if url.port() == Some(0) {
@@ -160,7 +164,7 @@ pub(crate) fn parse_tls_domain(value: &str) -> Result<String, ParseAction> {
         || value.parse::<std::net::IpAddr>().is_ok()
     {
         return Err(ParseAction::error(
-            "--tls expects a bare DNS name such as relay.example.com",
+            "--domain expects a bare DNS name such as relay.example.com",
         ));
     }
     Ok(value.to_string())

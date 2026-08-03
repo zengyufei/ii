@@ -163,8 +163,8 @@ ii tunnel -c ii1k7v...x9a --listen 0.0.0.0:8022
 Connections to B's listener travel over an encrypted Iroh connection to A, where A connects to the target TCP port. Direct paths are preferred and the default Iroh relay remains available. For a self-hosted public relay, specify it on A; the ticket carries the relay and self-signed trust policy to B:
 
 ```powershell
-ii relay --public https://PUBLIC_IP:8443
-ii tunnel -s 192.168.1.10:5000 --relay https://PUBLIC_IP:8443 -k
+ii relay --port 8443
+ii tunnel -s 192.168.1.10:5000 --relay http://PUBLIC_IP:8443
 ```
 
 The relay forwards encrypted Iroh traffic only. It does not expose the target TCP port to the public Internet. The ticket contains this tunnel's bearer access key, so anyone holding it can connect until A stops the service. The first release supports TCP only.
@@ -256,40 +256,50 @@ ii version
 
 You do not need to understand relay hosting to send ordinary files. This section is only for running your own relay service or using a fixed relay entrypoint in a company network.
 
-Start a self-signed HTTPS relay:
+Start an HTTP relay:
 
 ```powershell
-ii relay --public https://SERVER_PUBLIC_IP:8443
+ii relay
 ```
 
-You can use a domain too:
+By default it listens on `0.0.0.0` at a random free port and prints the primary IPv4 URL plus other local IPv4 interfaces. `0.0.0.0` is only a bind address, never a client address; clients use a reachable LAN or public IP with the printed port. A cloud public IP may be NAT-provided and therefore absent from the interface list.
+
+Choose a fixed port:
 
 ```powershell
-ii relay --public https://relay.example.com
+ii relay --port 8443
 ```
 
-`--public` is the public HTTPS address used by clients and must be `https://host[:port]`. On first start, `ii` generates and persists a self-signed certificate and key in the relay state directory. It listens on the public URL port, or on `443` when the URL has no port. Use `-H` for a different local backend port behind NAT or a reverse proxy:
+Send through the HTTP relay:
 
 ```powershell
-ii relay --public https://relay.example.com:8443 -H 9443
+ii send .\video.mp4 --relay http://SERVER_PUBLIC_IP:8443
 ```
 
-Send through the relay:
+For HTTPS, let `ii` generate a self-signed certificate for this process:
 
 ```powershell
+ii relay --tls --port 8443
 ii send .\video.mp4 --relay https://SERVER_PUBLIC_IP:8443 -k
 ```
 
-`-k` accepts the self-signed certificate and puts that policy in the ticket; the receiver needs no certificate installation or relay configuration. A first connection can still be replaced by a man-in-the-middle.
+`-k` is HTTPS-only. It skips certificate verification for that relay and puts the policy in the ticket; the receiver needs no certificate installation or relay configuration. A first connection can still be replaced by a man-in-the-middle.
 
-With a domain and PEM certificate files, use manual TLS:
+For a named self-signed TLS relay:
 
 ```powershell
-ii relay --tls relay.example.com -H 8443 --cert D:\certs\fullchain.pem --key D:\certs\privkey.pem
+ii relay --tls --domain relay.example.com --port 8443
+ii send .\video.mp4 --relay https://relay.example.com:8443 -k
+```
+
+To replace the generated certificate with PEM files:
+
+```powershell
+ii relay --tls --domain relay.example.com --port 8443 --cert D:\certs\fullchain.pem --key D:\certs\privkey.pem
 ii send .\video.mp4 --relay https://relay.example.com:8443
 ```
 
-Manual TLS does not use `-k`; clients use normal system TLS verification. Both `--relay` modes force HTTPS relay-only transport and skip UDP and direct paths. See [ii.md](ii.md) for ports, state paths, and the security boundary. FTP and SFTP configuration, tickets, and security limits are documented in [ftp.md](ftp.md) and [sftp.md](sftp.md).
+Manual TLS does not use `-k`; clients use normal system TLS verification. HTTP and HTTPS `--relay` modes both force relay-only transport and skip UDP and direct paths. See [ii.md](ii.md) for ports, TLS, public NAT boundaries, and the security boundary. FTP and SFTP configuration, tickets, and security limits are documented in [ftp.md](ftp.md) and [sftp.md](sftp.md).
 
 ## Full Manual
 

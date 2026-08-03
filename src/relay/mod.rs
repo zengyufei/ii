@@ -1,22 +1,21 @@
 mod logging;
 mod server;
-mod state;
 
 #[cfg(test)]
 use logging::LogFilter;
 pub use server::run;
 #[cfg(test)]
-use server::{build_server_config, load_self_signed_server_config};
-pub use state::default_config_path;
-#[cfg(test)]
-use state::{load_or_create as load_or_create_state, paths as relay_paths};
+use server::{advertised_urls, build_server_config, load_tls_server_config};
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::fs;
-    #[cfg(not(target_os = "windows"))]
-    use std::path::PathBuf;
+    use crate::{
+        command::RelayArgs,
+        transport::iroh::{EndpointPolicy, FILE_ALPN, bind_endpoint},
+    };
+    use std::{net::Ipv4Addr, time::Duration};
+    use tokio::time::timeout;
     use tracing::{Level, level_filters::LevelFilter};
     fn unused_local_port() -> u16 {
         std::net::TcpListener::bind("127.0.0.1:0")
@@ -26,69 +25,28 @@ mod tests {
             .port()
     }
 
-    fn public_url() -> iroh::RelayUrl {
-        "https://127.0.0.1:8443".parse().unwrap()
-    }
-
-    #[test]
-    fn default_path_is_platform_specific() {
-        let path = default_config_path().unwrap();
-        #[cfg(target_os = "windows")]
-        assert!(path.ends_with("relay.toml"));
-        #[cfg(not(target_os = "windows"))]
-        assert_eq!(path, PathBuf::from("/etc/ii/relay.toml"));
-    }
-
-    #[test]
-    fn first_setup_generates_and_reuses_certificate() {
-        let temp = tempfile::tempdir().unwrap();
-        let paths = relay_paths(temp.path().join("relay.toml"));
-
-        let first = load_or_create_state(&paths, &public_url()).unwrap();
-        let first_cert = fs::read(&paths.cert_path).unwrap();
-        let first_key = fs::read(&paths.key_path).unwrap();
-        let second = load_or_create_state(&paths, &public_url()).unwrap();
-
-        assert_eq!(first.public_url, second.public_url);
-        assert_eq!(first_cert, fs::read(&paths.cert_path).unwrap());
-        assert_eq!(first_key, fs::read(&paths.key_path).unwrap());
-        load_self_signed_server_config(&paths.cert_path, &paths.key_path).unwrap();
-    }
-
     #[tokio::test]
-    async fn minimal_relay_serves_probe_endpoints_and_stops() {
+    async fn http_relay_serves_probe_endpoints_and_stops() {
         rustls::crypto::ring::default_provider()
             .install_default()
             .ok();
-        let temp = tempfile::tempdir().unwrap();
-        let paths = relay_paths(temp.path().join("relay.toml"));
-        load_or_create_state(&paths, &public_url()).unwrap();
-        let server_config =
-            load_self_signed_server_config(&paths.cert_path, &paths.key_path).unwrap();
+        let requested_port = unused_local_port();
         let server = iroh_relay::server::Server::spawn(
-            build_server_config(server_config, unused_local_port()).unwrap(),
+            build_server_config(&RelayArgs {
+                tls: false,
+                domain: None,
+                cert: None,
+                key: None,
+                port: Some(requested_port),
+            })
+            .unwrap(),
         )
         .await
         .unwrap();
-
-        let https = server.https_addr().unwrap();
-        let client = reqwest::Client::builder()
-            .danger_accept_invalid_certs(true)
-            .build()
-            .unwrap();
+        let port = server.http_addr().unwrap().port();
+        assert_eq!(port, requested_port);
         assert_eq!(
-            client
-                .get(format!("https://127.0.0.1:{}/ping", https.port()))
-                .send()
-                .await
-                .unwrap()
-                .status(),
-            reqwest::StatusCode::OK
-        );
-
-        let http = server.http_addr().unwrap();
-        assert_eq!(
-            reqwest::get(format!("http://{http}/generate_204"))
+            reqwest::get(format!("http://127.0.0.1:{port}/generate_204"))
                 .await
                 .unwrap()
                 .status(),
@@ -97,50 +55,139 @@ mod tests {
         server.shutdown().await.unwrap();
     }
 
-    #[test]
-    fn missing_certificate_material_fails_clearly() {
-        let temp = tempfile::tempdir().unwrap();
-        let paths = relay_paths(temp.path().join("relay.toml"));
-        load_or_create_state(&paths, &public_url()).unwrap();
-        fs::remove_file(&paths.key_path).unwrap();
+    #[tokio::test]
+    async fn http_relay_forwards_iroh_streams() {
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
+        let relay = iroh_relay::server::Server::spawn(
+            build_server_config(&RelayArgs {
+                tls: false,
+                domain: None,
+                cert: None,
+                key: None,
+                port: None,
+            })
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+        let relay_url: iroh::RelayUrl =
+            format!("http://127.0.0.1:{}", relay.http_addr().unwrap().port())
+                .parse()
+                .unwrap();
+        let receiver = bind_endpoint(
+            EndpointPolicy::TrustedRelayOnly(relay_url.clone()),
+            FILE_ALPN,
+        )
+        .await
+        .unwrap();
+        let sender = bind_endpoint(EndpointPolicy::TrustedRelayOnly(relay_url), FILE_ALPN)
+            .await
+            .unwrap();
+        timeout(Duration::from_secs(5), receiver.online())
+            .await
+            .unwrap();
+        timeout(Duration::from_secs(5), sender.online())
+            .await
+            .unwrap();
 
-        let err = load_or_create_state(&paths, &public_url()).unwrap_err();
-        assert!(err.to_string().contains("incomplete"));
+        let receiver_task = {
+            let receiver = receiver.clone();
+            tokio::spawn(async move {
+                let incoming = timeout(Duration::from_secs(5), receiver.accept())
+                    .await
+                    .unwrap()
+                    .unwrap();
+                let connection = incoming.accept().unwrap().await.unwrap();
+                let (_send, mut recv) = connection.accept_bi().await.unwrap();
+                recv.read_to_end(64).await.unwrap()
+            })
+        };
+        let connection = timeout(
+            Duration::from_secs(5),
+            sender.connect(receiver.addr(), FILE_ALPN),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let (mut send, _recv) = connection.open_bi().await.unwrap();
+        send.write_all(b"relay over http").await.unwrap();
+        send.finish().unwrap();
+        assert_eq!(receiver_task.await.unwrap(), b"relay over http");
+
+        connection.close(0u32.into(), b"done");
+        sender.close().await;
+        receiver.close().await;
+        relay.shutdown().await.unwrap();
     }
 
     #[test]
-    fn malformed_persisted_certificate_fails_clearly() {
-        let temp = tempfile::tempdir().unwrap();
-        let paths = relay_paths(temp.path().join("relay.toml"));
-        load_or_create_state(&paths, &public_url()).unwrap();
-        fs::write(&paths.cert_path, "not a certificate").unwrap();
-
-        let err = load_self_signed_server_config(&paths.cert_path, &paths.key_path).unwrap_err();
-        assert!(
-            !err.to_string().is_empty(),
-            "a malformed persisted certificate must return a clear error"
+    fn advertised_urls_never_use_unspecified_bind_address() {
+        let (primary, other) = advertised_urls(
+            "http",
+            8443,
+            None,
+            Ipv4Addr::new(192, 168, 1, 20),
+            vec![Ipv4Addr::new(10, 0, 0, 5)],
         );
+        assert_eq!(primary, "http://192.168.1.20:8443");
+        assert_eq!(other, ["http://10.0.0.5:8443"]);
+
+        let (domain, other) = advertised_urls(
+            "https",
+            8443,
+            Some("relay.example.com"),
+            Ipv4Addr::new(192, 168, 1, 20),
+            vec![Ipv4Addr::new(10, 0, 0, 5)],
+        );
+        assert_eq!(domain, "https://relay.example.com:8443");
+        assert!(other.is_empty());
+    }
+
+    #[tokio::test]
+    async fn generated_self_signed_tls_relay_serves_ping() {
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
+        let server = iroh_relay::server::Server::spawn(
+            build_server_config(&RelayArgs {
+                tls: true,
+                domain: Some("relay.example.com".to_string()),
+                cert: None,
+                key: None,
+                port: None,
+            })
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+        let port = server.https_addr().unwrap().port();
+        let client = reqwest::Client::builder()
+            .danger_accept_invalid_certs(true)
+            .build()
+            .unwrap();
+        assert_eq!(
+            client
+                .get(format!("https://127.0.0.1:{port}/ping"))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            reqwest::StatusCode::OK
+        );
+        server.shutdown().await.unwrap();
     }
 
     #[test]
-    fn state_rejects_a_changed_public_url() {
+    fn malformed_manual_certificate_fails_clearly() {
         let temp = tempfile::tempdir().unwrap();
-        let paths = relay_paths(temp.path().join("relay.toml"));
-        load_or_create_state(&paths, &public_url()).unwrap();
-        let changed: iroh::RelayUrl = "https://relay.example.com".parse().unwrap();
+        let cert = temp.path().join("cert.pem");
+        let key = temp.path().join("key.pem");
+        std::fs::write(&cert, "not a certificate").unwrap();
+        std::fs::write(&key, "not a key").unwrap();
 
-        let err = load_or_create_state(&paths, &changed).unwrap_err();
-        assert!(err.to_string().contains("bound to"));
-    }
-
-    #[test]
-    fn legacy_relay_config_has_a_migration_error() {
-        let temp = tempfile::tempdir().unwrap();
-        let paths = relay_paths(temp.path().join("relay.toml"));
-        fs::write(&paths.config_path, "http_bind_addr = \"0.0.0.0:3340\"").unwrap();
-
-        let err = load_or_create_state(&paths, &public_url()).unwrap_err();
-        assert!(err.to_string().contains("unsupported relay.toml"));
+        assert!(load_tls_server_config(&cert, &key).is_err());
     }
 
     #[test]

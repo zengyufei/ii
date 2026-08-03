@@ -2,6 +2,14 @@
 
 All notable changes to `ii` are documented here. The default Chinese version is [CHANGELOG.md](CHANGELOG.md).
 
+## 0.2.8 - 2026-08-03
+
+### Changed
+
+- `ii relay` now starts an HTTP relay without arguments on a random port and supports `--port` for a fixed port; it prints reachable IPv4 URLs and other interface URLs.
+- `--tls` is now an optional self-signed HTTPS switch, `--domain` selects the TLS name, and `--cert` plus `--key` replace the generated certificate; `--public` and `-H` were removed.
+- `ii send --relay` and `ii tunnel -s --relay` accept HTTP or HTTPS URLs; `-k` is HTTPS-only.
+
 ## 0.2.7 - 2026-08-03
 
 ### Changed

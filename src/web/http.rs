@@ -106,7 +106,7 @@ pub(crate) async fn start_lan_web_server(
         .local_addr()
         .with_context(|| format!("read {label} server address"))?
         .port();
-    let host = local_web_host();
+    let (host, other_hosts) = lan_ipv4_hosts();
     let root_path = web_root_path(web_token);
     let url = format!("http://{host}:{port}{root_path}");
 
@@ -116,7 +116,7 @@ pub(crate) async fn start_lan_web_server(
     println!("{label}: {url}");
     println!();
     println!("other:");
-    for host in web_other_hosts(host, web_interface_ipv4_addrs()) {
+    for host in other_hosts {
         println!("http://{host}:{port}{root_path}");
     }
     println!();
@@ -158,6 +158,12 @@ pub(crate) fn local_web_host() -> Ipv4Addr {
         }
     }
     Ipv4Addr::LOCALHOST
+}
+
+pub(crate) fn lan_ipv4_hosts() -> (Ipv4Addr, Vec<Ipv4Addr>) {
+    let primary = local_web_host();
+    let other = web_other_hosts(primary, web_interface_ipv4_addrs());
+    (primary, other)
 }
 
 pub(crate) fn web_other_hosts(primary: Ipv4Addr, mut hosts: Vec<Ipv4Addr>) -> Vec<Ipv4Addr> {

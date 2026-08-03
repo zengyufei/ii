@@ -6,7 +6,7 @@ Usage:
   ii send [options] [path]
   ii web [directory] [--port <port>] [--token [value]] [--upload] [--path <dir>]
   ii webrtc [--port <port>] [--token [value]]
-  ii tunnel (-s <target-host:port> | -c <ticket>) [--listen <ip:port>] [--relay <https-url> [-k]]
+  ii tunnel (-s <target-host:port> | -c <ticket>) [--listen <ip:port>] [--relay <url> [-k]]
   ii recv [options] <ticket>
   ii relay [options]
   ii doctor
@@ -62,14 +62,14 @@ Options:
 
 pub(crate) const TUNNEL_HELP: &str = "\
 Usage:
-  ii tunnel -s <target-host:port> [--relay <https-url> [-k]]
+  ii tunnel -s <target-host:port> [--relay <url> [-k]]
   ii tunnel -c <ticket> [--listen <ip:port>]
 
 Options:
   -s <target-host:port>  Serve a TCP target reachable from this computer
   -c <ticket>            Listen locally and connect to a tunnel ticket
   --listen <ip:port>     Local listener for -c; defaults to the first free 127.0.0.1 port from 8080
-  --relay <https-url>    Force the serving endpoint through this relay
+  --relay <url>           Force the serving endpoint through this relay
   -k                     Accept a self-signed --relay certificate
 ";
 
@@ -88,14 +88,14 @@ Options:
 
 pub(crate) const RELAY_HELP: &str = "\
 Usage:
-  ii relay (--public <https-url> | --tls <domain> --cert <path> --key <path>) [-H <bind-port>]
+  ii relay [--port <port>] [--tls [--domain <name>] [--cert <path> --key <path>]]
 
 Options:
-  --public <https-url>  Self-signed mode; public HTTPS address including an optional port
-  --tls <domain>        Manual TLS mode; certificate DNS name
-  --cert <path>         PEM certificate chain for manual TLS mode
-  --key <path>          PEM private key for manual TLS mode
-  -H <bind-port>        Local HTTPS listener port; defaults to the public URL port or 443
+  --port <port>         HTTP or HTTPS listener port; defaults to a random free port
+  --tls                 Enable HTTPS with an ii-generated self-signed certificate
+  --domain <name>       TLS DNS name used for the advertised URL and self-signed certificate
+  --cert <path>         PEM certificate chain; replaces the generated certificate
+  --key <path>          PEM private key; requires --cert
 ";
 
 pub(crate) const DOCTOR_HELP: &str = "Usage:\n  ii doctor";

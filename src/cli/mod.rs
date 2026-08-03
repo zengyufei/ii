@@ -725,49 +725,60 @@ mod tests {
 
         let result = parse_args(["ii", "send", "file.txt", "-k"]);
         assert!(matches!(result, Err(ParseAction::Print { code: 2, .. })));
+
+        let result = parse_args([
+            "ii",
+            "send",
+            "file.txt",
+            "--relay",
+            "http://127.0.0.1",
+            "-k",
+        ]);
+        assert!(matches!(result, Err(ParseAction::Print { code: 2, .. })));
     }
 
     #[test]
-    fn relay_accepts_public_https_url() {
-        let cli = Cli::parse_from([
-            "ii",
-            "relay",
-            "--public",
-            "https://relay.example.com:8443",
-            "-H",
-            "8443",
-        ]);
+    fn relay_accepts_default_http_mode_and_port() {
+        let cli = Cli::parse_from(["ii", "relay", "--port=8443"]);
         match cli.command {
             Command::Relay(args) => {
                 assert_eq!(args.port, Some(8443));
-                assert_eq!(
-                    args.public.as_ref().map(|url| url.as_str()),
-                    Some("https://relay.example.com:8443/")
-                );
-                assert!(args.tls_domain.is_none());
+                assert!(!args.tls);
+                assert!(args.domain.is_none());
             }
             _ => panic!("expected relay command"),
         }
     }
 
     #[test]
-    fn relay_accepts_manual_tls_mode() {
+    fn relay_accepts_self_signed_and_manual_tls_modes() {
+        let self_signed =
+            Cli::parse_from(["ii", "relay", "--tls", "--domain", "relay.example.com"]);
+        match self_signed.command {
+            Command::Relay(args) => {
+                assert!(args.tls);
+                assert_eq!(args.domain.as_deref(), Some("relay.example.com"));
+                assert!(args.cert.is_none());
+                assert!(args.key.is_none());
+            }
+            _ => panic!("expected relay command"),
+        }
+
         let cli = Cli::parse_from([
             "ii",
             "relay",
             "--tls",
-            "relay.example.com",
             "--cert",
             "fullchain.pem",
             "--key",
             "privkey.pem",
-            "-H",
+            "--port",
             "8443",
         ]);
         match cli.command {
             Command::Relay(args) => {
-                assert!(args.public.is_none());
-                assert_eq!(args.tls_domain.as_deref(), Some("relay.example.com"));
+                assert!(args.tls);
+                assert!(args.domain.is_none());
                 assert_eq!(args.cert, Some(PathBuf::from("fullchain.pem")));
                 assert_eq!(args.key, Some(PathBuf::from("privkey.pem")));
                 assert_eq!(args.port, Some(8443));
@@ -777,54 +788,29 @@ mod tests {
     }
 
     #[test]
-    fn relay_rejects_missing_mode() {
-        let result = parse_args(["ii", "relay"]);
-        assert!(matches!(result, Err(ParseAction::Print { code: 2, .. })));
+    fn relay_rejects_invalid_tls_combinations_and_legacy_flags() {
+        for args in [
+            vec!["ii", "relay", "--port", "0"],
+            vec!["ii", "relay", "--domain", "relay.example.com"],
+            vec!["ii", "relay", "--cert", "fullchain.pem"],
+            vec!["ii", "relay", "--tls", "--cert", "fullchain.pem"],
+            vec!["ii", "relay", "--tls=relay.example.com"],
+            vec!["ii", "relay", "--public", "https://relay.example.com"],
+            vec!["ii", "relay", "-H", "8443"],
+        ] {
+            let result = parse_args(args);
+            assert!(matches!(result, Err(ParseAction::Print { code: 2, .. })));
+        }
     }
 
     #[test]
-    fn relay_rejects_non_https_public_url() {
-        let result = parse_args(["ii", "relay", "--public", "http://127.0.0.1:3340"]);
-        assert!(matches!(result, Err(ParseAction::Print { code: 2, .. })));
-    }
-
-    #[test]
-    fn relay_rejects_zero_ports_and_conflicting_modes() {
-        let invalid_public_port = parse_args(["ii", "relay", "--public", "https://127.0.0.1:0"]);
-        let invalid_bind_port = parse_args([
-            "ii",
-            "relay",
-            "--public",
-            "https://127.0.0.1:8443",
-            "-H",
-            "0",
-        ]);
-        let conflicting_modes = parse_args([
-            "ii",
-            "relay",
-            "--public",
-            "https://127.0.0.1:8443",
-            "--tls",
-            "relay.example.com",
-        ]);
-
-        assert!(matches!(
-            invalid_public_port,
-            Err(ParseAction::Print { code: 2, .. })
-        ));
-        assert!(matches!(
-            invalid_bind_port,
-            Err(ParseAction::Print { code: 2, .. })
-        ));
-        assert!(matches!(
-            conflicting_modes,
-            Err(ParseAction::Print { code: 2, .. })
-        ));
-    }
-
-    #[test]
-    fn send_rejects_non_https_custom_relay() {
-        let result = parse_args(["ii", "send", "file.txt", "--relay", "http://127.0.0.1"]);
-        assert!(matches!(result, Err(ParseAction::Print { code: 2, .. })));
+    fn send_accepts_http_custom_relay() {
+        let cli = Cli::parse_from(["ii", "send", "file.txt", "--relay", "http://127.0.0.1:3340"]);
+        match cli.command {
+            Command::Send(args) => {
+                assert_eq!(args.relay.unwrap().as_str(), "http://127.0.0.1:3340/")
+            }
+            _ => panic!("expected send command"),
+        }
     }
 }

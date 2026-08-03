@@ -166,8 +166,8 @@ ii tunnel -c ii1k7v...x9a --listen 0.0.0.0:8022
 本机连接 B 的监听端口，流量会经 Iroh 加密连接送到 A，再由 A 连接目标 TCP 端口。直连失败时默认可用 Iroh relay；自建公网 relay 时，在 A 上指定它，ticket 会把 relay 和自签信任策略带给 B：
 
 ```powershell
-ii relay --public https://公网IP:8443
-ii tunnel -s 192.168.1.10:5000 --relay https://公网IP:8443 -k
+ii relay --port 8443
+ii tunnel -s 192.168.1.10:5000 --relay http://公网IP:8443
 ```
 
 relay 只转发加密 Iroh 流量，不会把目标 TCP 端口直接开放到公网。ticket 内含本次 tunnel 的访问密钥，持有者可接入直到 A 停止服务，不要泄露。首版只支持 TCP。
@@ -268,40 +268,50 @@ ii version
 
 普通发文件不需要先理解 relay。只有你要自建中继服务，或者公司网络环境需要固定中继入口时，才需要看这一段。
 
-启动自签 HTTPS relay：
+直接启动 HTTP relay：
 
 ```powershell
-ii relay --public https://服务器公网IP:8443
+ii relay
 ```
 
-也可以使用域名：
+默认监听 `0.0.0.0` 的随机空闲端口，终端会打印主网卡 URL 和 `other:` 下的其余 IPv4 网卡 URL。`0.0.0.0` 仅用于监听，不能作为客户端地址；客户端使用实际可达的局域网 IP 或公网 IP 加打印出的端口。云服务器的公网 IP 可能由 NAT 提供，不一定出现在网卡列表中。
+
+固定端口：
 
 ```powershell
-ii relay --public https://relay.example.com
+ii relay --port 8443
 ```
 
-`--public` 是客户端实际访问的公网 HTTPS 地址，必须是 `https://主机[:端口]`。首次启动会自动在 relay 状态目录生成并持久化自签证书和私钥。默认监听 `--public` 的端口，未写端口就是 `443`；NAT 或反向代理需要转到不同后端端口时，用 `-H`：
+发送端指定 HTTP relay：
 
 ```powershell
-ii relay --public https://relay.example.com:8443 -H 9443
+ii send .\video.mp4 --relay http://服务器公网IP:8443
 ```
 
-发送端指定 relay：
+需要 HTTPS 时由 `ii` 自动生成当前进程使用的自签证书：
 
 ```powershell
+ii relay --tls --port 8443
 ii send .\video.mp4 --relay https://服务器公网IP:8443 -k
 ```
 
-`-k` 表示接受自签证书，并把该策略带进 ticket；接收方无需安装证书或配置 relay。首次连接仍可能遭遇中间人替换。
+`-k` 只用于 HTTPS，表示跳过该 relay 的证书校验，并把该策略带进 ticket；接收方无需安装证书或配置 relay。首次连接仍可能遭遇中间人替换。
 
-已有域名和 PEM 证书时，使用手工证书模式：
+自签 TLS 需要域名显示时：
 
 ```powershell
-ii relay --tls relay.example.com -H 8443 --cert D:\certs\fullchain.pem --key D:\certs\privkey.pem
+ii relay --tls --domain relay.example.com --port 8443
+ii send .\video.mp4 --relay https://relay.example.com:8443 -k
+```
+
+已有 PEM 证书时，使用手工证书替换自签证书：
+
+```powershell
+ii relay --tls --domain relay.example.com --port 8443 --cert D:\certs\fullchain.pem --key D:\certs\privkey.pem
 ii send .\video.mp4 --relay https://relay.example.com:8443
 ```
 
-手工证书模式不带 `-k`，客户端使用系统正常 TLS 校验。两种 `--relay` 都只走 HTTPS relay，不尝试 UDP 或直连；完整端口、状态路径和安全边界见 [ii.md](ii.md)。FTP 和 SFTP 的配置、ticket 和安全限制分别见 [ftp.md](ftp.md) 与 [sftp.md](sftp.md)。
+手工证书模式不带 `-k`，客户端使用系统正常 TLS 校验。HTTP 或 HTTPS 的 `--relay` 都只走 relay-only，不尝试 UDP 或直连；完整端口、TLS 和公网 NAT 边界见 [ii.md](ii.md)。FTP 和 SFTP 的配置、ticket 和安全限制分别见 [ftp.md](ftp.md) 与 [sftp.md](sftp.md)。
 
 ## 详细手册
 

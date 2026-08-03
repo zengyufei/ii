@@ -1,17 +1,11 @@
 use anyhow::Result;
 
-use crate::{relay, storage};
+use crate::storage;
 
 pub async fn run() -> Result<()> {
-    let config_path = relay::default_config_path()?;
     let s3_config_path = storage::default_config_path()?;
     println!("ii version: {}", env!("CARGO_PKG_VERSION"));
     println!("platform: {}", std::env::consts::OS);
-    println!("relay state: {}", config_path.display());
-    println!(
-        "relay config exists: {}",
-        if config_path.exists() { "yes" } else { "no" }
-    );
     println!("s3 config: {}", s3_config_path.display());
     println!(
         "s3 config exists: {}",
@@ -22,8 +16,8 @@ pub async fn run() -> Result<()> {
     report_ftp_config(&s3_config_path);
     report_sftp_config(&s3_config_path);
 
-    println!("relay modes: self-signed or manual TLS, always relay-only");
-    println!("relay start: ii relay --public https://PUBLIC_HOST[:PORT]");
+    println!("relay modes: HTTP by default; optional self-signed or manual TLS, always relay-only");
+    println!("relay start: ii relay [--port <port>] [--tls]");
     Ok(())
 }
 

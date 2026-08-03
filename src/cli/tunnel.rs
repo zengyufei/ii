@@ -50,7 +50,11 @@ pub(super) fn parse(args: Vec<String>) -> Result<TunnelArgs, ParseAction> {
                 return Err(ParseAction::error("--listen requires -c <ticket>"));
             }
             if accept_self_signed_relay && relay.is_none() {
-                return Err(ParseAction::error("-k requires -s --relay <https-url>"));
+                return Err(ParseAction::error("-k requires -s --relay <url>"));
+            }
+            if accept_self_signed_relay && relay.as_ref().is_some_and(|url| url.scheme() != "https")
+            {
+                return Err(ParseAction::error("-k requires an https:// relay URL"));
             }
             Ok(TunnelArgs::Serve {
                 target,
@@ -63,7 +67,7 @@ pub(super) fn parse(args: Vec<String>) -> Result<TunnelArgs, ParseAction> {
                 return Err(ParseAction::error("--relay requires -s <target-host:port>"));
             }
             if accept_self_signed_relay {
-                return Err(ParseAction::error("-k requires -s --relay <https-url>"));
+                return Err(ParseAction::error("-k requires -s --relay <url>"));
             }
             Ok(TunnelArgs::Connect { ticket, listen })
         }

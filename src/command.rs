@@ -83,8 +83,8 @@ pub struct RecvArgs {
 
 #[derive(Debug, Clone)]
 pub struct RelayArgs {
-    pub public: Option<iroh::RelayUrl>,
-    pub tls_domain: Option<String>,
+    pub tls: bool,
+    pub domain: Option<String>,
     pub cert: Option<PathBuf>,
     pub key: Option<PathBuf>,
     pub port: Option<u16>,

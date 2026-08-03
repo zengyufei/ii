@@ -10,13 +10,13 @@
 
 ```text
 ii help [<command>]
-ii send [<path>] [--name <name>] [-t] [-c] [-o <path>] [--web [--port <port>] [--token [<value>]] [--upload] [--path <dir>] | --s3 | --webdav | --ftp | --sftp] [--profile <name>] [-d] [-p] [--local] [--relay <https-url> [-k]] [--no-relay]
+ii send [<path>] [--name <name>] [-t] [-c] [-o <path>] [--web [--port <port>] [--token [<value>]] [--upload] [--path <dir>] | --s3 | --webdav | --ftp | --sftp] [--profile <name>] [-d] [-p] [--local] [--relay <url> [-k]] [--no-relay]
 ii web [<目录>] [--port <port>] [--token [<value>]] [--upload] [--path <目录>]
 ii webrtc [--port <port>] [--token [<value>]]
-ii tunnel -s <target-host:port> [--relay <https-url> [-k]]
+ii tunnel -s <target-host:port> [--relay <url> [-k]]
 ii tunnel -c <ticket> [--listen <ip:port>]
 ii recv <ticket> [-o <dir>] [--stdout] [--overwrite] [--resume] [--local] [--trace]
-ii relay (--public <https-url> | --tls <domain> --cert <path> --key <path>) [-H <bind-port>]
+ii relay [--port <port>] [--tls [--domain <name>] [--cert <path> --key <path>]]
 ii doctor
 ii version
 ```
@@ -103,13 +103,13 @@ tar czf - .\project | ii send --name project.tar.gz
 : 只走局域网优先路径，不走公网发现，不走公网 relay。
 
 `--relay <url>`
-: 使用 HTTPS relay-only 模式，URL 必须是 `https://主机[:端口]`。
+: 使用 HTTP 或 HTTPS relay-only 模式，URL 必须是 `http://主机[:端口]` 或 `https://主机[:端口]`。
   发送端和接收端都只通过该 relay 传输，不尝试 UDP、局域网发现或点对点直连。
-  默认按系统证书链校验 relay，适合 `ii relay --tls --cert --key` 的手工证书模式。
+  HTTPS 默认按系统证书链校验，适合 `ii relay --tls --cert --key` 的手工证书模式。
 
 `-k`
-: 只允许和 `--relay` 一起使用，表示接受该 relay 的自签证书。
-  用于 `ii relay --public https://...`。带 `-k` 的 ticket 会让接收端自动沿用自签信任策略。
+: 只允许和 HTTPS `--relay` 一起使用，表示接受该 relay 的自签证书。
+  用于 `ii relay --tls`。带 `-k` 的 ticket 会让接收端自动沿用自签信任策略。
 
 `--no-relay`
 : 禁用 relay，只允许直连和局域网路径。
@@ -147,7 +147,7 @@ tar czf - .\project | ii send --name project.tar.gz
 - `--web`、`--s3`、`--webdav`、`--ftp`、`--sftp`、`--local`、`--relay`、`--no-relay` 互斥。
 - 默认不需要用户选 relay。
 - 如果没有局域网或直连可用，默认会自动退到公网 relay。
-- 指定 `--relay https://...` 后，当前发送会强制走 HTTPS relay-only，不使用默认公网 relay。
+- 指定 `--relay http://...` 或 `--relay https://...` 后，当前发送会强制走 relay-only，不使用默认公网 relay。
 - 手工证书 relay 不带 `-k`；自签 relay 必须带 `-k`。
 
 ## `ii web`
@@ -196,11 +196,11 @@ ii tunnel -c ii1k7v...x9a
 默认先尝试直连和局域网路径，必要时使用 Iroh 默认 relay。指定 relay 时只在 A 上使用：
 
 ```powershell
-ii relay --public https://公网IP:8443
-ii tunnel -s 192.168.1.10:5000 --relay https://公网IP:8443 -k
+ii relay --port 8443
+ii tunnel -s 192.168.1.10:5000 --relay http://公网IP:8443
 ```
 
-`--relay <url>` 必须为 `https://主机[:端口]`，使本次 tunnel 强制走该 HTTPS relay；`-k` 仅和 `-s --relay` 同用，接受自签 relay。ticket 会把 relay URL 和自签信任策略带给 B，B 不需要再次配置。relay 只转发加密 Iroh 流量，不会把目标 TCP 端口直接暴露到公网。
+`--relay <url>` 可为 `http://主机[:端口]` 或 `https://主机[:端口]`，使本次 tunnel 强制走该 relay；`-k` 仅和 HTTPS `-s --relay` 同用，接受自签 relay。ticket 会把 relay URL 和自签信任策略带给 B，B 不需要再次配置。relay 只转发加密 Iroh 流量，不会把目标 TCP 端口直接暴露到公网。
 
 ticket 内有一次随机访问密钥。持有 ticket 的设备可以接入，直到 A 按 `Ctrl+C` 停止 tunnel；不要泄露 ticket。首版不支持 UDP、SOCKS、反向 tunnel 或后台守护。
 
@@ -336,74 +336,65 @@ ticket 里可以带足够完成连接、恢复传输和重复文件判定的最�
 
 ## `ii relay`
 
-`ii relay` 支持两种 HTTPS relay-only 服务模式：`--public` 自动生成自签证书，或 `--tls --cert --key` 使用已有证书。
-
-### 自签模式
-
-`--public` 启动自动生成证书的自签 relay，格式只能是 `https://主机[:公网端口]`：
+`ii relay` 默认启动 HTTP relay，不需要参数：
 
 ```powershell
-ii relay --public https://relay.example.com
-ii relay --public https://relay.example.com:8443
+ii relay
+ii relay --port 8443
 ```
 
-不传 `-H` 时，relay 监听 `--public` 中的端口；URL 没写端口时监听 `443`。如果 NAT 或反向代理把公网端口转发到不同的本机端口，用 `-H` 指定本机监听端口：
+它监听 `0.0.0.0:随机端口`，或监听 `--port` 指定的 `0.0.0.0:端口`。终端按 `ii web` 的格式输出主 IPv4 URL 和 `other:` 下的其余物理、虚拟网卡 IPv4 URL，但不显示二维码。`0.0.0.0` 只是 bind 地址，不能作为客户端 URL；客户端必须使用实际可达 IP 或域名。
+
+裸机或公网 IP 直接绑在网卡时，打印列表会包含公网地址。云服务器常由 NAT 映射公网 IP，网卡列表只有私网地址；这时从云控制台取得公网 IP，再与终端打印的端口拼成 relay URL。`ii` 不尝试猜测 NAT 映射。
+
+HTTP relay 示例：
 
 ```powershell
-ii relay --public https://relay.example.com:8443 -H 9443
+ii relay --port 8443
+ii send .\video.mp4 --relay http://公网IP:8443
+ii tunnel -s 192.168.1.10:5000 --relay http://公网IP:8443
 ```
 
-上例中客户端访问 `https://relay.example.com:8443`，relay 本机监听 `9443/tcp`。必须对外开放公网 HTTPS 端口；relay 不开放 HTTP、UDP 或 QUIC 端口。
+### TLS
 
-自签 relay 的客户端必须带 `-k`：
+`--tls` 开启 HTTPS。没有 `--cert` 和 `--key` 时，`ii` 仅为当前进程生成自签证书；客户端必须带 `-k`：
 
 ```powershell
-ii send .\video.mp4 --relay https://203.0.113.10:8443 -k
-ii send .\video.mp4 --relay https://relay.example.com -k
+ii relay --tls --port 8443
+ii send .\video.mp4 --relay https://公网IP:8443 -k
 ```
 
-`-k` 会把“接受自签证书”的策略写入 ticket。接收方只需运行 ticket 打印出的 `ii recv ...`，不需要另装证书、不需要写 relay 配置。
-
-### 自签证书和状态文件
-
-首次成功启动时，`ii relay` 自动生成并持久化自签 TLS 证书和私钥；重启时复用同一份材料：
-
-- Windows：`ii.exe` 同目录的 `relay.toml`、`relay-cert.pem`、`relay-key.pem`
-- Linux/macOS/其他 Unix-like：`/etc/ii/relay.toml`、`/etc/ii/relay-cert.pem`、`/etc/ii/relay-key.pem`
-
-`relay.toml` 记录该 relay 的公网 URL。后续必须继续使用同一 `--public`；若要换公网地址，删除这三个 state 文件后重新启动，让它生成新的 relay 身份。私钥或证书只剩其中一个、或内容损坏时，`ii relay` 会明确报错，不会悄悄换证书。
-
-自签模式不接受 `--tls`、`--cert` 或 `--key`。它不使用 ACME、Let’s Encrypt、HTTP relay、QUIC 或 metrics。
-
-### 手工证书模式
-
-使用已有的 PEM 完整证书链与私钥时：
+需要以域名访问时：
 
 ```powershell
-ii relay --tls relay.example.com -H 8443 --cert .\fullchain.pem --key .\privkey.pem
+ii relay --tls --domain relay.example.com --port 8443
+ii send .\video.mp4 --relay https://relay.example.com:8443 -k
 ```
 
-`--tls` 必须是证书 SAN 包含的裸域名；`--cert` 是 PEM 格式的完整证书链，`--key` 是匹配的 PEM 私钥。手工模式不读、不写 `relay.toml` 或自签证书文件。
+带 `--domain` 时，终端只输出该域名 HTTPS URL；自动证书包含该 DNS SAN。没有 `--domain` 时，终端输出 HTTPS 网卡 IP URL，仍需 `-k`。
 
-客户端使用正常 TLS 校验，不带 `-k`：
+已有 PEM 完整证书链和私钥时，成对提供 `--cert`、`--key` 替换自动证书：
 
 ```powershell
+ii relay --tls --domain relay.example.com --port 8443 --cert .\fullchain.pem --key .\privkey.pem
 ii send .\video.mp4 --relay https://relay.example.com:8443
 ```
 
-两种模式的 `--relay` 都强制 relay-only：不尝试局域网发现、UDP 打洞或点对点直连。
+手工证书模式通常配合 `--domain`，客户端正常校验证书，不带 `-k`。允许不带 `--domain` 使用手工证书；此时终端输出 HTTPS 网卡 IP URL，证书必须包含对应 IP SAN，否则用户需要自行改用匹配证书名或 `-k`。
+
+`--domain` 只能与 `--tls` 同用；`--cert` 和 `--key` 必须成对出现，且也要求 `--tls`。旧 `--public` 与 `-H` 已删除。HTTP 或 HTTPS 的 `--relay` 都强制 relay-only：不尝试局域网发现、UDP 打洞或点对点直连。
 
 ### 安全边界
 
-`-k` 对该 relay 自动接受自签证书，部署最简单，但首次连接时可被中间人替换 relay。Iroh 的端到端节点认证仍在；这个限制只针对 relay HTTPS 连接的首次信任。手工证书模式不带 `-k`，继续使用系统 TLS 证书校验。
+HTTP relay 不提供 relay 连接层 TLS；HTTPS 自签模式的 `-k` 会跳过证书校验，首次连接可能被中间人替换 relay。Iroh 的端到端节点认证仍在；手工证书模式不带 `-k`，继续使用系统 TLS 证书校验。
 
 ### 日志
 
-启动后会输出公网地址、本机监听端口、客户端连接和断开日志。需要更详细的协议日志时设置 `RUST_LOG`，例如：
+启动后会输出可访问 URL、客户端连接和断开日志。需要更详细的协议日志时设置 `RUST_LOG`，例如：
 
 ```powershell
 $env:RUST_LOG="debug"
-ii relay --public https://203.0.113.10:8443
+ii relay --port 8443
 ```
 
 ## `ii doctor`

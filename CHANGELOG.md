@@ -2,6 +2,14 @@
 
 本文件记录 `ii` 的重要变更。默认中文版本在这里，英文版本见 [CHANGELOG.en.md](CHANGELOG.en.md)。
 
+## 0.2.8 - 2026-08-03
+
+### 变更
+
+- `ii relay` 改为无参启动 HTTP relay，默认随机端口，支持 `--port` 固定端口；终端输出可访问 IPv4 URL 和 `other:` 网卡 URL。
+- `--tls` 改为可选自签 HTTPS 开关，`--domain` 指定 TLS 域名，`--cert` 和 `--key` 可替换自动证书；删除 `--public` 与 `-H`。
+- `ii send --relay` 与 `ii tunnel -s --relay` 支持 HTTP 或 HTTPS URL；`-k` 仅可用于 HTTPS relay。
+
 ## 0.2.7 - 2026-08-03
 
 ### 变更
