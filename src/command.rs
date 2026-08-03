@@ -31,6 +31,7 @@ pub struct SendArgs {
     pub webdav: bool,
     pub sftp: bool,
     pub web: bool,
+    pub web_port: Option<u16>,
     pub web_token: Option<String>,
     pub web_upload_dir: Option<PathBuf>,
     pub portable_webdav: bool,
@@ -43,12 +44,14 @@ pub struct SendArgs {
 #[derive(Debug, Clone, Default)]
 pub struct WebArgs {
     pub dir: Option<PathBuf>,
+    pub web_port: Option<u16>,
     pub web_token: Option<String>,
     pub web_upload_dir: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct WebrtcArgs {
+    pub web_port: Option<u16>,
     pub web_token: Option<String>,
 }
 

@@ -6,6 +6,7 @@ pub(super) fn parse(args: Vec<String>) -> Result<WebArgs, ParseAction> {
 
     while let Some(arg) = iter.next() {
         match split_long_value(&arg) {
+            Some(("port", value)) => out.web_port = Some(parse_port("--port", value)?),
             Some(("token", value)) => out.web_token = Some(value.to_string()),
             Some(("path", value)) => out.web_upload_dir = Some(PathBuf::from(value)),
             Some((flag, _)) => {
@@ -13,6 +14,7 @@ pub(super) fn parse(args: Vec<String>) -> Result<WebArgs, ParseAction> {
             }
             None => match arg.as_str() {
                 "-h" | "--help" => return Err(ParseAction::help(WEB_HELP)),
+                "--port" => out.web_port = Some(parse_port("--port", &iter.value("--port")?)?),
                 "--token" => out.web_token = Some(iter.value("--token")?),
                 "--path" => out.web_upload_dir = Some(PathBuf::from(iter.value("--path")?)),
                 _ if arg.starts_with('-') => {

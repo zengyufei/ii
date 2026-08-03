@@ -65,6 +65,7 @@ where
 
     let rest = args.split_off(1);
     let command = match command.as_str() {
+        "help" => return Err(help_for(rest)),
         "send" => Command::Send(send::parse(rest)?),
         "web" => Command::Web(web::parse(rest)?),
         "webrtc" => Command::Webrtc(webrtc::parse(rest)?),
@@ -77,6 +78,25 @@ where
     };
 
     Ok(Cli { command })
+}
+
+fn help_for(args: Vec<String>) -> ParseAction {
+    match args.as_slice() {
+        [] => ParseAction::help(HELP),
+        [flag] if is_help(flag) => ParseAction::help(HELP),
+        [topic] => match topic.as_str() {
+            "send" => ParseAction::help(SEND_HELP),
+            "web" => ParseAction::help(WEB_HELP),
+            "webrtc" => ParseAction::help(WEBRTC_HELP),
+            "tunnel" => ParseAction::help(TUNNEL_HELP),
+            "recv" => ParseAction::help(RECV_HELP),
+            "relay" => ParseAction::help(RELAY_HELP),
+            "doctor" => ParseAction::help(DOCTOR_HELP),
+            "version" => ParseAction::help(VERSION_HELP),
+            _ => ParseAction::error(format!("unknown help topic `{topic}`")),
+        },
+        _ => ParseAction::error("help accepts at most one command"),
+    }
 }
 
 #[cfg(test)]
@@ -211,15 +231,54 @@ mod tests {
     }
 
     #[test]
-    fn web_accepts_directory_token_and_upload_path() {
+    fn lan_web_commands_accept_explicit_ports() {
+        for args in [
+            vec!["ii", "send", "file.txt", "--web", "--port", "45123"],
+            vec!["ii", "send", "file.txt", "--web", "--port=45123"],
+        ] {
+            let cli = Cli::parse_from(args);
+            match cli.command {
+                Command::Send(args) => assert_eq!(args.web_port, Some(45123)),
+                _ => panic!("expected send command"),
+            }
+        }
+
+        for args in [
+            vec!["ii", "web", "shared", "--port", "45123"],
+            vec!["ii", "web", "shared", "--port=45123"],
+        ] {
+            let cli = Cli::parse_from(args);
+            match cli.command {
+                Command::Web(args) => assert_eq!(args.web_port, Some(45123)),
+                _ => panic!("expected web command"),
+            }
+        }
+
+        for args in [
+            vec!["ii", "webrtc", "--port", "45123"],
+            vec!["ii", "webrtc", "--port=45123"],
+        ] {
+            let cli = Cli::parse_from(args);
+            match cli.command {
+                Command::Webrtc(args) => assert_eq!(args.web_port, Some(45123)),
+                _ => panic!("expected webrtc command"),
+            }
+        }
+    }
+
+    #[test]
+    fn web_accepts_directory_token_upload_path_and_port() {
         let token = "A1b2C3d4E5f6G7h8";
         for args in [
             vec!["ii", "web"],
-            vec!["ii", "web", "shared", "--token", token, "--path", "uploads"],
+            vec![
+                "ii", "web", "shared", "--port", "45123", "--token", token, "--path", "uploads",
+            ],
             vec![
                 "ii",
                 "web",
                 "shared",
+                "--port=45123",
                 "--token=A1b2C3d4E5f6G7h8",
                 "--path=uploads",
             ],
@@ -229,6 +288,7 @@ mod tests {
                 Command::Web(args) => {
                     if args.dir.is_some() {
                         assert_eq!(args.dir, Some(PathBuf::from("shared")));
+                        assert_eq!(args.web_port, Some(45123));
                         assert_eq!(args.web_token.as_deref(), Some(token));
                         assert_eq!(args.web_upload_dir, Some(PathBuf::from("uploads")));
                     }
@@ -247,6 +307,11 @@ mod tests {
             vec!["ii", "web", "--token", "A1b2C3d4E5f6G7h!"],
             vec!["ii", "web", "--token"],
             vec!["ii", "web", "--path"],
+            vec!["ii", "web", "--port"],
+            vec!["ii", "web", "--port=0"],
+            vec!["ii", "web", "--port=-1"],
+            vec!["ii", "web", "--port=65536"],
+            vec!["ii", "web", "--port=nope"],
         ] {
             assert!(matches!(
                 parse_args(args),
@@ -292,24 +357,35 @@ mod tests {
 
     #[test]
     fn send_rejects_web_upload_path_without_web() {
-        assert!(matches!(
-            parse_args(["ii", "send", "file.txt", "--path", "uploads"]),
-            Err(ParseAction::Print { code: 2, .. })
-        ));
+        for args in [
+            vec!["ii", "send", "file.txt", "--path", "uploads"],
+            vec!["ii", "send", "file.txt", "--port", "45123"],
+            vec!["ii", "send", "file.txt", "--web", "--port=0"],
+            vec!["ii", "send", "file.txt", "--web", "--port=-1"],
+            vec!["ii", "send", "file.txt", "--web", "--port=65536"],
+            vec!["ii", "send", "file.txt", "--web", "--port=nope"],
+            vec!["ii", "send", "file.txt", "--web", "--port"],
+        ] {
+            assert!(matches!(
+                parse_args(args),
+                Err(ParseAction::Print { code: 2, .. })
+            ));
+        }
     }
 
     #[test]
-    fn webrtc_accepts_optional_token() {
+    fn webrtc_accepts_optional_token_and_port() {
         let token = "A1b2C3d4E5f6G7h8";
         for args in [
             vec!["ii", "webrtc"],
-            vec!["ii", "webrtc", "--token", token],
-            vec!["ii", "webrtc", "--token=A1b2C3d4E5f6G7h8"],
+            vec!["ii", "webrtc", "--port", "45123", "--token", token],
+            vec!["ii", "webrtc", "--port=45123", "--token=A1b2C3d4E5f6G7h8"],
         ] {
             let cli = Cli::parse_from(args);
             match cli.command {
                 Command::Webrtc(args) => {
                     if args.web_token.is_some() {
+                        assert_eq!(args.web_port, Some(45123));
                         assert_eq!(args.web_token.as_deref(), Some(token));
                     }
                 }
@@ -324,6 +400,11 @@ mod tests {
             vec!["ii", "webrtc", "shared"],
             vec!["ii", "webrtc", "-p"],
             vec!["ii", "webrtc", "--path", "uploads"],
+            vec!["ii", "webrtc", "--port"],
+            vec!["ii", "webrtc", "--port=0"],
+            vec!["ii", "webrtc", "--port=-1"],
+            vec!["ii", "webrtc", "--port=65536"],
+            vec!["ii", "webrtc", "--port=nope"],
             vec!["ii", "webrtc", "--token", "too-short"],
             vec!["ii", "webrtc", "--token"],
         ] {
@@ -462,6 +543,61 @@ mod tests {
     }
 
     #[test]
+    fn help_command_outputs_root_or_command_help() {
+        for args in [
+            vec!["ii", "help"],
+            vec!["ii", "help", "-h"],
+            vec!["ii", "help", "--help"],
+        ] {
+            match parse_args(args) {
+                Err(ParseAction::Print { text, code }) => {
+                    assert_eq!(code, 0);
+                    assert_eq!(text, HELP);
+                }
+                Ok(_) => panic!("expected root help"),
+            }
+        }
+
+        for (topic, expected) in [
+            ("send", SEND_HELP),
+            ("web", WEB_HELP),
+            ("webrtc", WEBRTC_HELP),
+            ("tunnel", TUNNEL_HELP),
+            ("recv", RECV_HELP),
+            ("relay", RELAY_HELP),
+            ("doctor", DOCTOR_HELP),
+            ("version", VERSION_HELP),
+        ] {
+            match parse_args(["ii", "help", topic]) {
+                Err(ParseAction::Print { text, code }) => {
+                    assert_eq!(code, 0, "{topic}");
+                    assert_eq!(text, expected, "{topic}");
+                }
+                Ok(_) => panic!("expected {topic} help"),
+            }
+        }
+    }
+
+    #[test]
+    fn help_command_rejects_unknown_or_extra_topics() {
+        for args in [
+            vec!["ii", "help", "help"],
+            vec!["ii", "help", "unknown"],
+            vec!["ii", "help", "send", "extra"],
+            vec!["ii", "help", "send", "--help"],
+        ] {
+            match parse_args(args) {
+                Err(ParseAction::Print { text, code }) => {
+                    assert_eq!(code, 2);
+                    assert!(text.starts_with("error: "));
+                    assert!(text.ends_with(HELP));
+                }
+                Ok(_) => panic!("expected help topic error"),
+            }
+        }
+    }
+
+    #[test]
     fn conflicting_backends_keep_exit_code_and_error_text() {
         match parse_args(["ii", "send", "--ftp", "--sftp", "file.txt"]) {
             Err(ParseAction::Print { text, code }) => {
@@ -482,6 +618,8 @@ mod tests {
             ("tunnel", TUNNEL_HELP),
             ("recv", RECV_HELP),
             ("relay", RELAY_HELP),
+            ("doctor", DOCTOR_HELP),
+            ("version", VERSION_HELP),
         ] {
             match parse_args(["ii", command, "--help"]) {
                 Err(ParseAction::Print { text, code }) => {

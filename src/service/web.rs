@@ -25,6 +25,7 @@ pub(super) async fn send_web(args: SendArgs) -> Result<()> {
             download_qr_svg: String::new(),
         },
         upload_dir,
+        args.web_port,
         args.web_token,
     )
     .await
@@ -33,5 +34,11 @@ async fn run_impl(args: WebArgs) -> Result<()> {
     let start_dir = std::env::current_dir().context("read current directory for web service")?;
     let root = directory_root(&start_dir, args.dir.as_deref()).await?;
     let upload_dir = web_upload_dir(&start_dir, args.web_upload_dir.as_deref());
-    serve_web(WebContent::Directory { root }, upload_dir, args.web_token).await
+    serve_web(
+        WebContent::Directory { root },
+        upload_dir,
+        args.web_port,
+        args.web_token,
+    )
+    .await
 }

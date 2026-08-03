@@ -9,9 +9,10 @@
 ## 命令总览
 
 ```text
-ii send [<path>] [--name <name>] [-t] [-c] [-o <path>] [--web [--token <value>] [--path <dir>] | --s3 | --webdav | --ftp | --sftp] [--profile <name>] [-d] [-p] [--local] [--relay <https-url> [-k]] [--no-relay]
-ii web [<目录>] [--token <value>] [--path <目录>]
-ii webrtc [--token <value>]
+ii help [<command>]
+ii send [<path>] [--name <name>] [-t] [-c] [-o <path>] [--web [--port <port>] [--token <value>] [--path <dir>] | --s3 | --webdav | --ftp | --sftp] [--profile <name>] [-d] [-p] [--local] [--relay <https-url> [-k]] [--no-relay]
+ii web [<目录>] [--port <port>] [--token <value>] [--path <目录>]
+ii webrtc [--port <port>] [--token <value>]
 ii tunnel -s <target-host:port> [--relay <https-url> [-k]]
 ii tunnel -c <ticket> [--listen <ip:port>]
 ii recv <ticket> [-o <dir>] [--stdout] [--overwrite] [--resume] [--local] [--trace]
@@ -19,6 +20,8 @@ ii relay (--public <https-url> | --tls <domain> --cert <path> --key <path>) [-H 
 ii doctor
 ii version
 ```
+
+`ii help` 显示命令总览；`ii help send`、`ii help web`、`ii help webrtc`、`ii help tunnel`、`ii help recv`、`ii help relay`、`ii help doctor`、`ii help version` 显示对应命令帮助，内容与 `<command> --help` 相同。
 
 ## 核心规则
 
@@ -84,6 +87,9 @@ tar czf - .\project | ii send --name project.tar.gz
 `--web`
 : 在局域网内临时开放一个无账号鉴权 HTTP 下载页。执行后会在主 URL 上方展示进入下载页的二维码，随后在 `other:` 下列出其余物理和虚拟网卡的 IPv4 URL；下载页顶部二维码直达 `/download`。网页可一次上传多个文件，默认写到启动命令当前目录的 `./ii/`，不支持上传目录。按 `Ctrl+C` 停止服务。文件直接下载；文件夹会按原目录名打包为 `.tar` 下载。它不生成 ticket，不能和 `-c`、`-o`、`--s3`、`--webdav`、`--ftp`、`--sftp`、`--local`、`--relay`、`--no-relay` 同时使用。
 
+`--port <port>`
+: 仅和 `--web` 同用，指定 `1` 到 `65535` 的 HTTP 监听端口。未提供时由系统随机选择；`0`、非数字、超范围或已占用端口会报错。
+
 `--token <value>`
 : 仅和 `--web` 同用，把网页、下载和上传 URL 固定到 `/<value>/` 路径下；遗漏或写错路径会返回 `404`。`value` 必须为 16 到 128 个 ASCII 字母、数字、`-` 或 `_`。不提供时仍使用原来的无令牌 URL。
 
@@ -146,23 +152,23 @@ tar czf - .\project | ii send --name project.tar.gz
 ```powershell
 ii web
 ii web .\shared
-ii web .\shared --token A1b2C3d4E5f6G7h8 --path .\uploads
+ii web .\shared --port 8080 --token A1b2C3d4E5f6G7h8 --path .\uploads
 ```
 
 `ii web` 不带路径时服务启动命令当前目录；带路径时必须是已有目录，文件路径会报错。网页提供 nginx 风格的递归目录浏览：目录可继续进入、`../` 返回父目录、每项显示名称、修改时间和大小；普通文件直接响应，不强制下载。网页顶部可一次上传多个独立文件，不支持上传目录。
 
 命令行会在主 IPv4 LAN URL 上方打印根页二维码，并在 `other:` 下打印其他物理和虚拟网卡 URL；网页不显示二维码。按 `Ctrl+C` 关闭服务。
 
-`--token <value>` 把目录、文件和上传 URL 固定到 `/<value>/` 下；遗漏或写错返回 `404`。令牌必须为 16 到 128 个 ASCII 字母、数字、`-` 或 `_`。`--path <目录>` 指定网页上传文件直接写入的目录；相对路径按启动目录解析，首次上传才创建目录，未指定时写入启动目录下的 `./ii/`。`-p` 不适用于 `ii web`，仍仅用于 WebDAV、FTP、SFTP 的便携 ticket。
+`--port <port>` 指定 `1` 到 `65535` 的 HTTP 监听端口，未提供时随机选择。`--token <value>` 把目录、文件和上传 URL 固定到 `/<value>/` 下；遗漏或写错返回 `404`。令牌必须为 16 到 128 个 ASCII 字母、数字、`-` 或 `_`。`--path <目录>` 指定网页上传文件直接写入的目录；相对路径按启动目录解析，首次上传才创建目录，未指定时写入启动目录下的 `./ii/`。`-p` 不适用于 `ii web`，仍仅用于 WebDAV、FTP、SFTP 的便携 ticket。
 
 ## `ii webrtc`
 
 ```powershell
 ii webrtc
-ii webrtc --token A1b2C3d4E5f6G7h8
+ii webrtc --port 8080 --token A1b2C3d4E5f6G7h8
 ```
 
-`ii webrtc` 在 `0.0.0.0` 的随机端口提供局域网页面。命令行在主 IPv4 LAN URL 上方打印二维码，并在 `other:` 下打印其他物理和虚拟网卡 URL；按 `Ctrl+C` 关闭服务。打开同一 URL 的浏览器自动成为临时编号设备，可以选择任一在线设备并发送多个独立文件或文本消息；文本只发送给当前选中设备，接收端在当前页面列表中显示完整消息并可逐条复制，对方文件仍自动接收并下载。
+`ii webrtc` 在 `0.0.0.0` 的 HTTP 端口提供局域网页面；`--port <port>` 可指定 `1` 到 `65535`，未提供时随机选择。命令行在主 IPv4 LAN URL 上方打印二维码，并在 `other:` 下打印其他物理和虚拟网卡 URL；按 `Ctrl+C` 关闭服务。打开同一 URL 的浏览器自动成为临时编号设备，可以选择任一在线设备并发送多个独立文件或文本消息；文本只发送给当前选中设备，接收端在当前页面列表中显示完整消息并可逐条复制，对方文件仍自动接收并下载。
 
 文本输入使用 UTF-8 字节传输，分片不超过 1 MiB，接收端重组为一条消息，不显示分片。接收消息列表只存在于当前页面，刷新后清空；`ii` 不保存消息，也不建立聊天记录。
 

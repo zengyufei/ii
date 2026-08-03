@@ -63,9 +63,10 @@ pub(crate) struct LanWebServer {
 pub(crate) async fn serve_web(
     mut content: WebContent,
     upload_dir: PathBuf,
+    web_port: Option<u16>,
     web_token: Option<String>,
 ) -> Result<()> {
-    let lan = start_lan_web_server(web_token.as_deref(), "ii web").await?;
+    let lan = start_lan_web_server(web_port, web_token.as_deref(), "ii web").await?;
     if let WebContent::Download {
         download_qr_svg, ..
     } = &mut content
@@ -96,12 +97,11 @@ pub(crate) async fn serve_web(
 }
 
 pub(crate) async fn start_lan_web_server(
+    port: Option<u16>,
     web_token: Option<&str>,
     label: &str,
 ) -> Result<LanWebServer> {
-    let listener = TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0))
-        .await
-        .with_context(|| format!("bind {label} server"))?;
+    let listener = bind_lan_web_listener(port, label).await?;
     let port = listener
         .local_addr()
         .with_context(|| format!("read {label} server address"))?
@@ -123,6 +123,12 @@ pub(crate) async fn start_lan_web_server(
     println!("press Ctrl+C to stop sharing");
 
     Ok(LanWebServer { listener, url })
+}
+
+pub(crate) async fn bind_lan_web_listener(port: Option<u16>, label: &str) -> Result<TcpListener> {
+    TcpListener::bind((Ipv4Addr::UNSPECIFIED, port.unwrap_or(0)))
+        .await
+        .with_context(|| format!("bind {label} server"))
 }
 pub(crate) fn web_upload_dir(start_dir: &Path, configured_dir: Option<&Path>) -> PathBuf {
     match configured_dir {

@@ -2,9 +2,10 @@ pub(crate) const HELP: &str = "\
 ii file transfer
 
 Usage:
+  ii help [command]
   ii send [options] [path]
-  ii web [directory] [--token <value>] [--path <dir>]
-  ii webrtc [--token <value>]
+  ii web [directory] [--port <port>] [--token <value>] [--path <dir>]
+  ii webrtc [--port <port>] [--token <value>]
   ii tunnel (-s <target-host:port> | -c <ticket>) [--listen <ip:port>] [--relay <https-url> [-k]]
   ii recv [options] <ticket>
   ii relay [options]
@@ -26,6 +27,7 @@ Options:
   --ftp
   --sftp
   --web
+  --port <port>
   --token <value>
   --path <dir>
   -p
@@ -39,18 +41,20 @@ Options:
 
 pub(crate) const WEB_HELP: &str = "\
 Usage:
-  ii web [directory] [--token <value>] [--path <dir>]
+  ii web [directory] [--port <port>] [--token <value>] [--path <dir>]
 
 Options:
+  --port <port>
   --token <value>
   --path <dir>
 ";
 
 pub(crate) const WEBRTC_HELP: &str = "\
 Usage:
-  ii webrtc [--token <value>]
+  ii webrtc [--port <port>] [--token <value>]
 
 Options:
+  --port <port>
   --token <value>
 ";
 

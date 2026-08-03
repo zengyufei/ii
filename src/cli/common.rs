@@ -67,6 +67,9 @@ pub(crate) fn validate_send(args: &SendArgs) -> Result<(), ParseAction> {
     if args.web_upload_dir.is_some() && !args.web {
         return Err(ParseAction::error("--path requires --web"));
     }
+    if args.web_port.is_some() && !args.web {
+        return Err(ParseAction::error("--port requires --web"));
+    }
     if let Some(token) = args.web_token.as_deref()
         && !is_valid_web_token(token)
     {

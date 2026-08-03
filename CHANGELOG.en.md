@@ -2,6 +2,13 @@
 
 All notable changes to `ii` are documented here. The default Chinese version is [CHANGELOG.md](CHANGELOG.md).
 
+## 0.2.6 - 2026-08-03
+
+### Added
+
+- `ii send ... --web`, `ii web`, and `ii webrtc` support `--port <port>` to select the HTTP listener port; omitting it keeps random port selection.
+- Added `ii help [command]` for root or command-specific help.
+
 ## 0.2.5 - 2026-08-01
 
 ### Fixed

@@ -10,6 +10,7 @@ pub(super) fn parse(args: Vec<String>) -> Result<SendArgs, ParseAction> {
             Some(("output", value)) => out.output = Some(PathBuf::from(value)),
             Some(("profile", value)) => out.profile = Some(value.to_string()),
             Some(("relay", value)) => out.relay = Some(parse_relay_url(value)?),
+            Some(("port", value)) => out.web_port = Some(parse_port("--port", value)?),
             Some(("token", value)) => out.web_token = Some(value.to_string()),
             Some(("path", value)) => out.web_upload_dir = Some(PathBuf::from(value)),
             Some((flag, _)) => {
@@ -28,6 +29,7 @@ pub(super) fn parse(args: Vec<String>) -> Result<SendArgs, ParseAction> {
                 "--webdav" => out.webdav = true,
                 "--sftp" => out.sftp = true,
                 "--web" => out.web = true,
+                "--port" => out.web_port = Some(parse_port("--port", &iter.value("--port")?)?),
                 "--token" => out.web_token = Some(iter.value("--token")?),
                 "--path" => out.web_upload_dir = Some(PathBuf::from(iter.value("--path")?)),
                 "-p" => out.portable_webdav = true,

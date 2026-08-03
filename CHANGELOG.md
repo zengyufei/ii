@@ -2,6 +2,13 @@
 
 本文件记录 `ii` 的重要变更。默认中文版本在这里，英文版本见 [CHANGELOG.en.md](CHANGELOG.en.md)。
 
+## 0.2.6 - 2026-08-03
+
+### 新增
+
+- `ii send ... --web`、`ii web` 与 `ii webrtc` 支持 `--port <port>` 指定 HTTP 监听端口；未提供时仍随机选择。
+- 新增 `ii help [command]`，可显示命令总览或指定命令的帮助。
+
 ## 0.2.5 - 2026-08-01
 
 ### 修复

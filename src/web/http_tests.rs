@@ -1,6 +1,7 @@
 use super::{
     http::{
-        WebContent, WebShare, serve_web_connection, web_other_hosts, web_root_path, web_upload_dir,
+        WebContent, WebShare, bind_lan_web_listener, serve_web_connection, start_lan_web_server,
+        web_other_hosts, web_root_path, web_upload_dir,
     },
     qr::svg as web_qr_svg,
     test_support::*,
@@ -96,4 +97,38 @@ fn lan_url_helpers_preserve_default_token_and_upload_paths() {
         ),
         vec![Ipv4Addr::new(10, 0, 0, 2), Ipv4Addr::new(172, 17, 0, 1)]
     );
+}
+
+#[tokio::test]
+async fn lan_listener_uses_random_or_requested_port() {
+    let random = bind_lan_web_listener(None, "test").await.unwrap();
+    assert_ne!(random.local_addr().unwrap().port(), 0);
+    drop(random);
+
+    let reservation = TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0)).await.unwrap();
+    let port = reservation.local_addr().unwrap().port();
+    drop(reservation);
+    let requested = bind_lan_web_listener(Some(port), "test").await.unwrap();
+    assert_eq!(requested.local_addr().unwrap().port(), port);
+    drop(requested);
+
+    let occupied = TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0)).await.unwrap();
+    assert!(
+        bind_lan_web_listener(Some(occupied.local_addr().unwrap().port()), "test")
+            .await
+            .is_err()
+    );
+}
+
+#[tokio::test]
+async fn lan_server_url_uses_requested_port_and_token_path() {
+    let reservation = TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0)).await.unwrap();
+    let port = reservation.local_addr().unwrap().port();
+    drop(reservation);
+
+    let lan = start_lan_web_server(Some(port), Some("A1b2C3d4E5f6G7h8"), "test")
+        .await
+        .unwrap();
+    assert_eq!(lan.listener.local_addr().unwrap().port(), port);
+    assert!(lan.url.ends_with(&format!(":{port}/A1b2C3d4E5f6G7h8/")));
 }
