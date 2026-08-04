@@ -13,10 +13,32 @@ use crate::{
 use anyhow::{Context, Result, bail};
 use iroh::TransportAddr;
 use std::{
+    collections::VecDeque,
     io::Write,
     path::PathBuf,
     process::{Command, Stdio},
+    sync::Arc,
 };
+use tokio::task::JoinSet;
+
+const MAX_ACTIVE_TRANSFERS: usize = 16;
+const MAX_QUEUED_TRANSFERS: usize = 1_000;
+
+#[derive(Clone, Copy)]
+struct TransferLimits {
+    active: usize,
+    queued: usize,
+}
+
+const DEFAULT_TRANSFER_LIMITS: TransferLimits = TransferLimits {
+    active: MAX_ACTIVE_TRANSFERS,
+    queued: MAX_QUEUED_TRANSFERS,
+};
+
+struct QueuedConnection {
+    number: usize,
+    conn: iroh::endpoint::Connection,
+}
 
 pub(super) async fn run(args: SendArgs) -> Result<()> {
     run_impl(args).await
@@ -126,7 +148,25 @@ where
     let ticket_str = ticket.encode()?;
     ticket_ready(&ticket_str)?;
 
-    let mut accepted = 0usize;
+    if args.keep_alive {
+        let accepted = serve_keep_alive(&endpoint, Arc::new(source), show_progress).await;
+        if accepted == 0 {
+            eprintln!("ii send: no receiver connected");
+        }
+        return Ok(());
+    }
+
+    let accepted = serve_once(&endpoint, &source, show_progress).await;
+
+    endpoint.close().await;
+    if accepted == 0 {
+        eprintln!("ii send: no receiver connected");
+    }
+    Ok(())
+}
+
+async fn serve_once(endpoint: &iroh::Endpoint, source: &Source, show_progress: bool) -> usize {
+    let mut accepted = 0;
     loop {
         tokio::select! {
             _ = tokio::signal::ctrl_c() => break,
@@ -151,9 +191,7 @@ where
                 match serve_one(conn, &source, show_progress).await {
                     Ok(ServeOutcome::Sent) => {
                         accepted += 1;
-                        if !args.keep_alive {
-                            break;
-                        }
+                        break;
                     }
                     Ok(ServeOutcome::Ignored) => {}
                     Err(err) => eprintln!("ii send: transfer failed: {err:#}"),
@@ -162,11 +200,131 @@ where
         }
     }
 
-    endpoint.close().await;
-    if accepted == 0 {
-        eprintln!("ii send: no receiver connected");
+    accepted
+}
+
+async fn serve_keep_alive(
+    endpoint: &iroh::Endpoint,
+    source: Arc<Source>,
+    show_progress: bool,
+) -> usize {
+    serve_keep_alive_with_limits(endpoint, source, show_progress, DEFAULT_TRANSFER_LIMITS).await
+}
+
+async fn serve_keep_alive_with_limits(
+    endpoint: &iroh::Endpoint,
+    source: Arc<Source>,
+    show_progress: bool,
+    limits: TransferLimits,
+) -> usize {
+    let mut accepted = 0;
+    let mut next_number = 1;
+    let mut waiting = VecDeque::new();
+    let mut handshakes = JoinSet::new();
+    let mut transfers = JoinSet::new();
+
+    loop {
+        start_queued_transfers(
+            &mut transfers,
+            &mut waiting,
+            &source,
+            show_progress,
+            limits.active,
+        );
+
+        tokio::select! {
+            biased;
+            _ = tokio::signal::ctrl_c() => break,
+            joined = transfers.join_next(), if !transfers.is_empty() => {
+                match joined {
+                    Some(Ok(Ok(ServeOutcome::Sent))) => accepted += 1,
+                    Some(Ok(Ok(ServeOutcome::Ignored))) | Some(Err(_)) | None => {}
+                    Some(Ok(Err(_))) => {}
+                }
+            }
+            joined = handshakes.join_next(), if !handshakes.is_empty() => {
+                match joined {
+                    Some(Ok(Ok(conn))) => {
+                        let queued = QueuedConnection { number: next_number, conn };
+                        next_number += 1;
+                        if transfers.len() < limits.active {
+                            start_transfer(&mut transfers, queued, Arc::clone(&source), show_progress);
+                        } else {
+                            waiting.push_back(queued);
+                        }
+                    }
+                    Some(Ok(Err(err))) => {
+                        eprintln!("ii send: failed to accept connection: {err:#}");
+                    }
+                    Some(Err(err)) => {
+                        eprintln!("ii send: connection task failed: {err}");
+                    }
+                    None => {}
+                }
+            }
+            incoming = endpoint.accept() => {
+                let Some(incoming) = incoming else {
+                    break;
+                };
+                if !has_capacity(transfers.len(), waiting.len(), handshakes.len(), limits) {
+                    incoming.refuse();
+                    continue;
+                }
+                handshakes.spawn(async move {
+                    let accepting = incoming.accept().context("accept incoming connection")?;
+                    accepting.await.context("complete incoming connection")
+                });
+            }
+        }
     }
-    Ok(())
+
+    endpoint.close().await;
+    waiting.clear();
+    handshakes.abort_all();
+    transfers.abort_all();
+    while handshakes.join_next().await.is_some() {}
+    while transfers.join_next().await.is_some() {}
+    accepted
+}
+
+fn has_capacity(active: usize, waiting: usize, handshakes: usize, limits: TransferLimits) -> bool {
+    active + waiting + handshakes < limits.active + limits.queued
+}
+
+fn start_queued_transfers(
+    transfers: &mut JoinSet<Result<ServeOutcome>>,
+    waiting: &mut VecDeque<QueuedConnection>,
+    source: &Arc<Source>,
+    show_progress: bool,
+    max_active: usize,
+) {
+    while transfers.len() < max_active {
+        let Some(queued) = waiting.pop_front() else {
+            break;
+        };
+        start_transfer(transfers, queued, Arc::clone(source), show_progress);
+    }
+}
+
+fn start_transfer(
+    transfers: &mut JoinSet<Result<ServeOutcome>>,
+    queued: QueuedConnection,
+    source: Arc<Source>,
+    show_progress: bool,
+) {
+    transfers.spawn(async move {
+        let result = crate::transport::p2p::serve_one_multiline(
+            queued.conn,
+            source.as_ref(),
+            show_progress,
+            format!("ii send #{}", queued.number),
+        )
+        .await;
+        if let Err(err) = &result {
+            eprintln!("ii send #{}: transfer failed: {err:#}", queued.number);
+        }
+        result
+    });
 }
 
 async fn send_s3<F>(args: SendArgs, show_progress: bool, ticket_ready: &F) -> Result<()>
@@ -432,4 +590,300 @@ fn try_copy_with_command(command: &str, text: &str) -> Result<()> {
         bail!("{command} exited with {status}");
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        command::RelayArgs,
+        relay::build_server_config,
+        transport::iroh::{EndpointPolicy, FILE_ALPN, bind_endpoint},
+    };
+    use iroh::RelayMode;
+    use tokio::time::{Duration, timeout};
+
+    async fn test_endpoint() -> iroh::Endpoint {
+        bind_endpoint(EndpointPolicy::standard(RelayMode::Disabled), FILE_ALPN)
+            .await
+            .unwrap()
+    }
+
+    async fn relay_endpoint(relay_url: iroh::RelayUrl) -> iroh::Endpoint {
+        bind_endpoint(EndpointPolicy::TrustedRelayOnly(relay_url), FILE_ALPN)
+            .await
+            .unwrap()
+    }
+
+    async fn test_relay() -> (iroh_relay::server::Server, iroh::RelayUrl) {
+        let relay = iroh_relay::server::Server::spawn(
+            build_server_config(&RelayArgs {
+                tls: false,
+                domain: None,
+                cert: None,
+                key: None,
+                port: None,
+            })
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+        let relay_url = format!("http://127.0.0.1:{}", relay.http_addr().unwrap().port())
+            .parse()
+            .unwrap();
+        (relay, relay_url)
+    }
+
+    #[test]
+    fn capacity_counts_handshakes_and_queue() {
+        let limits = TransferLimits {
+            active: 2,
+            queued: 3,
+        };
+        assert!(has_capacity(2, 2, 0, limits));
+        assert!(!has_capacity(2, 2, 1, limits));
+    }
+
+    #[tokio::test]
+    async fn queued_receiver_starts_after_stalled_receiver_closes() {
+        crate::install_crypto_provider();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("source.bin");
+        std::fs::write(&path, b"queued transfer").unwrap();
+        let source = Arc::new(Source::from_file(path, None).await.unwrap());
+        let sender = test_endpoint().await;
+        let sender_for_task = sender.clone();
+        let sender_task = tokio::spawn(async move {
+            serve_keep_alive_with_limits(
+                &sender_for_task,
+                Arc::clone(&source),
+                false,
+                TransferLimits {
+                    active: 1,
+                    queued: 1,
+                },
+            )
+            .await
+        });
+        let first = test_endpoint().await;
+        let first_conn = timeout(
+            Duration::from_secs(5),
+            first.connect(sender.addr(), FILE_ALPN),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let (_first_send, _first_recv) = first_conn.open_bi().await.unwrap();
+
+        let second = test_endpoint().await;
+        let second_conn = timeout(
+            Duration::from_secs(5),
+            second.connect(sender.addr(), FILE_ALPN),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let (mut second_send, mut second_recv) = second_conn.open_bi().await.unwrap();
+        second_send
+            .write_all(
+                &postcard::to_stdvec(&crate::ticket::ResumeRequest { resume_from: 0 }).unwrap(),
+            )
+            .await
+            .unwrap();
+        second_send.finish().unwrap();
+
+        let third = test_endpoint().await;
+        assert!(
+            timeout(
+                Duration::from_secs(5),
+                third.connect(sender.addr(), FILE_ALPN),
+            )
+            .await
+            .unwrap()
+            .is_err()
+        );
+
+        first_conn.close(0u32.into(), b"cancel");
+        let bytes = timeout(Duration::from_secs(5), second_recv.read_to_end(1024))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(bytes, b"queued transfer");
+
+        second_conn.close(0u32.into(), b"done");
+        sender_task.abort();
+        let _ = sender_task.await;
+        sender.close().await;
+        first.close().await;
+        second.close().await;
+        third.close().await;
+    }
+
+    #[tokio::test]
+    async fn waiting_connections_are_started_fifo() {
+        crate::install_crypto_provider();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("source.bin");
+        std::fs::write(&path, b"fifo transfer").unwrap();
+        let source = Arc::new(Source::from_file(path, None).await.unwrap());
+        let sender = test_endpoint().await;
+        let sender_for_task = sender.clone();
+        let sender_task = tokio::spawn(async move {
+            serve_keep_alive_with_limits(
+                &sender_for_task,
+                source,
+                false,
+                TransferLimits {
+                    active: 1,
+                    queued: 2,
+                },
+            )
+            .await
+        });
+
+        let first = test_endpoint().await;
+        let first_conn = timeout(
+            Duration::from_secs(5),
+            first.connect(sender.addr(), FILE_ALPN),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let (_first_send, _first_recv) = first_conn.open_bi().await.unwrap();
+
+        let second = test_endpoint().await;
+        let second_conn = timeout(
+            Duration::from_secs(5),
+            second.connect(sender.addr(), FILE_ALPN),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let (mut second_send, mut second_recv) = second_conn.open_bi().await.unwrap();
+        second_send
+            .write_all(
+                &postcard::to_stdvec(&crate::ticket::ResumeRequest { resume_from: 0 }).unwrap(),
+            )
+            .await
+            .unwrap();
+        second_send.finish().unwrap();
+
+        let third = test_endpoint().await;
+        let third_conn = timeout(
+            Duration::from_secs(5),
+            third.connect(sender.addr(), FILE_ALPN),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let (mut third_send, mut third_recv) = third_conn.open_bi().await.unwrap();
+        third_send
+            .write_all(
+                &postcard::to_stdvec(&crate::ticket::ResumeRequest { resume_from: 0 }).unwrap(),
+            )
+            .await
+            .unwrap();
+        third_send.finish().unwrap();
+
+        first_conn.close(0u32.into(), b"cancel");
+        let second_bytes = timeout(Duration::from_secs(5), second_recv.read_to_end(1024))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(second_bytes, b"fifo transfer");
+        assert!(
+            timeout(Duration::from_millis(250), third_recv.read_to_end(1024))
+                .await
+                .is_err()
+        );
+
+        second_conn.close(0u32.into(), b"done");
+        let third_bytes = timeout(Duration::from_secs(5), third_recv.read_to_end(1024))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(third_bytes, b"fifo transfer");
+
+        third_conn.close(0u32.into(), b"done");
+        sender_task.abort();
+        let _ = sender_task.await;
+        sender.close().await;
+        first.close().await;
+        second.close().await;
+        third.close().await;
+    }
+
+    #[tokio::test]
+    async fn stalled_receiver_does_not_block_another_active_transfer() {
+        crate::install_crypto_provider();
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("source.bin");
+        std::fs::write(&path, b"parallel transfer").unwrap();
+        let source = Arc::new(Source::from_file(path, None).await.unwrap());
+        let (relay, relay_url) = test_relay().await;
+        let sender = relay_endpoint(relay_url.clone()).await;
+        timeout(Duration::from_secs(5), sender.online())
+            .await
+            .unwrap();
+        let sender_for_task = sender.clone();
+        let sender_task = tokio::spawn(async move {
+            serve_keep_alive_with_limits(
+                &sender_for_task,
+                source,
+                false,
+                TransferLimits {
+                    active: 2,
+                    queued: 0,
+                },
+            )
+            .await
+        });
+
+        let stalled = relay_endpoint(relay_url.clone()).await;
+        timeout(Duration::from_secs(5), stalled.online())
+            .await
+            .unwrap();
+        let stalled_conn = timeout(
+            Duration::from_secs(5),
+            stalled.connect(sender.addr(), FILE_ALPN),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let (_stalled_send, _stalled_recv) = stalled_conn.open_bi().await.unwrap();
+
+        let receiver = relay_endpoint(relay_url).await;
+        timeout(Duration::from_secs(5), receiver.online())
+            .await
+            .unwrap();
+        let conn = timeout(
+            Duration::from_secs(5),
+            receiver.connect(sender.addr(), FILE_ALPN),
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        let (mut send, mut recv) = conn.open_bi().await.unwrap();
+        send.write_all(
+            &postcard::to_stdvec(&crate::ticket::ResumeRequest { resume_from: 0 }).unwrap(),
+        )
+        .await
+        .unwrap();
+        send.finish().unwrap();
+
+        let bytes = timeout(Duration::from_secs(5), recv.read_to_end(1024))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(bytes, b"parallel transfer");
+
+        conn.close(0u32.into(), b"done");
+        stalled_conn.close(0u32.into(), b"cancel");
+        sender_task.abort();
+        let _ = sender_task.await;
+        sender.close().await;
+        stalled.close().await;
+        receiver.close().await;
+        relay.shutdown().await.unwrap();
+    }
 }

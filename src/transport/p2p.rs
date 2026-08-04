@@ -293,12 +293,31 @@ pub(crate) async fn serve_one(
     source: &Source,
     show_progress: bool,
 ) -> Result<ServeOutcome> {
-    let (mut send, mut recv) = match conn.accept_bi().await {
-        Ok(streams) => streams,
-        Err(err) if err.to_string().contains("timed out") => return Ok(ServeOutcome::Ignored),
-        Err(err) => return Err(err).context("accept stream"),
-    };
-    let req = recv.read_to_end(64).await.context("read request")?;
+    serve_one_inner(conn, source, show_progress, None).await
+}
+
+pub(crate) async fn serve_one_multiline(
+    conn: iroh::endpoint::Connection,
+    source: &Source,
+    show_progress: bool,
+    label: String,
+) -> Result<ServeOutcome> {
+    serve_one_inner(conn, source, show_progress, Some(label)).await
+}
+
+async fn serve_one_inner(
+    conn: iroh::endpoint::Connection,
+    source: &Source,
+    show_progress: bool,
+    multiline_label: Option<String>,
+) -> Result<ServeOutcome> {
+    let (mut send, mut recv) =
+        match accept_transfer_stream(&conn, multiline_label.as_deref(), show_progress).await {
+            Ok(streams) => streams,
+            Err(err) if err.to_string().contains("timed out") => return Ok(ServeOutcome::Ignored),
+            Err(err) => return Err(err).context("accept stream"),
+        };
+    let req = read_transfer_request(&mut recv, multiline_label.as_deref(), show_progress).await?;
     let resume_from = if req.is_empty() {
         0
     } else {
@@ -306,12 +325,62 @@ pub(crate) async fn serve_one(
             .context("parse resume request")?
             .resume_from
     };
-    source
-        .stream_to(&mut send, resume_from, show_progress)
-        .await?;
+    match multiline_label {
+        Some(label) => {
+            source
+                .stream_to_multiline(&mut send, resume_from, show_progress, label)
+                .await?;
+        }
+        None => {
+            source
+                .stream_to(&mut send, resume_from, show_progress)
+                .await?
+        }
+    }
     send.finish().context("finish payload")?;
     conn.closed().await;
     Ok(ServeOutcome::Sent)
+}
+
+async fn accept_transfer_stream(
+    conn: &iroh::endpoint::Connection,
+    multiline_label: Option<&str>,
+    show_progress: bool,
+) -> Result<(iroh::endpoint::SendStream, iroh::endpoint::RecvStream)> {
+    let Some(label) = multiline_label.filter(|_| show_progress) else {
+        return Ok(conn.accept_bi().await?);
+    };
+    eprintln!("{label}: connected; waiting for transfer request");
+    let accept = conn.accept_bi();
+    tokio::pin!(accept);
+    let mut ticker = tokio::time::interval(Duration::from_secs(1));
+    ticker.tick().await;
+    loop {
+        tokio::select! {
+            streams = &mut accept => return Ok(streams?),
+            _ = ticker.tick() => eprintln!("{label}: waiting for transfer request"),
+        }
+    }
+}
+
+async fn read_transfer_request(
+    recv: &mut iroh::endpoint::RecvStream,
+    multiline_label: Option<&str>,
+    show_progress: bool,
+) -> Result<Vec<u8>> {
+    let read = recv.read_to_end(64);
+    tokio::pin!(read);
+    let Some(label) = multiline_label.filter(|_| show_progress) else {
+        return read.await.context("read request");
+    };
+    let mut ticker = tokio::time::interval(Duration::from_secs(1));
+    ticker.tick().await;
+    loop {
+        tokio::select! {
+            request = &mut read => return request.context("read request"),
+            _ = ticker.tick() => eprintln!("{label}: waiting for transfer request"),
+        }
+    }
 }
 
 pub(crate) fn filter_local_addrs(addr: iroh::EndpointAddr) -> iroh::EndpointAddr {

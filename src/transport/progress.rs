@@ -1,13 +1,16 @@
 use anyhow::{Context, Result};
 use std::{
+    borrow::Cow,
     io::{IsTerminal, Write},
     time::Duration,
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
 pub(crate) struct TransferProgress {
-    label: &'static str,
+    label: Cow<'static, str>,
     enabled: bool,
+    line_mode: bool,
+    draw_interval: Duration,
     total: Option<u64>,
     completed: u64,
     transferred: u64,
@@ -25,8 +28,31 @@ impl TransferProgress {
     ) -> Self {
         let now = std::time::Instant::now();
         Self {
-            label,
+            label: Cow::Borrowed(label),
             enabled,
+            line_mode: false,
+            draw_interval: Duration::from_millis(250),
+            total,
+            completed,
+            transferred: 0,
+            started: now,
+            last_draw: now,
+            last_rate_completed: completed,
+        }
+    }
+
+    pub(crate) fn multiline(
+        label: String,
+        enabled: bool,
+        total: Option<u64>,
+        completed: u64,
+    ) -> Self {
+        let now = std::time::Instant::now();
+        Self {
+            label: Cow::Owned(label),
+            enabled,
+            line_mode: true,
+            draw_interval: Duration::from_secs(1),
             total,
             completed,
             transferred: 0,
@@ -39,15 +65,27 @@ impl TransferProgress {
     pub(crate) fn advance(&mut self, bytes: u64) {
         self.completed = self.completed.saturating_add(bytes);
         self.transferred = self.transferred.saturating_add(bytes);
-        if self.enabled && self.last_draw.elapsed() >= Duration::from_millis(250) {
+        if self.enabled && self.last_draw.elapsed() >= self.draw_interval {
             self.draw(false);
         }
+    }
+
+    pub(crate) fn tick(&mut self) {
+        if self.enabled && self.line_mode && self.last_draw.elapsed() >= self.draw_interval {
+            self.draw(false);
+        }
+    }
+
+    fn is_multiline(&self) -> bool {
+        self.line_mode
     }
 
     pub(crate) fn finish(&mut self) {
         if self.enabled {
             self.draw(true);
-            eprintln!();
+            if !self.line_mode {
+                eprintln!();
+            }
         }
     }
 
@@ -99,7 +137,11 @@ impl TransferProgress {
             }
         };
 
-        eprint!("\r{message:<96}");
+        if self.line_mode {
+            eprintln!("{message}");
+        } else {
+            eprint!("\r{message:<96}");
+        }
         let _ = std::io::stderr().flush();
         self.last_draw = now;
         self.last_rate_completed = self.completed;
@@ -146,8 +188,30 @@ where
 {
     let mut buf = [0u8; 64 * 1024];
     let mut written = 0u64;
+    if !progress.is_multiline() {
+        loop {
+            let n = reader.read(&mut buf).await.context("read payload")?;
+            if n == 0 {
+                return Ok(written);
+            }
+            writer.write_all(&buf[..n]).await.context("write payload")?;
+            let n = n as u64;
+            written = written.saturating_add(n);
+            progress.advance(n);
+        }
+    }
+
+    let mut ticker = tokio::time::interval(Duration::from_secs(1));
+    ticker.tick().await;
     loop {
-        let n = reader.read(&mut buf).await.context("read payload")?;
+        let read = reader.read(&mut buf);
+        tokio::pin!(read);
+        let n = loop {
+            tokio::select! {
+                result = &mut read => break result.context("read payload")?,
+                _ = ticker.tick() => progress.tick(),
+            }
+        };
         if n == 0 {
             break;
         }

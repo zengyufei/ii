@@ -2,6 +2,12 @@
 
 All notable changes to `ii` are documented here. The default Chinese version is [CHANGELOG.md](CHANGELOG.md).
 
+## 0.2.9 - 2026-08-04
+
+### Changed
+
+- `ii send -t` now runs up to 16 concurrent receive tasks with up to 1,000 FIFO queued connections; one disconnected or timed-out receiver no longer blocks a resumed transfer in another free slot.
+
 ## 0.2.8 - 2026-08-03
 
 ### Changed

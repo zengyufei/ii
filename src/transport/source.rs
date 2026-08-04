@@ -147,6 +147,35 @@ impl Source {
         resume_from: u64,
         show_progress: bool,
     ) -> Result<()> {
+        self.stream_to_with_progress(
+            out,
+            resume_from,
+            TransferProgress::new("ii send", show_progress, self.size(), resume_from),
+        )
+        .await
+    }
+
+    pub(crate) async fn stream_to_multiline<W: AsyncWrite + Unpin>(
+        &self,
+        out: &mut W,
+        resume_from: u64,
+        show_progress: bool,
+        label: String,
+    ) -> Result<()> {
+        self.stream_to_with_progress(
+            out,
+            resume_from,
+            TransferProgress::multiline(label, show_progress, self.size(), resume_from),
+        )
+        .await
+    }
+
+    async fn stream_to_with_progress<W: AsyncWrite + Unpin>(
+        &self,
+        out: &mut W,
+        resume_from: u64,
+        mut progress: TransferProgress,
+    ) -> Result<()> {
         if resume_from > 0 && self.kind == PayloadKind::Dir {
             bail!("resume is only supported for regular files");
         }
@@ -156,8 +185,6 @@ impl Source {
                 .await
                 .context("seek resume offset")?;
         }
-        let mut progress =
-            TransferProgress::new("ii send", show_progress, self.size(), resume_from);
         copy_with_progress(&mut file, out, &mut progress)
             .await
             .context("stream payload")?;

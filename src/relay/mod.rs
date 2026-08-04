@@ -3,9 +3,11 @@ mod server;
 
 #[cfg(test)]
 use logging::LogFilter;
+#[cfg(test)]
+pub(crate) use server::build_server_config;
 pub use server::run;
 #[cfg(test)]
-use server::{advertised_urls, build_server_config, load_tls_server_config};
+use server::{advertised_urls, load_tls_server_config};
 
 #[cfg(test)]
 mod tests {
