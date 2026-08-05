@@ -12,7 +12,8 @@ use std::{
 };
 
 const DEFAULT_S3_PROFILE: &str = "default";
-const LEGACY_CLOUDFLARE_S3_PROFILE: &str = "cloudflare";
+const DEFAULT_R2_PROFILE: &str = "default";
+const DEFAULT_AZURE_PROFILE: &str = "default";
 const DEFAULT_WEBDAV_PROFILE: &str = "default";
 const DEFAULT_FTP_PROFILE: &str = "default";
 const DEFAULT_SFTP_PROFILE: &str = "default";
@@ -49,32 +50,38 @@ fn load_s3_profile_from_path(
 ) -> Result<S3ProfileSelection> {
     let mut config = load_config(&path)?;
     let existed = config.storage.s3.contains_key(profile_name);
-    let legacy_default = profile_name == DEFAULT_S3_PROFILE
-        && !existed
-        && config.storage.s3.contains_key(LEGACY_CLOUDFLARE_S3_PROFILE);
-    let mut profile = if legacy_default {
-        config
+    if !existed
+        && profile_name == DEFAULT_S3_PROFILE
+        && let Some(legacy_name) = config
             .storage
             .s3
-            .get(LEGACY_CLOUDFLARE_S3_PROFILE)
-            .cloned()
-            .unwrap_or_else(S3Profile::empty_cloudflare)
-    } else {
-        config
-            .storage
-            .s3
-            .get(profile_name)
-            .cloned()
-            .unwrap_or_else(S3Profile::empty_cloudflare)
-    };
+            .iter()
+            .find(|(_, profile)| profile.provider == "cloudflare-r2")
+            .map(|(name, _)| name)
+    {
+        bail!(
+            "R2 profile `{legacy_name}` must move to [storage.r2.{legacy_name}] and use `ii send <file> --r2`"
+        );
+    }
+    let mut profile = config
+        .storage
+        .s3
+        .get(profile_name)
+        .cloned()
+        .unwrap_or_else(S3Profile::empty);
 
-    let mut changed = legacy_default;
+    let mut changed = false;
     if profile.provider.trim().is_empty() {
-        profile.provider = "cloudflare-r2".to_string();
+        profile.provider = default_s3_provider();
         changed = true;
     }
+    if profile.provider == "cloudflare-r2" {
+        bail!(
+            "R2 profile `{profile_name}` must move to [storage.r2.{profile_name}] and use `ii send <file> --r2`"
+        );
+    }
     if profile.region.trim().is_empty() {
-        profile.region = "auto".to_string();
+        profile.region = "us-east-1".to_string();
         changed = true;
     }
     if profile.prefix.trim().is_empty() {
@@ -86,16 +93,7 @@ fn load_s3_profile_from_path(
         changed = true;
     }
 
-    if profile.provider == "cloudflare-r2"
-        && profile.endpoint.trim().is_empty()
-        && let Some(account_id) = profile.account_id.as_deref()
-        && !account_id.trim().is_empty()
-    {
-        profile.endpoint = cloudflare_r2_endpoint(account_id);
-        changed = true;
-    }
-
-    let missing = missing_cloudflare_fields(&profile);
+    let missing = missing_s3_fields(&profile);
     if !missing.is_empty() {
         if !allow_prompt || !std::io::stdin().is_terminal() {
             bail!(
@@ -104,11 +102,9 @@ fn load_s3_profile_from_path(
                 path.display()
             );
         }
-        println!("ii: Cloudflare R2 is not configured.");
-        println!("Open this page:");
-        println!("https://dash.cloudflare.com/?to=/:account/r2/api-tokens");
+        println!("ii: S3-compatible storage is not configured.");
         println!();
-        prompt_missing_cloudflare_fields(&mut profile)?;
+        prompt_missing_s3_fields(&mut profile, !existed)?;
         changed = true;
     }
 
@@ -119,6 +115,154 @@ fn load_s3_profile_from_path(
         .insert(profile_name.to_string(), profile.clone());
 
     Ok(S3ProfileSelection {
+        path,
+        config,
+        profile,
+        save_after_success: changed || !existed,
+    })
+}
+
+pub fn load_or_prompt_r2_profile() -> Result<R2ProfileSelection> {
+    load_or_prompt_r2_profile_from_path(default_config_path()?, DEFAULT_R2_PROFILE)
+}
+
+pub fn load_or_prompt_r2_profile_named(profile_name: &str) -> Result<R2ProfileSelection> {
+    load_or_prompt_r2_profile_from_path(default_config_path()?, profile_name)
+}
+
+pub fn load_r2_profile_noninteractive(profile_name: Option<&str>) -> Result<R2ProfileSelection> {
+    load_r2_profile_from_path(
+        default_config_path()?,
+        profile_name.unwrap_or(DEFAULT_R2_PROFILE),
+        false,
+    )
+}
+
+fn load_or_prompt_r2_profile_from_path(
+    path: PathBuf,
+    profile_name: &str,
+) -> Result<R2ProfileSelection> {
+    load_r2_profile_from_path(path, profile_name, true)
+}
+
+fn load_r2_profile_from_path(
+    path: PathBuf,
+    profile_name: &str,
+    allow_prompt: bool,
+) -> Result<R2ProfileSelection> {
+    let mut config = load_config(&path)?;
+    let existed = config.storage.r2.contains_key(profile_name);
+    let mut profile = config
+        .storage
+        .r2
+        .get(profile_name)
+        .cloned()
+        .unwrap_or_else(R2Profile::empty);
+    let mut changed = false;
+    if profile.prefix.trim().is_empty() {
+        profile.prefix = default_prefix();
+        changed = true;
+    }
+    if profile.presign_ttl_seconds == 0 {
+        profile.presign_ttl_seconds = default_presign_ttl_seconds();
+        changed = true;
+    }
+    let missing = missing_r2_fields(&profile);
+    if !missing.is_empty() {
+        if !allow_prompt || !std::io::stdin().is_terminal() {
+            bail!(
+                "R2 config is missing {}. Run `ii send <file> --r2` from an interactive terminal once, or edit {} manually.",
+                missing.join(", "),
+                path.display()
+            );
+        }
+        println!("ii: Cloudflare R2 is not configured.");
+        println!("Open this page:");
+        println!("https://dash.cloudflare.com/?to=/:account/r2/api-tokens");
+        println!();
+        prompt_missing_r2_fields(&mut profile)?;
+        changed = true;
+    }
+    validate_r2_profile(&profile).with_context(|| format!("R2 config {}", path.display()))?;
+    config
+        .storage
+        .r2
+        .insert(profile_name.to_string(), profile.clone());
+    Ok(R2ProfileSelection {
+        path,
+        config,
+        profile,
+        save_after_success: changed || !existed,
+    })
+}
+
+pub fn load_or_prompt_azure_profile() -> Result<AzureProfileSelection> {
+    load_or_prompt_azure_profile_from_path(default_config_path()?, DEFAULT_AZURE_PROFILE)
+}
+
+pub fn load_or_prompt_azure_profile_named(profile_name: &str) -> Result<AzureProfileSelection> {
+    load_or_prompt_azure_profile_from_path(default_config_path()?, profile_name)
+}
+
+pub fn load_azure_profile_noninteractive(
+    profile_name: Option<&str>,
+) -> Result<AzureProfileSelection> {
+    load_azure_profile_from_path(
+        default_config_path()?,
+        profile_name.unwrap_or(DEFAULT_AZURE_PROFILE),
+        false,
+    )
+}
+
+fn load_or_prompt_azure_profile_from_path(
+    path: PathBuf,
+    profile_name: &str,
+) -> Result<AzureProfileSelection> {
+    load_azure_profile_from_path(path, profile_name, true)
+}
+
+fn load_azure_profile_from_path(
+    path: PathBuf,
+    profile_name: &str,
+    allow_prompt: bool,
+) -> Result<AzureProfileSelection> {
+    let mut config = load_config(&path)?;
+    let existed = config.storage.azure.contains_key(profile_name);
+    let mut profile = config
+        .storage
+        .azure
+        .get(profile_name)
+        .cloned()
+        .unwrap_or_else(AzureProfile::empty);
+    let mut changed = false;
+    if profile.prefix.trim().is_empty() {
+        profile.prefix = default_prefix();
+        changed = true;
+    }
+    if profile.presign_ttl_seconds == 0 {
+        profile.presign_ttl_seconds = default_presign_ttl_seconds();
+        changed = true;
+    }
+    let missing = missing_azure_fields(&profile);
+    if !missing.is_empty() {
+        if !allow_prompt || !std::io::stdin().is_terminal() {
+            bail!(
+                "Azure config is missing {}. Run `ii send <file> --azure` from an interactive terminal once, or edit {} manually.",
+                missing.join(", "),
+                path.display()
+            );
+        }
+        println!("ii: Azure Blob Storage is not configured.");
+        println!();
+        prompt_missing_azure_fields(&mut profile, !existed)?;
+        changed = true;
+    }
+    validate_azure_profile(&profile).with_context(|| format!("Azure config {}", path.display()))?;
+    config
+        .storage
+        .azure
+        .insert(profile_name.to_string(), profile.clone());
+    Ok(AzureProfileSelection {
         path,
         config,
         profile,
@@ -374,6 +518,25 @@ pub fn build_bucket(profile: &S3Profile) -> Result<crate::s3::Client> {
     .context("create S3 bucket")
 }
 
+pub fn build_r2_bucket(profile: &R2Profile) -> Result<crate::s3::Client> {
+    build_bucket(&r2_as_s3_profile(profile))
+}
+
+pub fn r2_as_s3_profile(profile: &R2Profile) -> S3Profile {
+    S3Profile {
+        provider: "cloudflare-r2".to_string(),
+        account_id: Some(profile.account_id.clone()),
+        bucket: profile.bucket.clone(),
+        endpoint: cloudflare_r2_endpoint(&profile.account_id),
+        region: "auto".to_string(),
+        access_key_id: profile.access_key_id.clone(),
+        secret_access_key: profile.secret_access_key.clone(),
+        prefix: profile.prefix.clone(),
+        presign_ttl_seconds: profile.presign_ttl_seconds,
+        path_style: true,
+    }
+}
+
 pub fn normalized_object_key(prefix: &str, random_id: &str, name: &str) -> String {
     let prefix = prefix.trim_matches('/');
     let name = safe_key_component(name);
@@ -404,17 +567,61 @@ fn hex_lower(bytes: [u8; 16]) -> String {
     out
 }
 
-fn missing_cloudflare_fields(profile: &S3Profile) -> Vec<&'static str> {
+fn missing_s3_fields(profile: &S3Profile) -> Vec<&'static str> {
     let mut missing = Vec::new();
-    if profile.provider == "cloudflare-r2"
-        && profile.endpoint.trim().is_empty()
-        && profile
-            .account_id
-            .as_deref()
-            .unwrap_or_default()
-            .trim()
-            .is_empty()
-    {
+    if profile.endpoint.trim().is_empty() {
+        missing.push("Endpoint");
+    }
+    if profile.region.trim().is_empty() {
+        missing.push("Region");
+    }
+    if profile.bucket.trim().is_empty() {
+        missing.push("Bucket");
+    }
+    if profile.access_key_id.trim().is_empty() {
+        missing.push("Access Key ID");
+    }
+    if profile.secret_access_key.trim().is_empty() {
+        missing.push("Secret Access Key");
+    }
+    missing
+}
+
+fn prompt_missing_s3_fields(profile: &mut S3Profile, new_profile: bool) -> Result<()> {
+    if profile.endpoint.trim().is_empty() {
+        profile.endpoint = prompt_line("S3 endpoint (http(s)://host): ")?;
+    }
+    if new_profile {
+        let region = prompt_optional_line("S3 region (default us-east-1): ")?;
+        if !region.is_empty() {
+            profile.region = region;
+        }
+    } else if profile.region.trim().is_empty() {
+        profile.region = "us-east-1".to_string();
+    }
+    if profile.bucket.trim().is_empty() {
+        profile.bucket = prompt_line("Bucket: ")?;
+    }
+    if profile.access_key_id.trim().is_empty() {
+        profile.access_key_id = prompt_line("Access Key ID: ")?;
+    }
+    if profile.secret_access_key.trim().is_empty() {
+        profile.secret_access_key = prompt_line("Secret Access Key: ")?;
+    }
+    if new_profile {
+        let style = prompt_optional_line("Path-style addressing (yes/no, default yes): ")?;
+        profile.path_style = match style.as_str() {
+            "" | "yes" | "y" | "true" => true,
+            "no" | "n" | "false" => false,
+            _ => bail!("path-style addressing must be yes or no"),
+        };
+    }
+    Ok(())
+}
+
+fn missing_r2_fields(profile: &R2Profile) -> Vec<&'static str> {
+    let mut missing = Vec::new();
+    if profile.account_id.trim().is_empty() {
         missing.push("Account ID");
     }
     if profile.bucket.trim().is_empty() {
@@ -429,19 +636,9 @@ fn missing_cloudflare_fields(profile: &S3Profile) -> Vec<&'static str> {
     missing
 }
 
-fn prompt_missing_cloudflare_fields(profile: &mut S3Profile) -> Result<()> {
-    if profile.provider == "cloudflare-r2"
-        && profile.endpoint.trim().is_empty()
-        && profile
-            .account_id
-            .as_deref()
-            .unwrap_or_default()
-            .trim()
-            .is_empty()
-    {
-        let account_id = prompt_line("Account ID: ")?;
-        profile.endpoint = cloudflare_r2_endpoint(&account_id);
-        profile.account_id = Some(account_id);
+fn prompt_missing_r2_fields(profile: &mut R2Profile) -> Result<()> {
+    if profile.account_id.trim().is_empty() {
+        profile.account_id = prompt_line("Account ID: ")?;
     }
     if profile.bucket.trim().is_empty() {
         profile.bucket = prompt_line("Bucket: ")?;
@@ -451,6 +648,55 @@ fn prompt_missing_cloudflare_fields(profile: &mut S3Profile) -> Result<()> {
     }
     if profile.secret_access_key.trim().is_empty() {
         profile.secret_access_key = prompt_line("Secret Access Key: ")?;
+    }
+    Ok(())
+}
+
+fn missing_azure_fields(profile: &AzureProfile) -> Vec<&'static str> {
+    let mut missing = Vec::new();
+    if profile.account_name.trim().is_empty() {
+        missing.push("Account name");
+    }
+    if profile.container.trim().is_empty() {
+        missing.push("Container");
+    }
+    match profile.auth {
+        AzureAuth::SharedKey if profile.account_key.trim().is_empty() => {
+            missing.push("Account key")
+        }
+        AzureAuth::Sas if profile.sas_token.trim().is_empty() => missing.push("SAS token"),
+        _ => {}
+    }
+    missing
+}
+
+fn prompt_missing_azure_fields(profile: &mut AzureProfile, new_profile: bool) -> Result<()> {
+    if new_profile {
+        let auth = prompt_optional_line("Authentication (shared-key/sas, default shared-key): ")?;
+        profile.auth = match auth.as_str() {
+            "" | "shared-key" => AzureAuth::SharedKey,
+            "sas" => AzureAuth::Sas,
+            _ => bail!("Azure authentication must be shared-key or sas"),
+        };
+    }
+    if profile.account_name.trim().is_empty() {
+        profile.account_name = prompt_line("Account name: ")?;
+    }
+    if profile.container.trim().is_empty() {
+        profile.container = prompt_line("Container: ")?;
+    }
+    if profile.endpoint.is_none() {
+        let endpoint = prompt_optional_line("Blob endpoint (optional): ")?;
+        profile.endpoint = (!endpoint.is_empty()).then_some(endpoint);
+    }
+    match profile.auth {
+        AzureAuth::SharedKey if profile.account_key.trim().is_empty() => {
+            profile.account_key = prompt_line("Account key: ")?;
+        }
+        AzureAuth::Sas if profile.sas_token.trim().is_empty() => {
+            profile.sas_token = prompt_line("Container SAS token: ")?;
+        }
+        _ => {}
     }
     Ok(())
 }
@@ -587,6 +833,84 @@ pub fn validate_s3_profile(profile: &S3Profile) -> Result<()> {
         bail!("S3 endpoint must start with http:// or https://");
     }
     Ok(())
+}
+
+pub fn validate_r2_profile(profile: &R2Profile) -> Result<()> {
+    let mut missing = Vec::new();
+    if profile.account_id.trim().is_empty() {
+        missing.push("account_id");
+    }
+    if profile.bucket.trim().is_empty() {
+        missing.push("bucket");
+    }
+    if profile.access_key_id.trim().is_empty() {
+        missing.push("access_key_id");
+    }
+    if profile.secret_access_key.trim().is_empty() {
+        missing.push("secret_access_key");
+    }
+    if !missing.is_empty() {
+        bail!("R2 profile is missing {}", missing.join(", "));
+    }
+    Ok(())
+}
+
+pub fn validate_azure_profile(profile: &AzureProfile) -> Result<()> {
+    let missing = missing_azure_fields(profile);
+    if !missing.is_empty() {
+        bail!("Azure profile is missing {}", missing.join(", "));
+    }
+    if let Some(endpoint) = profile.endpoint.as_deref() {
+        let url = url::Url::parse(endpoint.trim()).context("parse Azure endpoint")?;
+        if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
+            bail!("Azure endpoint must start with http:// or https://");
+        }
+        if !url.username().is_empty()
+            || url.password().is_some()
+            || url.query().is_some()
+            || url.fragment().is_some()
+        {
+            bail!("Azure endpoint must not contain user info, a query, or a fragment");
+        }
+    }
+    if profile.auth == AzureAuth::Sas {
+        let token = profile.sas_token.trim().trim_start_matches('?');
+        let query = url::form_urlencoded::parse(token.as_bytes()).collect::<Vec<_>>();
+        if !query
+            .iter()
+            .any(|(key, value)| key == "sig" && !value.is_empty())
+        {
+            bail!("Azure SAS token is missing sig");
+        }
+        let permissions = azure_sas_permissions(token).unwrap_or_default();
+        if !permissions.contains('r') || !permissions.contains('w') {
+            bail!("Azure SAS token requires read and write permissions");
+        }
+        if azure_sas_field(token, "sr").as_deref() != Some("c") {
+            bail!("Azure SAS token must be a container SAS (sr=c)");
+        }
+    }
+    Ok(())
+}
+
+pub fn validate_azure_delete_permission(profile: &AzureProfile) -> Result<()> {
+    if profile.auth == AzureAuth::Sas
+        && !azure_sas_permissions(&profile.sas_token)
+            .is_some_and(|permissions| permissions.contains('d'))
+    {
+        bail!("Azure SAS token requires delete permission for -d");
+    }
+    Ok(())
+}
+
+fn azure_sas_permissions(token: &str) -> Option<String> {
+    azure_sas_field(token, "sp")
+}
+
+fn azure_sas_field(token: &str, wanted: &str) -> Option<String> {
+    url::form_urlencoded::parse(token.trim().trim_start_matches('?').as_bytes())
+        .find(|(key, _)| key == wanted)
+        .map(|(_, value)| value.into_owned())
 }
 
 fn validate_required_profile_fields(profile: &S3Profile, path: &Path) -> Result<()> {
@@ -731,6 +1055,14 @@ pub(crate) fn default_presign_ttl_seconds() -> u32 {
     86_400
 }
 
+pub(crate) fn default_s3_provider() -> String {
+    "generic-s3".to_string()
+}
+
+pub(crate) fn default_azure_auth() -> AzureAuth {
+    AzureAuth::SharedKey
+}
+
 pub(crate) fn default_path_style() -> bool {
     true
 }
@@ -851,30 +1183,68 @@ mod tests {
     }
 
     #[test]
-    fn s3_default_migrates_legacy_cloudflare_profile() {
+    fn s3_rejects_legacy_r2_profile_without_migration() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("ii.toml");
         let mut config = IiConfig::default();
-        config.storage.backend = Some("webdav".to_string());
-        config.storage.profile = Some("default".to_string());
         config.storage.s3.insert(
-            LEGACY_CLOUDFLARE_S3_PROFILE.to_string(),
-            complete_s3_profile("legacy-cloudflare"),
+            DEFAULT_S3_PROFILE.to_string(),
+            legacy_r2_s3_profile("legacy-cloudflare"),
         );
         save_config(&path, &config).unwrap();
 
-        let selection = load_or_prompt_s3_profile_from_path(path, DEFAULT_S3_PROFILE).unwrap();
+        let err = load_or_prompt_s3_profile_from_path(path, DEFAULT_S3_PROFILE).unwrap_err();
 
-        assert_eq!(selection.profile.bucket, "legacy-cloudflare");
-        assert!(selection.config.storage.s3.contains_key(DEFAULT_S3_PROFILE));
-        assert!(
-            selection
-                .config
-                .storage
-                .s3
-                .contains_key(LEGACY_CLOUDFLARE_S3_PROFILE)
+        assert!(err.to_string().contains("use `ii send <file> --r2`"));
+    }
+
+    #[test]
+    fn s3_default_rejects_legacy_named_r2_profile_without_migration() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ii.toml");
+        let mut config = IiConfig::default();
+        config
+            .storage
+            .s3
+            .insert("cloudflare".to_string(), legacy_r2_s3_profile("legacy"));
+        save_config(&path, &config).unwrap();
+
+        let err = load_or_prompt_s3_profile_from_path(path, DEFAULT_S3_PROFILE).unwrap_err();
+
+        assert!(err.to_string().contains("[storage.r2.cloudflare]"));
+    }
+
+    #[test]
+    fn r2_profiles_use_their_own_namespace() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("ii.toml");
+        let mut config = IiConfig::default();
+        config.storage.r2.insert(
+            DEFAULT_R2_PROFILE.to_string(),
+            complete_r2_profile("r2-default"),
         );
-        assert!(selection.save_after_success);
+        config.storage.s3.insert(
+            DEFAULT_S3_PROFILE.to_string(),
+            complete_s3_profile("s3-default"),
+        );
+        save_config(&path, &config).unwrap();
+
+        let selection = load_or_prompt_r2_profile_from_path(path, DEFAULT_R2_PROFILE).unwrap();
+
+        assert_eq!(selection.profile.bucket, "r2-default");
+        assert!(!selection.save_after_success);
+    }
+
+    #[test]
+    fn azure_sas_requires_download_and_upload_permissions() {
+        let mut profile = complete_azure_sas_profile("sp=rw&sr=c&sig=test");
+        validate_azure_profile(&profile).unwrap();
+        profile.sas_token = "sp=r&sr=c&sig=test".to_string();
+        assert!(validate_azure_profile(&profile).is_err());
+        profile.sas_token = "sp=rw&sr=c&sig=test".to_string();
+        assert!(validate_azure_delete_permission(&profile).is_err());
+        profile.sas_token = "sp=rw&sr=b&sig=test".to_string();
+        assert!(validate_azure_profile(&profile).is_err());
     }
 
     #[test]
@@ -1011,16 +1381,50 @@ mod tests {
 
     fn complete_s3_profile(bucket: &str) -> S3Profile {
         S3Profile {
-            provider: "cloudflare-r2".to_string(),
-            account_id: Some("account".to_string()),
+            provider: default_s3_provider(),
+            account_id: None,
             bucket: bucket.to_string(),
-            endpoint: "https://account.r2.cloudflarestorage.com".to_string(),
-            region: "auto".to_string(),
+            endpoint: "https://s3.example.com".to_string(),
+            region: "us-east-1".to_string(),
             access_key_id: "key-id".to_string(),
             secret_access_key: "secret".to_string(),
             prefix: default_prefix(),
             presign_ttl_seconds: default_presign_ttl_seconds(),
             path_style: default_path_style(),
+        }
+    }
+
+    fn legacy_r2_s3_profile(bucket: &str) -> S3Profile {
+        S3Profile {
+            provider: "cloudflare-r2".to_string(),
+            account_id: Some("account".to_string()),
+            endpoint: "https://account.r2.cloudflarestorage.com".to_string(),
+            region: "auto".to_string(),
+            ..complete_s3_profile(bucket)
+        }
+    }
+
+    fn complete_r2_profile(bucket: &str) -> R2Profile {
+        R2Profile {
+            account_id: "account".to_string(),
+            bucket: bucket.to_string(),
+            access_key_id: "key-id".to_string(),
+            secret_access_key: "secret".to_string(),
+            prefix: default_prefix(),
+            presign_ttl_seconds: default_presign_ttl_seconds(),
+        }
+    }
+
+    fn complete_azure_sas_profile(sas_token: &str) -> AzureProfile {
+        AzureProfile {
+            auth: AzureAuth::Sas,
+            account_name: "account".to_string(),
+            container: "files".to_string(),
+            endpoint: None,
+            account_key: String::new(),
+            sas_token: sas_token.to_string(),
+            prefix: default_prefix(),
+            presign_ttl_seconds: default_presign_ttl_seconds(),
         }
     }
 

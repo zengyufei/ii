@@ -64,7 +64,10 @@ async fn run_impl(args: RecvArgs) -> Result<()> {
         trace_endpoint_addr("ticket endpoints", endpoint, &trace);
     }
     if let Some(s3) = ticket.s3_route() {
-        trace.info(format_args!("ticket s3 object: {}", s3.object_key));
+        trace.info(format_args!(
+            "ticket object-storage object: {}",
+            s3.object_key
+        ));
     }
 
     let out_dir = args

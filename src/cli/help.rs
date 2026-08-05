@@ -28,7 +28,9 @@ Options:
   -t
   -c, --copy
   -o, --output <path>
-  --s3
+  --s3                 Generic S3-compatible object storage
+  --r2                 Cloudflare R2
+  --azure              Azure Blob Storage (Shared Key or SAS)
   --webdav
   --ftp
   --sftp

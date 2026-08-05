@@ -1,5 +1,6 @@
 use anyhow::{Result, bail};
 
+pub(crate) mod azure;
 pub(crate) mod ftp;
 pub(crate) mod s3;
 pub(crate) mod sftp;

@@ -32,6 +32,8 @@ impl ParseAction {
 pub(crate) fn validate_send(args: &SendArgs) -> Result<(), ParseAction> {
     let backend_count = [
         args.s3,
+        args.r2,
+        args.azure,
         args.ftp,
         args.webdav,
         args.sftp,
@@ -46,7 +48,7 @@ pub(crate) fn validate_send(args: &SendArgs) -> Result<(), ParseAction> {
 
     if backend_count > 1 {
         return Err(ParseAction::error(
-            "--s3, --webdav, --ftp, --sftp, --web, --local, --relay and --no-relay conflict with each other",
+            "--s3, --r2, --azure, --webdav, --ftp, --sftp, --web, --local, --relay and --no-relay conflict with each other",
         ));
     }
 

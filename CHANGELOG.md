@@ -2,6 +2,17 @@
 
 本文件记录 `ii` 的重要变更。默认中文版本在这里，英文版本见 [CHANGELOG.en.md](CHANGELOG.en.md)。
 
+## 0.3.1 - 2026-08-05
+
+### 新增
+
+- `ii send --r2` 使用独立的 Cloudflare R2 profile；`ii send --azure` 支持 Azure Block Blob 的 Shared Key 或 Container SAS。
+
+### 变更
+
+- `ii send --s3` 现在只表示通用 S3 兼容对象存储，首次配置 endpoint、region、bucket、凭据和 path-style。
+- 旧 `[storage.s3.<name>]` 的 `provider = "cloudflare-r2"` 不再迁移；改写为 `[storage.r2.<name>]` 并使用 `--r2`。已生成的签名对象 URL ticket 仍可接收。
+
 ## 0.3.0 - 2026-08-05
 
 ### 新增

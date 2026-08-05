@@ -10,7 +10,7 @@
 
 ```text
 ii help [<command>]
-ii send [<path>...] [--name <name>] [--include <glob>] [--exclude <glob>] [--rate <bytes/s>] [--json] [-t] [-c] [-o <path>] [--web [--port <port>] [--bind <ip>] [--token [<value>]] [--upload] [--path <path>] | --s3 | --webdav | --ftp | --sftp] [--profile <name>] [-d] [-p] [--local] [--relay <url> [-k]] [--no-relay]
+ii send [<path>...] [--name <name>] [--include <glob>] [--exclude <glob>] [--rate <bytes/s>] [--json] [-t] [-c] [-o <path>] [--web [--port <port>] [--bind <ip>] [--token [<value>]] [--upload] [--path <path>] | --s3 | --r2 | --azure | --webdav | --ftp | --sftp] [--profile <name>] [-d] [-p] [--local] [--relay <url> [-k]] [--no-relay]
 ii web [<目录>] [--port <port>] [--bind <ip>] [--token [<value>]] [--upload] [--path <目录>]
 ii dav [<目录>] [--port <port>] [--bind <ip>] [--token [<value>]] [--read-only]
 ii webrtc [--port <port>] [--bind <ip>] [--token [<value>]]
@@ -32,7 +32,7 @@ ii version
 - 默认先走直连和局域网，必要时再走公网 relay。
 - 需要显式限制路径时，用 `--local`、`--relay`、`--no-relay`。
 - `ii relay` 是运维命令，不是用户日常发文件要记的东西。
-- `--s3`、`--webdav`、`--ftp` 和 `--sftp` 是可选中转后端，第一次会初始化本机 `ii.toml`。
+- `--s3`、`--r2`、`--azure`、`--webdav`、`--ftp` 和 `--sftp` 是可选中转后端，第一次会初始化本机 `ii.toml`。
 
 ## `ii send`
 
@@ -87,7 +87,7 @@ tar czf - .\project | ii send --name project.tar.gz
   如果文件已存在，会覆盖。这个 `-o` 属于 `ii send`，不影响 `ii recv -o <dir>` 的保存目录语义。
 
 `--web`
-: 在局域网内临时开放一个无账号鉴权 HTTP 下载页。执行后会在主 URL 上方展示进入下载页的二维码，随后在 `other:` 下列出其余物理和虚拟网卡的 IPv4 URL；下载页顶部二维码直达 `/download`。默认只提供下载；传入 `--upload` 后才开放多文件上传。按 `Ctrl+C` 停止服务。文件直接下载；文件夹会按原目录名打包为 `.tar` 下载。它不生成 ticket，不能和 `-c`、`-o`、`--s3`、`--webdav`、`--ftp`、`--sftp`、`--local`、`--relay`、`--no-relay` 同时使用。
+: 在局域网内临时开放一个无账号鉴权 HTTP 下载页。执行后会在主 URL 上方展示进入下载页的二维码，随后在 `other:` 下列出其余物理和虚拟网卡的 IPv4 URL；下载页顶部二维码直达 `/download`。默认只提供下载；传入 `--upload` 后才开放多文件上传。按 `Ctrl+C` 停止服务。文件直接下载；文件夹会按原目录名打包为 `.tar` 下载。它不生成 ticket，不能和 `-c`、`-o`、`--s3`、`--r2`、`--azure`、`--webdav`、`--ftp`、`--sftp`、`--local`、`--relay`、`--no-relay` 同时使用。
 
 `--port <port>`
 : 仅和 `--web` 同用，指定 `1` 到 `65535` 的 HTTP 监听端口。未提供时由系统随机选择；`0`、非数字、超范围或已占用端口会报错。
@@ -132,17 +132,20 @@ tar czf - .\project | ii send --name project.tar.gz
 : 禁用 relay，只允许直连和局域网路径。
 
 `--s3`
-: 走对象存储后端，不走 peer/relay 路径。默认 profile 是 `default`，默认 provider 是 Cloudflare R2。  
-  如果本机还没有配置，`ii` 会在终端里依次提示 `Account ID`、`Bucket`、`Access Key ID`、`Secret Access Key`，成功后把配置写到平台默认路径：Windows 是 `ii.exe` 同目录下的 `ii.toml`，Linux/macOS/其他 Unix-like 是 `/etc/ii/ii.toml`。  
-  之后再执行 `ii send ... --s3` 时，会直接复用这份配置。
+: 走通用 S3 兼容对象存储，不走 peer/relay 路径。默认 profile 是 `default`；首次使用依次配置 endpoint、region、bucket、access key、secret 和 path-style。path-style 默认开启，可改为虚拟主机风格。上传、HEAD 同 MD5 去重、流式 PUT、预签名 GET/DELETE 和 Range 续传都使用 S3 兼容 API。
+
+`--r2`
+: 走 Cloudflare R2，不走 peer/relay 路径。默认 profile 是 `default`；首次使用配置 Account ID、bucket、access key 和 secret。endpoint 固定推导为 R2 S3 API endpoint，region 固定为 `auto`，path-style 固定开启。R2 与通用 S3 使用独立配置段。
+
+`--azure`
+: 走 Azure Block Blob，不走 peer/relay 路径。默认 profile 是 `default`；支持 `auth = "shared-key"` 或 `auth = "sas"`。Shared Key 会生成对象级 GET SAS，使用 `-d` 时再生成对象级 DELETE SAS；SAS 模式要求 Container SAS 具有 `r`、`w` 权限，`-d` 还要求 `d`。SAS 会完整写入 ticket，ticket 泄露者得到 SAS 本身的全部权限范围。
 
 `--profile <name>`
-: 只在 `--s3`、`--webdav`、`--ftp` 或 `--sftp` 模式下生效，用来选择 `ii.toml` 里的后端 profile。
-  例子：`ii send .\file.zip --s3 --profile work`、`ii send .\file.zip --webdav --profile nas`、`ii send .\file.zip --ftp --profile legacy`、`ii send .\file.zip --sftp --profile server`。
-  四种后端不指定时都默认使用 `default`。旧的 `[storage.s3.cloudflare]` 会自动兼容迁移为 S3 的 `default` profile。
+: 只在 `--s3`、`--r2`、`--azure`、`--webdav`、`--ftp` 或 `--sftp` 模式下生效，用来选择 `ii.toml` 里的后端 profile。
+  例子：`ii send .\file.zip --s3 --profile work`、`ii send .\file.zip --r2 --profile r2`、`ii send .\file.zip --azure --profile blob`、`ii send .\file.zip --webdav --profile nas`。六种后端不指定时都默认使用 `default`。旧 S3 profile 若 `provider = "cloudflare-r2"` 会明确报错，必须手工写到 `[storage.r2.<name>]` 并改用 `--r2`；不会自动迁移或改写旧配置。
 
 `-d`
-: 只在 `--s3`、`--webdav`、`--ftp` 或 `--sftp` 模式下生效。接收端拿到文件后，会尝试删除中转端里的对应对象；删除失败会忽略，不影响下载结果。
+: 只在 `--s3`、`--r2`、`--azure`、`--webdav`、`--ftp` 或 `--sftp` 模式下生效。接收端拿到文件后，会尝试删除中转端里的对应对象；删除失败会忽略，不影响下载结果。
 
 `--webdav`
 : 走 WebDAV 中转后端，不走 peer/relay 路径。  
@@ -155,13 +158,55 @@ tar czf - .\project | ii send --name project.tar.gz
 `--sftp`
 : 走 SFTP 中转后端，不走 peer/relay 路径。首次缺配置时，`ii` 提示主机、用户名和密码或私钥路径，上传成功后才写入 `ii.toml`。支持密码与 SSH 私钥认证。每次连接都会打印并直接接受服务器 SSH SHA-256 主机指纹，不保存 known-hosts；服务器仍可被中间人替换。详见 [sftp.md](sftp.md)。
 
+`SMB/NFS`
+: 不提供原生 SMB/NFS 中转。SMB 的认证、签名、加密和 dialect 兼容，以及 NFS 的 RPC、认证、端口发现和版本兼容，不适合当前 Windows/Linux/macOS 完整兼容和小包体目标。系统已挂载的 SMB/NFS 目录仍可直接作为本地 `ii send` 输入。
+
 `-p`
 : 只在 `--webdav`、`--ftp` 或 `--sftp` 模式下生效。生成便携 ticket。WebDAV/FTP ticket 写入 URL、用户名和密码；SFTP 密码 ticket 写入密码，私钥 ticket 写入私钥文本和口令。
   ticket 只有编码，没有加密。谁拿到 ticket 谁就拿到了这次后端访问凭据。接收成功后，配置会写入本机 `ii.toml`；便携 SFTP 私钥会另存为密钥文件，配置只保存路径。
 
+### 对象存储配置
+
+Windows 配置文件在 `ii.exe` 同目录的 `ii.toml`；Linux、macOS 和其他 Unix-like 在 `/etc/ii/ii.toml`。三个对象存储后端各自使用独立 profile：
+
+```toml
+[storage.s3.default]
+endpoint = "https://s3.example.com"
+region = "us-east-1"
+bucket = "files"
+access_key_id = "..."
+secret_access_key = "..."
+path_style = true
+prefix = "ii/"
+presign_ttl_seconds = 86400
+```
+
+```toml
+[storage.r2.default]
+account_id = "..."
+bucket = "files"
+access_key_id = "..."
+secret_access_key = "..."
+prefix = "ii/"
+presign_ttl_seconds = 86400
+```
+
+```toml
+[storage.azure.default]
+auth = "shared-key"
+account_name = "..."
+container = "files"
+account_key = "..."
+# endpoint = "https://<account>.blob.core.windows.net"
+prefix = "ii/"
+presign_ttl_seconds = 86400
+```
+
+Azure SAS 模式把 `auth` 改为 `"sas"`，移除 `account_key`，加入具有 `sr=c`、`sp=rw` 的 `sas_token`；使用 `-d` 时还需要 `sp` 包含 `d`。自定义 `endpoint` 可用于 Azure China、Azure Stack 或 Azurite。
+
 ### 路径规则
 
-- `--web`、`--s3`、`--webdav`、`--ftp`、`--sftp`、`--local`、`--relay`、`--no-relay` 互斥。
+- `--web`、`--s3`、`--r2`、`--azure`、`--webdav`、`--ftp`、`--sftp`、`--local`、`--relay`、`--no-relay` 互斥。
 - 默认不需要用户选 relay。
 - 如果没有局域网或直连可用，默认会自动退到公网 relay。
 - 指定 `--relay http://...` 或 `--relay https://...` 后，当前发送会强制走 relay-only，不使用默认公网 relay。
@@ -465,8 +510,9 @@ ii version
 - 局域网发现：`iroh-mdns-address-lookup`
 - 公网发现、NAT 穿透、relay：`iroh`
 - relay 服务：`iroh-relay`
-- S3 中转：`rust-s3`
-- WebDAV 中转：`reqwest_dav`
+- S3、R2 中转：内部精简 SigV4/HTTP 客户端
+- Azure Blob 中转：内部精简 Block Blob REST 客户端
+- WebDAV 中转：内部精简 HTTP/WebDAV 客户端
 - FTP 中转：`suppaftp`
 - SFTP 中转：`russh`、`russh-sftp`
 

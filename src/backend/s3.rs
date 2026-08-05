@@ -183,7 +183,7 @@ pub(crate) async fn recv_s3(
         .s3_route()
         .context("s3 ticket missing route")?
         .clone();
-    trace.info("using s3 storage route");
+    trace.info("using signed object-storage route");
     let bytes_written = match ticket.kind() {
         PayloadKind::File | PayloadKind::Stdin => {
             if args.stdout {

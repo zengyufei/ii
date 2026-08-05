@@ -35,6 +35,8 @@ pub struct SendArgs {
     pub copy: bool,
     pub output: Option<PathBuf>,
     pub s3: bool,
+    pub r2: bool,
+    pub azure: bool,
     pub ftp: bool,
     pub delete_after_recv: bool,
     pub profile: Option<String>,

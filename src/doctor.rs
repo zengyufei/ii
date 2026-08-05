@@ -12,6 +12,8 @@ pub async fn run() -> Result<()> {
         if s3_config_path.exists() { "yes" } else { "no" }
     );
     report_s3_config(&s3_config_path);
+    report_r2_config(&s3_config_path);
+    report_azure_config(&s3_config_path);
     report_webdav_config(&s3_config_path);
     report_ftp_config(&s3_config_path);
     report_sftp_config(&s3_config_path);
@@ -27,13 +29,7 @@ fn report_s3_config(path: &std::path::Path) {
     }
     match storage::load_config(path) {
         Ok(config) => {
-            let profile = if config.storage.s3.contains_key("default") {
-                "default".to_string()
-            } else if config.storage.s3.contains_key("cloudflare") {
-                "cloudflare".to_string()
-            } else {
-                "default".to_string()
-            };
+            let profile = "default".to_string();
             println!("s3 profile: {profile}");
             match config.storage.s3.get(&profile) {
                 Some(s3) => {
@@ -53,6 +49,59 @@ fn report_s3_config(path: &std::path::Path) {
             }
         }
         Err(err) => println!("s3 config parse failed: {err:#}"),
+    }
+}
+
+fn report_r2_config(path: &std::path::Path) {
+    if !path.exists() {
+        return;
+    }
+    match storage::load_config(path) {
+        Ok(config) => match config.storage.r2.get("default") {
+            Some(r2) => {
+                println!("r2 profile: default");
+                println!("r2 account: {}", r2.account_id);
+                println!("r2 bucket: {}", r2.bucket);
+                println!(
+                    "r2 credentials: {}",
+                    if r2.access_key_id.is_empty() || r2.secret_access_key.is_empty() {
+                        "missing"
+                    } else {
+                        "configured"
+                    }
+                );
+            }
+            None if config.storage.r2.is_empty() => println!("r2 profile: not configured"),
+            None => println!("r2 profile configured but default profile is missing"),
+        },
+        Err(err) => println!("r2 config parse failed: {err:#}"),
+    }
+}
+
+fn report_azure_config(path: &std::path::Path) {
+    if !path.exists() {
+        return;
+    }
+    match storage::load_config(path) {
+        Ok(config) => match config.storage.azure.get("default") {
+            Some(azure) => {
+                println!("azure profile: default");
+                println!("azure account: {}", azure.account_name);
+                println!("azure container: {}", azure.container);
+                println!("azure auth: {:?}", azure.auth);
+                println!(
+                    "azure credentials: {}",
+                    match azure.auth {
+                        storage::AzureAuth::SharedKey if azure.account_key.is_empty() => "missing",
+                        storage::AzureAuth::Sas if azure.sas_token.is_empty() => "missing",
+                        _ => "configured",
+                    }
+                );
+            }
+            None if config.storage.azure.is_empty() => println!("azure profile: not configured"),
+            None => println!("azure profile configured but default profile is missing"),
+        },
+        Err(err) => println!("azure config parse failed: {err:#}"),
     }
 }
 

@@ -673,7 +673,7 @@ mod tests {
         match parse_args(["ii", "send", "--ftp", "--sftp", "file.txt"]) {
             Err(ParseAction::Print { text, code }) => {
                 assert_eq!(code, 2);
-                assert!(text.starts_with("error: --s3, --webdav, --ftp, --sftp, --web, --local, --relay and --no-relay conflict with each other\n\n"));
+                assert!(text.starts_with("error: --s3, --r2, --azure, --webdav, --ftp, --sftp, --web, --local, --relay and --no-relay conflict with each other\n\n"));
                 assert!(text.ends_with(HELP));
             }
             Ok(_) => panic!("expected conflicting backends to fail"),
@@ -711,6 +711,32 @@ mod tests {
                 assert_eq!(args.profile, Some("work".to_string()));
             }
             _ => panic!("expected send command"),
+        }
+    }
+
+    #[test]
+    fn send_accepts_r2_and_azure_profiles() {
+        for args in [
+            vec!["ii", "send", "--r2", "--profile", "work", "-d", "file.txt"],
+            vec![
+                "ii",
+                "send",
+                "--azure",
+                "--profile",
+                "work",
+                "-d",
+                "file.txt",
+            ],
+        ] {
+            let cli = Cli::parse_from(args);
+            match cli.command {
+                Command::Send(args) => {
+                    assert!(args.r2 || args.azure);
+                    assert_eq!(args.profile.as_deref(), Some("work"));
+                    assert!(args.delete_after_recv);
+                }
+                _ => panic!("expected send command"),
+            }
         }
     }
 

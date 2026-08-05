@@ -19,10 +19,10 @@
   <strong>简体中文</strong> · <a href="README.en.md">English</a>
 </p>
 
-`ii` 是临时文件传输命令行工具：默认 P2P 直连，局域网可发现，无法直连时自动使用 relay。
+`ii` 是临时文件传输命令行工具：默认 P2P 直连，局域网可发现；无法直连时自动降级到 Iroh 默认的 n0 relay。
 
 - 发送文件、目录、多文件和管道数据；接收支持断点续传、同 MD5 跳过和冲突覆盖。
-- 可选 S3/R2、WebDAV、FTP、SFTP 中转；传完可删除中转对象。
+- 可选通用 S3、Cloudflare R2、Azure Blob、WebDAV、FTP、SFTP 中转；传完可删除中转对象。
 - 另有局域网网页、WebDAV、浏览器直传、TCP 隧道和自建 relay。
 
 ## 快速开始
@@ -110,12 +110,14 @@ ii send .\video.mp4 --json
 
 | 后端 | 发送命令 | 说明 |
 | --- | --- | --- |
-| S3 / R2 | `ii send .\video.mp4 --s3` | 首次使用按提示配置 |
+| 通用 S3 | `ii send .\video.mp4 --s3` | 配置兼容 endpoint、region、bucket 和 path-style |
+| Cloudflare R2 | `ii send .\video.mp4 --r2` | 独立 R2 配置，固定 R2 endpoint |
+| Azure Blob | `ii send .\video.mp4 --azure` | Shared Key 或 Container SAS |
 | WebDAV | `ii send .\video.mp4 --webdav` | 支持便携 ticket |
 | FTP | `ii send .\video.mp4 --ftp` | 仅明文 `ftp://` |
 | SFTP | `ii send .\video.mp4 --sftp` | 支持密码和私钥 |
 
-`--profile <name>` 选择后端配置；`-p` 将 WebDAV、FTP 或 SFTP 凭据写入 ticket，ticket 未加密，只能交给可信接收方；`-d` 在接收成功后尝试删除中转对象。配置和协议限制见 [ii.md](ii.md)、[ftp.md](ftp.md)、[sftp.md](sftp.md)。
+`--profile <name>` 选择后端配置；S3、R2 和 Azure ticket 只包含对象 URL，接收端无需本机配置。`-p` 将 WebDAV、FTP 或 SFTP 凭据写入 ticket，ticket 未加密，只能交给可信接收方；`-d` 在接收成功后尝试删除中转对象。SMB/NFS 已挂载目录可直接作为本地发送路径，不提供原生中转。配置和协议限制见 [ii.md](ii.md)、[ftp.md](ftp.md)、[sftp.md](sftp.md)。
 
 ## 接收
 
@@ -206,7 +208,7 @@ ii send .\video.mp4 --relay https://relay.example.com:8443
 
 ## 图形界面
 
-Release 同时提供 `ii-gui`。它支持默认自动路径、仅局域网、指定 HTTPS relay、S3 和 WebDAV；FTP/SFTP 仅在 CLI 中提供。
+Release 同时提供 `ii-gui`。它支持默认自动路径、仅局域网、指定 HTTPS relay、S3 和 WebDAV；R2、Azure、FTP、SFTP 仅在 CLI 中提供。
 
 ## 诊断
 

@@ -2,6 +2,17 @@
 
 All notable changes to `ii` are documented here. The default Chinese version is [CHANGELOG.md](CHANGELOG.md).
 
+## 0.3.1 - 2026-08-05
+
+### Added
+
+- Added `ii send --r2` with separate Cloudflare R2 profiles, and `ii send --azure` for Azure Block Blob with Shared Key or Container SAS authentication.
+
+### Changed
+
+- `ii send --s3` now means generic S3-compatible object storage only, and first-run setup collects endpoint, region, bucket, credentials, and path-style mode.
+- Legacy `provider = "cloudflare-r2"` entries under `[storage.s3.<name>]` are no longer migrated; move them to `[storage.r2.<name>]` and use `--r2`. Existing signed object URL tickets remain receivable.
+
 ## 0.3.0 - 2026-08-05
 
 ### Added

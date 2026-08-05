@@ -31,6 +31,8 @@ pub(super) fn parse(args: Vec<String>) -> Result<SendArgs, ParseAction> {
                 "-c" | "--copy" => out.copy = true,
                 "-o" | "--output" => out.output = Some(PathBuf::from(iter.value(&arg)?)),
                 "--s3" => out.s3 = true,
+                "--r2" => out.r2 = true,
+                "--azure" => out.azure = true,
                 "--ftp" => out.ftp = true,
                 "-d" => out.delete_after_recv = true,
                 "--profile" => out.profile = Some(iter.value("--profile")?),

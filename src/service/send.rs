@@ -118,14 +118,34 @@ where
     F: Fn(&str) -> Result<()> + Send + Sync,
 {
     let show_progress = !args.json && should_show_progress(false);
-    if args.delete_after_recv && !args.s3 && !args.webdav && !args.ftp && !args.sftp {
-        bail!("-d requires --s3, --webdav, --ftp or --sftp");
+    if args.delete_after_recv
+        && !args.s3
+        && !args.r2
+        && !args.azure
+        && !args.webdav
+        && !args.ftp
+        && !args.sftp
+    {
+        bail!("-d requires --s3, --r2, --azure, --webdav, --ftp or --sftp");
     }
-    if args.profile.is_some() && !args.s3 && !args.webdav && !args.ftp && !args.sftp {
-        bail!("--profile requires --s3, --webdav, --ftp or --sftp");
+    if args.profile.is_some()
+        && !args.s3
+        && !args.r2
+        && !args.azure
+        && !args.webdav
+        && !args.ftp
+        && !args.sftp
+    {
+        bail!("--profile requires --s3, --r2, --azure, --webdav, --ftp or --sftp");
     }
     if args.s3 {
         return send_s3(args, show_progress, &ticket_ready).await;
+    }
+    if args.r2 {
+        return send_r2(args, show_progress, &ticket_ready).await;
+    }
+    if args.azure {
+        return send_azure(args, show_progress, &ticket_ready).await;
     }
     if args.webdav {
         return send_webdav(args, show_progress, &ticket_ready).await;
@@ -452,6 +472,87 @@ where
     let ticket_str = ticket.encode()?;
     ticket_ready(&ticket_str)?;
     Ok(())
+}
+
+async fn send_r2<F>(args: SendArgs, show_progress: bool, ticket_ready: &F) -> Result<()>
+where
+    F: Fn(&str) -> Result<()> + Send + Sync,
+{
+    let selection = if args.json {
+        storage::load_r2_profile_noninteractive(args.profile.as_deref())?
+    } else {
+        match args.profile.as_deref() {
+            Some(profile) => storage::load_or_prompt_r2_profile_named(profile)?,
+            None => storage::load_or_prompt_r2_profile()?,
+        }
+    };
+    let source = source_from_args(&args).await?;
+    let profile = storage::r2_as_s3_profile(&selection.profile);
+    let upload = crate::backend::s3::upload(
+        &source,
+        &profile,
+        args.delete_after_recv,
+        show_progress,
+        args.rate.map(RateLimiter::new).map(Arc::new),
+    )
+    .await?;
+    if selection.save_after_success {
+        storage::save_config(&selection.path, &selection.config)?;
+    }
+    let ticket = Ticket::s3(
+        upload.download_url,
+        upload.delete_url,
+        upload.object_key,
+        source.name().to_string(),
+        source.kind(),
+        source.size(),
+        source.content_md5(),
+    );
+    ticket_ready(&ticket.encode()?)
+}
+
+async fn send_azure<F>(args: SendArgs, show_progress: bool, ticket_ready: &F) -> Result<()>
+where
+    F: Fn(&str) -> Result<()> + Send + Sync,
+{
+    let selection = if args.json {
+        storage::load_azure_profile_noninteractive(args.profile.as_deref())?
+    } else {
+        match args.profile.as_deref() {
+            Some(profile) => storage::load_or_prompt_azure_profile_named(profile)?,
+            None => storage::load_or_prompt_azure_profile()?,
+        }
+    };
+    if args.delete_after_recv {
+        storage::validate_azure_delete_permission(&selection.profile)?;
+    }
+    if selection.profile.auth == storage::AzureAuth::Sas {
+        eprintln!(
+            "ii send: warning: Azure SAS ticket includes the SAS token and its full permissions"
+        );
+    }
+    let source = source_from_args(&args).await?;
+    let upload = crate::backend::azure::upload(
+        &source,
+        &selection.profile,
+        args.delete_after_recv,
+        show_progress,
+        args.rate.map(RateLimiter::new).map(Arc::new),
+    )
+    .await?;
+    if selection.save_after_success {
+        storage::save_config(&selection.path, &selection.config)?;
+    }
+    let ticket = Ticket::s3(
+        upload.download_url,
+        upload.delete_url,
+        upload.object_key,
+        source.name().to_string(),
+        source.kind(),
+        source.size(),
+        source.content_md5(),
+    );
+    ticket_ready(&ticket.encode()?)
 }
 
 async fn send_webdav<F>(args: SendArgs, show_progress: bool, ticket_ready: &F) -> Result<()>

@@ -19,10 +19,10 @@
   <a href="README.md">简体中文</a> · <strong>English</strong>
 </p>
 
-`ii` is a CLI for temporary file transfer: it connects peer-to-peer by default, discovers services on the LAN, and falls back to relays when direct connectivity is unavailable.
+`ii` is a CLI for temporary file transfer: it connects peer-to-peer by default, discovers services on the LAN, and automatically falls back to Iroh's default n0 relay when direct connectivity is unavailable.
 
 - Send files, folders, multiple paths, or piped data. Receives resume, skip matching MD5 files, and overwrite conflicts.
-- Use S3/R2, WebDAV, FTP, or SFTP as optional backends, with cleanup after receiving.
+- Use generic S3, Cloudflare R2, Azure Blob, WebDAV, FTP, or SFTP as optional backends, with cleanup after receiving.
 - It also provides LAN web sharing, WebDAV, browser transfer, TCP tunnels, and self-hosted relays.
 
 ## Quick Start
@@ -110,12 +110,14 @@ Plain `ii send` exits after its first successful transfer. `-t` serves up to 16 
 
 | Backend | Send command | Notes |
 | --- | --- | --- |
-| S3 / R2 | `ii send .\video.mp4 --s3` | Prompts for configuration on first use |
+| Generic S3 | `ii send .\video.mp4 --s3` | Configure a compatible endpoint, region, bucket, and path-style mode |
+| Cloudflare R2 | `ii send .\video.mp4 --r2` | Separate R2 configuration with the fixed R2 endpoint |
+| Azure Blob | `ii send .\video.mp4 --azure` | Shared Key or Container SAS |
 | WebDAV | `ii send .\video.mp4 --webdav` | Supports portable tickets |
 | FTP | `ii send .\video.mp4 --ftp` | Plaintext `ftp://` only |
 | SFTP | `ii send .\video.mp4 --sftp` | Password and private-key authentication |
 
-`--profile <name>` selects a backend configuration. `-p` writes WebDAV, FTP, or SFTP credentials into the ticket; tickets are not encrypted, so share them only with trusted receivers. `-d` attempts to delete the backend object after a successful receive. See [ii.md](ii.md), [ftp.md](ftp.md), and [sftp.md](sftp.md) for configuration and protocol limits.
+`--profile <name>` selects a backend configuration. S3, R2, and Azure tickets contain only signed object URLs, so receivers need no local profile. `-p` writes WebDAV, FTP, or SFTP credentials into the ticket; tickets are not encrypted, so share them only with trusted receivers. `-d` attempts to delete the backend object after a successful receive. Mounted SMB/NFS directories remain usable as local send paths; native SMB/NFS backends are not provided. See [ii.md](ii.md), [ftp.md](ftp.md), and [sftp.md](sftp.md) for configuration and protocol limits.
 
 ## Receive
 
@@ -206,7 +208,7 @@ Without `--port`, the relay chooses a free port. The terminal prints usable IPv4
 
 ## Desktop GUI
 
-Releases also include `ii-gui`. It supports the default automatic path, local-only transfers, a chosen HTTPS relay, S3, and WebDAV. FTP and SFTP are CLI-only.
+Releases also include `ii-gui`. It supports the default automatic path, local-only transfers, a chosen HTTPS relay, S3, and WebDAV. R2, Azure, FTP, and SFTP are CLI-only.
 
 ## Diagnostics
 
