@@ -12,7 +12,7 @@
 ii help [<command>]
 ii send [<path>...] [--name <name>] [--include <glob>] [--exclude <glob>] [--rate <bytes/s>] [--json] [-t] [-c] [-o <path>] [--web [--port <port>] [--bind <ip>] [--token [<value>]] [--upload] [--path <path>] | --s3 | --r2 | --azure | --webdav | --ftp | --sftp] [--profile <name>] [-d] [-p] [--local] [--relay <url> [-k]] [--no-relay]
 ii web [<目录>] [--port <port>] [--bind <ip>] [--token [<value>]] [--upload] [--path <目录>]
-ii dav [<目录>] [--port <port>] [--bind <ip>] [--token [<value>]] [--read-only]
+ii dav [<目录>] [--port <port>] [--bind <ip>] [--token [<value>]] [--read-only] [--username <username> --password <password>] [--tls [--domain <name>] [--cert <path> --key <path>]]
 ii webrtc [--port <port>] [--bind <ip>] [--token [<value>]]
 ii tunnel -s <target-host:port> [--relay <url> [-k]]
 ii tunnel -c <ticket> [--listen <ip:port>]
@@ -232,9 +232,14 @@ ii web .\shared --port 8080 --token A1b2C3d4E5f6G7h8 --upload --path .\uploads
 ii dav
 ii dav .\shared --port 8080 --bind 192.168.1.20 --token A1b2C3d4E5f6G7h8
 ii dav .\shared --read-only
+ii dav .\shared --port 8443 --username alice --password secret --tls --domain dav.example.com --cert .\fullchain.pem --key .\privkey.pem
 ```
 
-`ii dav` 把当前目录或指定目录作为局域网 WebDAV 根目录，默认可读写；支持 `OPTIONS`、`PROPFIND`、`GET`、`HEAD`、Range、`PUT`、`MKCOL`、`DELETE`、`MOVE`、`COPY`、`LOCK`、`UNLOCK`，上传支持 `Content-Length`、chunked body 和 `100-continue`。`--read-only` 禁止所有改写。`--token` 是 URL 路径令牌，不是账户认证；服务默认无 TLS 和 Basic Auth，只适合可信局域网。
+`ii dav` 把当前目录或指定目录作为 WebDAV 根目录，默认可读写；支持 `OPTIONS`、`PROPFIND`、`GET`、`HEAD`、Range、`PUT`、`MKCOL`、`DELETE`、`MOVE`、`COPY`、`LOCK`、`UNLOCK`，上传支持 `Content-Length`、chunked body 和 `100-continue`。`--read-only` 禁止所有改写。`--token` 是 URL 路径令牌，不是账户认证。
+
+`--username <username>` 与 `--password <password>` 必须成对提供，启用所有 DAV 方法的 HTTP Basic Auth。用户名不能为空，且不能包含 `:`、CR 或 LF；密码不能为空，且不能包含 CR 或 LF。`--password` 会进入 shell 历史和进程列表。
+
+`--tls` 开启 HTTPS。没有 `--cert` 与 `--key` 时，`ii` 仅为当前进程生成自签证书；客户端必须手动信任。`--domain` 指定证书 DNS 名称和输出 URL；只允许与 `--tls` 同用。已有 PEM 完整证书链和私钥时，成对提供 `--cert`、`--key`；它们也要求 `--tls`。对公网提供服务时必须使用 TLS：可由 `ii dav --tls` 直接终止，或由 HTTPS 反向代理终止并把 `ii dav` 绑定到 `127.0.0.1`。明文 HTTP 下 Basic Auth 凭据可被窃听。
 
 ## `ii discover`
 

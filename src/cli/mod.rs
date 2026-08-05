@@ -908,4 +908,52 @@ mod tests {
             _ => panic!("expected dav command"),
         }
     }
+
+    #[test]
+    fn dav_accepts_basic_auth_and_tls_options() {
+        let cli = Cli::parse_from([
+            "ii",
+            "dav",
+            "share",
+            "--username",
+            "alice",
+            "--password=secret",
+            "--tls",
+            "--domain",
+            "dav.example.com",
+            "--cert",
+            "fullchain.pem",
+            "--key",
+            "privkey.pem",
+        ]);
+        match cli.command {
+            Command::Dav(args) => {
+                assert_eq!(args.username.as_deref(), Some("alice"));
+                assert_eq!(args.password.as_deref(), Some("secret"));
+                assert!(args.tls);
+                assert_eq!(args.domain.as_deref(), Some("dav.example.com"));
+                assert_eq!(args.cert, Some(PathBuf::from("fullchain.pem")));
+                assert_eq!(args.key, Some(PathBuf::from("privkey.pem")));
+            }
+            _ => panic!("expected dav command"),
+        }
+
+        for args in [
+            vec!["ii", "dav", "--username", "alice"],
+            vec!["ii", "dav", "--password", "secret"],
+            vec!["ii", "dav", "--domain", "dav.example.com"],
+            vec!["ii", "dav", "--tls", "--cert", "fullchain.pem"],
+            vec![
+                "ii",
+                "dav",
+                "--tls",
+                "--username",
+                "",
+                "--password",
+                "secret",
+            ],
+        ] {
+            assert!(parse_args(args).is_err());
+        }
+    }
 }

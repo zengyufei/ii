@@ -17,7 +17,7 @@ use std::{
     sync::Arc,
 };
 use tokio::{
-    io::{AsyncReadExt, AsyncWriteExt},
+    io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     net::{TcpListener, TcpStream},
 };
 
@@ -74,9 +74,16 @@ pub(crate) async fn serve_web(
     rate_limiter: Option<Arc<RateLimiter>>,
     json: bool,
 ) -> Result<()> {
-    let lan =
-        start_lan_web_server_with_output(web_port, web_bind, web_token.as_deref(), "ii web", !json)
-            .await?;
+    let lan = start_lan_web_server_with_output(
+        web_port,
+        web_bind,
+        web_token.as_deref(),
+        "ii web",
+        "http",
+        None,
+        !json,
+    )
+    .await?;
     if let WebContent::Download {
         download_qr_svg, ..
     } = &mut content
@@ -126,7 +133,18 @@ pub(crate) async fn start_lan_web_server(
     web_token: Option<&str>,
     label: &str,
 ) -> Result<LanWebServer> {
-    start_lan_web_server_with_output(port, bind, web_token, label, true).await
+    start_lan_web_server_with_output(port, bind, web_token, label, "http", None, true).await
+}
+
+pub(crate) async fn start_lan_web_server_with_scheme(
+    port: Option<u16>,
+    bind: Option<IpAddr>,
+    web_token: Option<&str>,
+    label: &str,
+    scheme: &str,
+    domain: Option<&str>,
+) -> Result<LanWebServer> {
+    start_lan_web_server_with_output(port, bind, web_token, label, scheme, domain, true).await
 }
 
 async fn start_lan_web_server_with_output(
@@ -134,6 +152,8 @@ async fn start_lan_web_server_with_output(
     bind: Option<IpAddr>,
     web_token: Option<&str>,
     label: &str,
+    scheme: &str,
+    domain: Option<&str>,
     output: bool,
 ) -> Result<LanWebServer> {
     let listener = bind_lan_web_listener(port, bind, label).await?;
@@ -142,22 +162,25 @@ async fn start_lan_web_server_with_output(
         .with_context(|| format!("read {label} server address"))?
         .port();
     let root_path = web_root_path(web_token);
-    let (url, other_urls) = match bind {
-        None | Some(IpAddr::V4(Ipv4Addr::UNSPECIFIED)) => {
-            let (host, other_hosts) = lan_ipv4_hosts();
-            (
-                web_url(IpAddr::V4(host), port, &root_path),
-                other_hosts
-                    .into_iter()
-                    .map(|host| web_url(IpAddr::V4(host), port, &root_path))
-                    .collect(),
-            )
-        }
-        Some(IpAddr::V6(Ipv6Addr::UNSPECIFIED)) => (
-            web_url(IpAddr::V6(local_web_host_v6()), port, &root_path),
-            Vec::new(),
-        ),
-        Some(host) => (web_url(host, port, &root_path), Vec::new()),
+    let (url, other_urls) = match domain {
+        Some(domain) => (format!("{scheme}://{domain}:{port}{root_path}"), Vec::new()),
+        None => match bind {
+            None | Some(IpAddr::V4(Ipv4Addr::UNSPECIFIED)) => {
+                let (host, other_hosts) = lan_ipv4_hosts();
+                (
+                    web_url(scheme, IpAddr::V4(host), port, &root_path),
+                    other_hosts
+                        .into_iter()
+                        .map(|host| web_url(scheme, IpAddr::V4(host), port, &root_path))
+                        .collect(),
+                )
+            }
+            Some(IpAddr::V6(Ipv6Addr::UNSPECIFIED)) => (
+                web_url(scheme, IpAddr::V6(local_web_host_v6()), port, &root_path),
+                Vec::new(),
+            ),
+            Some(host) => (web_url(scheme, host, port, &root_path), Vec::new()),
+        },
     };
 
     if output {
@@ -212,10 +235,10 @@ pub(crate) async fn bind_lan_web_listener(
     TcpListener::from_std(socket.into()).with_context(|| format!("start {label} server"))
 }
 
-fn web_url(host: IpAddr, port: u16, root_path: &str) -> String {
+fn web_url(scheme: &str, host: IpAddr, port: u16, root_path: &str) -> String {
     match host {
-        IpAddr::V4(host) => format!("http://{host}:{port}{root_path}"),
-        IpAddr::V6(host) => format!("http://[{host}]:{port}{root_path}"),
+        IpAddr::V4(host) => format!("{scheme}://{host}:{port}{root_path}"),
+        IpAddr::V6(host) => format!("{scheme}://[{host}]:{port}{root_path}"),
     }
 }
 pub(crate) fn web_upload_dir(start_dir: &Path, configured_dir: Option<&Path>) -> PathBuf {
@@ -591,7 +614,7 @@ pub(crate) fn web_token_path<'a>(web_token: Option<&str>, target: &'a str) -> Op
     }
 }
 
-pub(crate) async fn read_web_request(stream: &mut TcpStream) -> Result<WebRequest> {
+pub(crate) async fn read_web_request(stream: &mut (impl AsyncRead + Unpin)) -> Result<WebRequest> {
     let mut request = Vec::with_capacity(1024);
     let mut chunk = [0u8; 1024];
     let header_end = loop {
@@ -728,7 +751,10 @@ async fn write_web_download(
     Ok(())
 }
 
-pub(crate) async fn write_web_redirect(stream: &mut TcpStream, location: &str) -> Result<()> {
+pub(crate) async fn write_web_redirect(
+    stream: &mut (impl AsyncWrite + Unpin),
+    location: &str,
+) -> Result<()> {
     let header = format!(
         "HTTP/1.1 302 Found\r\nLocation: {location}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
     );
@@ -741,7 +767,7 @@ pub(crate) async fn write_web_redirect(stream: &mut TcpStream, location: &str) -
 }
 
 pub(crate) async fn write_web_response(
-    stream: &mut TcpStream,
+    stream: &mut (impl AsyncWrite + Unpin),
     status: &str,
     content_type: &str,
     body: &[u8],
@@ -750,7 +776,7 @@ pub(crate) async fn write_web_response(
 }
 
 pub(crate) async fn write_web_response_for_method(
-    stream: &mut TcpStream,
+    stream: &mut (impl AsyncWrite + Unpin),
     status: &str,
     content_type: &str,
     headers: &str,
@@ -774,7 +800,7 @@ pub(crate) async fn write_web_response_for_method(
 }
 
 pub(crate) async fn write_web_response_with_headers(
-    stream: &mut TcpStream,
+    stream: &mut (impl AsyncWrite + Unpin),
     status: &str,
     content_type: &str,
     headers: &str,
@@ -794,7 +820,7 @@ pub(crate) async fn write_web_response_with_headers(
 }
 
 pub(crate) async fn write_web_error(
-    stream: &mut TcpStream,
+    stream: &mut (impl AsyncWrite + Unpin),
     status: &str,
     message: &str,
 ) -> Result<()> {

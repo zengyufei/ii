@@ -158,11 +158,14 @@ ii web .\shared --upload --path .\uploads
 # Mount a directory in a file manager; writable by default
 ii dav .\shared
 ii dav .\shared --read-only
+ii dav .\shared --port 8443 --username alice --password secret --tls --domain dav.example.com --cert D:\certs\fullchain.pem --key D:\certs\privkey.pem
 ```
 
 `ii send --web` serves a download page for one file or folder. `ii web` displays an nginx-style directory listing and serves the current directory when no directory is given. `--upload` enables multi-file uploads only; their default destination is `./ii/` under the startup directory, while `--path <dir>` selects another directory. `ii dav` reads and writes its served directory directly, not the web upload directory.
 
-`--port 8080` fixes the port, `--bind ::` listens on IPv6 only, and bare `--token` generates a path token while `--token <value>` uses the supplied token. These services have no account authentication and are for short-lived, trusted LAN use only.
+`ii dav --username <username> --password <password>` enables HTTP Basic Auth; both options are required together. `--password` is visible in shell history and process listings, so use it only where that is acceptable. `--tls` enables HTTPS. Without `--cert` and `--key`, ii generates a self-signed certificate valid only for the running process, which clients must explicitly trust. For public access, use a trusted PEM certificate or terminate HTTPS in a reverse proxy and bind `ii dav` to `127.0.0.1`. Without `--tls`, Basic Auth credentials travel in clear text.
+
+`--port 8080` fixes the port, `--bind ::` listens on IPv6 only, and bare `--token` generates a path token while `--token <value>` uses the supplied token. A path token is not account authentication.
 
 ### LAN Discovery
 

@@ -5,7 +5,7 @@ Usage:
   ii help [command]
   ii send [options] [path...]
   ii web [directory] [--port <port>] [--bind <ip>] [--token [value]] [--upload] [--path <dir>]
-  ii dav [directory] [--port <port>] [--bind <ip>] [--token [value]] [--read-only]
+  ii dav [directory] [--port <port>] [--bind <ip>] [--token [value]] [--read-only] [--username <username> --password <password>] [--tls [--domain <name>] [--cert <path> --key <path>]]
   ii webrtc [--port <port>] [--bind <ip>] [--token [value]]
   ii tunnel (-s <target-host:port> | -c <ticket>) [--listen <ip:port>] [--relay <url> [-k]]
   ii recv [options] <ticket>
@@ -113,13 +113,19 @@ Options:
 
 pub(crate) const DAV_HELP: &str = "\
 Usage:
-  ii dav [directory] [--port <port>] [--bind <ip>] [--token [value]] [--read-only]
+  ii dav [directory] [--port <port>] [--bind <ip>] [--token [value]] [--read-only] [--username <username> --password <password>] [--tls [--domain <name>] [--cert <path> --key <path>]]
 
 Options:
   --port <port>
   --bind <ip>
   --token [value]
   --read-only
+  --username <username>  HTTP Basic Auth username; requires --password
+  --password <password>  HTTP Basic Auth password; requires --username
+  --tls                  Enable HTTPS with an ii-generated self-signed certificate
+  --domain <name>        TLS DNS name used for the advertised URL and self-signed certificate
+  --cert <path>          PEM certificate chain; replaces the generated certificate
+  --key <path>           PEM private key; requires --cert
 ";
 
 pub(crate) const DISCOVER_HELP: &str = "\

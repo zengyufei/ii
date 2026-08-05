@@ -1,14 +1,17 @@
 use crate::{
     discovery::{self, Service},
+    relay::tls_server_config,
     web::{
         directory,
         http::{
-            WebRequest, html_escape, read_web_request, start_lan_web_server, web_root_path,
-            web_token_path, write_web_error, write_web_response, write_web_response_with_headers,
+            WebRequest, html_escape, read_web_request, start_lan_web_server_with_scheme,
+            web_root_path, web_token_path, write_web_error, write_web_response,
+            write_web_response_with_headers,
         },
     },
 };
 use anyhow::{Context, Result, bail};
+use base64::{Engine, engine::general_purpose::STANDARD};
 use percent_encoding::{NON_ALPHANUMERIC, percent_decode_str, utf8_percent_encode};
 use rand::RngExt;
 use std::{
@@ -29,9 +32,9 @@ const HTTP_DATE_FORMAT: &[FormatItem<'static>] = format_description!(
 );
 use tokio::{
     fs,
-    io::{self, AsyncReadExt, AsyncWriteExt},
-    net::TcpStream,
+    io::{self, AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
 };
+use tokio_rustls::TlsAcceptor;
 
 struct Lock {
     token: String,
@@ -43,19 +46,83 @@ struct LockState {
     locks: HashMap<PathBuf, Lock>,
 }
 
+#[derive(Clone)]
+struct BasicAuth {
+    credentials: Vec<u8>,
+}
+
+impl BasicAuth {
+    fn new(username: String, password: String) -> Self {
+        Self {
+            credentials: format!("{username}:{password}").into_bytes(),
+        }
+    }
+
+    fn permits(&self, request: &WebRequest) -> bool {
+        let Some(value) = request.header("authorization") else {
+            return false;
+        };
+        let Some((scheme, encoded)) = value.split_once(' ') else {
+            return false;
+        };
+        if !scheme.eq_ignore_ascii_case("basic") || encoded.contains(char::is_whitespace) {
+            return false;
+        }
+        let Ok(credentials) = STANDARD.decode(encoded) else {
+            return false;
+        };
+        constant_time_eq(&credentials, &self.credentials)
+    }
+}
+
+fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
+    if left.len() != right.len() {
+        return false;
+    }
+    left.iter()
+        .zip(right)
+        .fold(0u8, |difference, (left, right)| difference | (left ^ right))
+        == 0
+}
+
+trait DavStream: AsyncRead + AsyncWrite + Unpin {}
+
+impl<T: AsyncRead + AsyncWrite + Unpin> DavStream for T {}
+
 pub(crate) async fn serve_dav(
     root: PathBuf,
     port: Option<u16>,
     bind: Option<std::net::IpAddr>,
     token: Option<String>,
     read_only: bool,
+    credentials: Option<(String, String)>,
+    tls: bool,
+    domain: Option<String>,
+    cert: Option<std::path::PathBuf>,
+    key: Option<std::path::PathBuf>,
 ) -> Result<()> {
-    let lan = start_lan_web_server(port, bind, token.as_deref(), "ii dav").await?;
+    let tls_acceptor = tls
+        .then(|| {
+            tls_server_config(domain.as_deref(), cert.as_deref(), key.as_deref())
+                .map(|config| TlsAcceptor::from(Arc::new(config)))
+        })
+        .transpose()?;
+    let scheme = if tls { "https" } else { "http" };
+    let lan = start_lan_web_server_with_scheme(
+        port,
+        bind,
+        token.as_deref(),
+        "ii dav",
+        scheme,
+        domain.as_deref(),
+    )
+    .await?;
     let _advertiser = discovery::advertise(Service::Dav {
         url: lan.url.clone(),
     })
     .await?;
     let locks = Arc::new(Mutex::new(LockState::default()));
+    let basic_auth = credentials.map(|(username, password)| BasicAuth::new(username, password));
     loop {
         tokio::select! {
             _ = tokio::signal::ctrl_c() => break,
@@ -64,8 +131,19 @@ pub(crate) async fn serve_dav(
                 let root = root.clone();
                 let token = token.clone();
                 let locks = Arc::clone(&locks);
+                let basic_auth = basic_auth.clone();
+                let tls_acceptor = tls_acceptor.clone();
                 tokio::spawn(async move {
-                    if let Err(err) = serve_dav_connection(stream, root, token, read_only, locks).await {
+                    let result = match tls_acceptor {
+                        Some(acceptor) => match acceptor.accept(stream).await {
+                            Ok(stream) => {
+                                serve_dav_connection(stream, root, token, read_only, basic_auth, locks).await
+                            }
+                            Err(err) => Err(err).context("accept DAV TLS connection"),
+                        },
+                        None => serve_dav_connection(stream, root, token, read_only, basic_auth, locks).await,
+                    };
+                    if let Err(err) = result {
                         eprintln!("ii dav: request failed: {err:#}");
                     }
                 });
@@ -76,10 +154,11 @@ pub(crate) async fn serve_dav(
 }
 
 async fn serve_dav_connection(
-    mut stream: TcpStream,
+    mut stream: impl DavStream,
     root: PathBuf,
     token: Option<String>,
     read_only: bool,
+    basic_auth: Option<BasicAuth>,
     locks: Arc<Mutex<LockState>>,
 ) -> Result<()> {
     let request = match read_web_request(&mut stream).await {
@@ -94,6 +173,12 @@ async fn serve_dav_connection(
         }
     };
     let request_path = request.target.split('?').next().unwrap_or(&request.target);
+    if basic_auth
+        .as_ref()
+        .is_some_and(|auth| !auth.permits(&request))
+    {
+        return write_basic_auth_required(&mut stream).await;
+    }
     let Some(path) = web_token_path(token.as_deref(), request_path) else {
         return write_web_error(&mut stream, "404 Not Found", "not found").await;
     };
@@ -167,7 +252,18 @@ async fn serve_dav_connection(
     }
 }
 
-async fn write_options(stream: &mut TcpStream, read_only: bool) -> Result<()> {
+async fn write_basic_auth_required(stream: &mut (impl AsyncWrite + Unpin)) -> Result<()> {
+    write_web_response_with_headers(
+        stream,
+        "401 Unauthorized",
+        "text/plain; charset=utf-8",
+        "WWW-Authenticate: Basic realm=\"ii dav\", charset=\"UTF-8\"\r\n",
+        b"authentication required",
+    )
+    .await
+}
+
+async fn write_options(stream: &mut (impl AsyncWrite + Unpin), read_only: bool) -> Result<()> {
     let allow = if read_only {
         "OPTIONS, PROPFIND, GET, HEAD, PROPPATCH"
     } else {
@@ -184,7 +280,7 @@ async fn write_options(stream: &mut TcpStream, read_only: bool) -> Result<()> {
 }
 
 async fn propfind(
-    stream: &mut TcpStream,
+    stream: &mut (impl AsyncWrite + Unpin),
     root: &Path,
     relative: &Path,
     token: Option<&str>,
@@ -222,7 +318,7 @@ async fn propfind(
 }
 
 async fn put(
-    stream: &mut TcpStream,
+    stream: &mut impl DavStream,
     root: &Path,
     relative: &Path,
     request: &WebRequest,
@@ -263,7 +359,7 @@ async fn put(
 }
 
 async fn mkcol(
-    stream: &mut TcpStream,
+    stream: &mut (impl AsyncWrite + Unpin),
     root: &Path,
     relative: &Path,
     request: &WebRequest,
@@ -299,7 +395,7 @@ async fn mkcol(
 }
 
 async fn delete(
-    stream: &mut TcpStream,
+    stream: &mut (impl AsyncWrite + Unpin),
     root: &Path,
     relative: &Path,
     request: &WebRequest,
@@ -326,7 +422,7 @@ async fn delete(
 }
 
 async fn move_or_copy(
-    stream: &mut TcpStream,
+    stream: &mut (impl AsyncWrite + Unpin),
     root: &Path,
     relative: &Path,
     token: Option<&str>,
@@ -403,7 +499,7 @@ async fn move_or_copy(
 }
 
 async fn lock(
-    stream: &mut TcpStream,
+    stream: &mut (impl AsyncWrite + Unpin),
     root: &Path,
     relative: &Path,
     token: Option<&str>,
@@ -470,7 +566,7 @@ async fn lock(
 }
 
 async fn unlock(
-    stream: &mut TcpStream,
+    stream: &mut (impl AsyncWrite + Unpin),
     root: &Path,
     relative: &Path,
     request: &WebRequest,
@@ -499,7 +595,11 @@ async fn unlock(
     }
 }
 
-async fn proppatch(stream: &mut TcpStream, token: Option<&str>, relative: &Path) -> Result<()> {
+async fn proppatch(
+    stream: &mut (impl AsyncWrite + Unpin),
+    token: Option<&str>,
+    relative: &Path,
+) -> Result<()> {
     let href = dav_relative_href(relative, token);
     let body = format!(
         "<?xml version=\"1.0\"?><d:multistatus xmlns:d=\"DAV:\"><d:response><d:href>{href}</d:href><d:propstat><d:prop/><d:status>HTTP/1.1 403 Forbidden</d:status></d:propstat></d:response></d:multistatus>"
@@ -514,7 +614,7 @@ async fn proppatch(stream: &mut TcpStream, token: Option<&str>, relative: &Path)
 }
 
 async fn write_request_body(
-    stream: &mut TcpStream,
+    stream: &mut impl DavStream,
     request: &WebRequest,
     file: &mut fs::File,
 ) -> Result<()> {
@@ -542,7 +642,7 @@ async fn write_request_body(
 }
 
 async fn write_chunked_body(
-    stream: &mut TcpStream,
+    stream: &mut impl DavStream,
     mut buffered: Vec<u8>,
     file: &mut fs::File,
 ) -> Result<()> {
@@ -579,7 +679,10 @@ async fn write_chunked_body(
     }
 }
 
-async fn take_line(stream: &mut TcpStream, buffered: &mut Vec<u8>) -> Result<String> {
+async fn take_line(
+    stream: &mut (impl AsyncRead + Unpin),
+    buffered: &mut Vec<u8>,
+) -> Result<String> {
     loop {
         if let Some(position) = buffered.windows(2).position(|bytes| bytes == b"\r\n") {
             let line = std::str::from_utf8(&buffered[..position])
@@ -600,7 +703,11 @@ async fn take_line(stream: &mut TcpStream, buffered: &mut Vec<u8>) -> Result<Str
     }
 }
 
-async fn fill(stream: &mut TcpStream, buffered: &mut Vec<u8>, length: usize) -> Result<()> {
+async fn fill(
+    stream: &mut (impl AsyncRead + Unpin),
+    buffered: &mut Vec<u8>,
+    length: usize,
+) -> Result<()> {
     while buffered.len() < length {
         let mut chunk = [0u8; 64 * 1024];
         let read = stream.read(&mut chunk).await?;
@@ -802,7 +909,10 @@ fn copy_path(source: &Path, destination: &Path) -> Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::web::test_support::{raw_request, request, response_body, response_header};
+    use crate::{
+        relay::tls_server_config,
+        web::test_support::{raw_request, request, response_body, response_header},
+    };
     use std::{
         net::{Ipv4Addr, SocketAddr},
         sync::Arc,
@@ -812,6 +922,7 @@ mod tests {
     async fn test_server(
         root: PathBuf,
         read_only: bool,
+        basic_auth: Option<BasicAuth>,
         count: usize,
     ) -> (SocketAddr, tokio::task::JoinHandle<()>) {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
@@ -822,8 +933,9 @@ mod tests {
                 let (stream, _) = listener.accept().await.unwrap();
                 let root = root.clone();
                 let locks = Arc::clone(&locks);
+                let basic_auth = basic_auth.clone();
                 tokio::spawn(async move {
-                    serve_dav_connection(stream, root, None, read_only, locks)
+                    serve_dav_connection(stream, root, None, read_only, basic_auth, locks)
                         .await
                         .unwrap();
                 });
@@ -837,7 +949,7 @@ mod tests {
         let temp = tempfile::tempdir().unwrap();
         let root = std::fs::canonicalize(temp.path()).unwrap();
         std::fs::write(root.join("existing.txt"), b"existing").unwrap();
-        let (address, server) = test_server(root.clone(), false, 12).await;
+        let (address, server) = test_server(root.clone(), false, None, 12).await;
 
         assert!(request(address, "/").await.starts_with(b"HTTP/1.1 200 OK"));
         let propfind = crate::web::test_support::request_with_headers(
@@ -921,7 +1033,7 @@ mod tests {
     async fn read_only_dav_rejects_writes() {
         let temp = tempfile::tempdir().unwrap();
         let (address, server) =
-            test_server(std::fs::canonicalize(temp.path()).unwrap(), true, 1).await;
+            test_server(std::fs::canonicalize(temp.path()).unwrap(), true, None, 1).await;
         let response = raw_request(
             address,
             b"PUT /blocked.txt HTTP/1.1\r\nHost: test\r\nContent-Length: 1\r\n\r\nx",
@@ -929,5 +1041,98 @@ mod tests {
         .await;
         assert!(response.starts_with(b"HTTP/1.1 403 Forbidden"));
         server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn basic_auth_rejects_invalid_credentials_and_allows_valid_credentials() {
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("private.txt"), b"private").unwrap();
+        let auth = BasicAuth::new("alice".into(), "secret".into());
+        let (address, server) = test_server(
+            std::fs::canonicalize(temp.path()).unwrap(),
+            false,
+            Some(auth),
+            3,
+        )
+        .await;
+
+        let missing = request(address, "/private.txt").await;
+        assert!(missing.starts_with(b"HTTP/1.1 401 Unauthorized"));
+        assert_eq!(
+            response_header(&missing, "WWW-Authenticate"),
+            Some("Basic realm=\"ii dav\", charset=\"UTF-8\"")
+        );
+
+        let invalid = crate::web::test_support::request_with_headers(
+            address,
+            "GET",
+            "/private.txt",
+            "Authorization: Basic YWxpY2U6d3Jvbmc=\r\n",
+        )
+        .await;
+        assert!(invalid.starts_with(b"HTTP/1.1 401 Unauthorized"));
+
+        let valid = crate::web::test_support::request_with_headers(
+            address,
+            "GET",
+            "/private.txt",
+            "Authorization: Basic YWxpY2U6c2VjcmV0\r\n",
+        )
+        .await;
+        assert!(valid.starts_with(b"HTTP/1.1 200 OK"));
+        assert_eq!(response_body(&valid), b"private");
+        server.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn tls_dav_serves_basic_auth_requests() {
+        rustls::crypto::ring::default_provider()
+            .install_default()
+            .ok();
+        let temp = tempfile::tempdir().unwrap();
+        std::fs::write(temp.path().join("private.txt"), b"private").unwrap();
+        let root = std::fs::canonicalize(temp.path()).unwrap();
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let acceptor = TlsAcceptor::from(Arc::new(
+            tls_server_config(Some("localhost"), None, None).unwrap(),
+        ));
+        let locks = Arc::new(Mutex::new(LockState::default()));
+        let task = tokio::spawn(async move {
+            for _ in 0..2 {
+                let (stream, _) = listener.accept().await.unwrap();
+                let stream = acceptor.accept(stream).await.unwrap();
+                serve_dav_connection(
+                    stream,
+                    root.clone(),
+                    None,
+                    false,
+                    Some(BasicAuth::new("alice".into(), "secret".into())),
+                    Arc::clone(&locks),
+                )
+                .await
+                .unwrap();
+            }
+        });
+
+        let client = reqwest::Client::builder()
+            .danger_accept_invalid_certs(true)
+            .build()
+            .unwrap();
+        let missing = client
+            .get(format!("https://127.0.0.1:{}/private.txt", address.port()))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(missing.status(), reqwest::StatusCode::UNAUTHORIZED);
+        let valid = client
+            .get(format!("https://127.0.0.1:{}/private.txt", address.port()))
+            .basic_auth("alice", Some("secret"))
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(valid.status(), reqwest::StatusCode::OK);
+        assert_eq!(valid.bytes().await.unwrap().as_ref(), b"private");
+        task.await.unwrap();
     }
 }

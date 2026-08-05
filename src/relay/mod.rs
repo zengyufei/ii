@@ -6,6 +6,7 @@ use logging::LogFilter;
 #[cfg(test)]
 pub(crate) use server::build_server_config;
 pub use server::run;
+pub(crate) use server::tls_server_config;
 #[cfg(test)]
 use server::{advertised_urls, load_tls_server_config};
 

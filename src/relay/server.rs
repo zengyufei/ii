@@ -145,7 +145,11 @@ pub(crate) fn build_server_config(args: &RelayArgs) -> Result<server::ServerConf
         relay_config.tls = Some(server::TlsConfig::new(
             bind_addr,
             CertConfig::Manual {
-                server_config: tls_server_config(args)?,
+                server_config: tls_server_config(
+                    args.domain.as_deref(),
+                    args.cert.as_deref(),
+                    args.key.as_deref(),
+                )?,
             },
         ));
     }
@@ -156,10 +160,14 @@ pub(crate) fn build_server_config(args: &RelayArgs) -> Result<server::ServerConf
     Ok(config)
 }
 
-fn tls_server_config(args: &RelayArgs) -> Result<rustls::ServerConfig> {
-    match (&args.cert, &args.key) {
+pub(crate) fn tls_server_config(
+    domain: Option<&str>,
+    cert: Option<&Path>,
+    key: Option<&Path>,
+) -> Result<rustls::ServerConfig> {
+    match (cert, key) {
         (Some(cert), Some(key)) => load_tls_server_config(cert, key),
-        (None, None) => generate_self_signed_server_config(args.domain.as_deref()),
+        (None, None) => generate_self_signed_server_config(domain),
         _ => bail!("--cert and --key must be provided together"),
     }
 }

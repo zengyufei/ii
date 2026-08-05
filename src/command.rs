@@ -79,6 +79,12 @@ pub struct DavArgs {
     pub web_bind: Option<IpAddr>,
     pub web_token: Option<String>,
     pub read_only: bool,
+    pub username: Option<String>,
+    pub password: Option<String>,
+    pub tls: bool,
+    pub domain: Option<String>,
+    pub cert: Option<PathBuf>,
+    pub key: Option<PathBuf>,
 }
 
 #[derive(Debug, Clone)]

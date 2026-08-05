@@ -13,6 +13,11 @@ pub(super) async fn run(args: DavArgs) -> Result<()> {
         args.web_bind,
         args.web_token,
         args.read_only,
+        args.username.zip(args.password),
+        args.tls,
+        args.domain,
+        args.cert,
+        args.key,
     )
     .await
 }

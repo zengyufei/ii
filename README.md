@@ -158,11 +158,14 @@ ii web .\shared --upload --path .\uploads
 # 用系统文件管理器挂载目录；默认可读写
 ii dav .\shared
 ii dav .\shared --read-only
+ii dav .\shared --port 8443 --username alice --password secret --tls --domain dav.example.com --cert D:\certs\fullchain.pem --key D:\certs\privkey.pem
 ```
 
 `ii send --web` 为单个文件或目录提供下载页。`ii web` 显示 nginx 风格目录列表，省略目录时服务当前目录；`--upload` 才开放多文件上传，默认写入启动目录的 `./ii/`，`--path <dir>` 可改为指定目录。`ii dav` 直接读写所服务目录，不使用网页上传目录。
 
-`--port 8080` 固定端口，`--bind ::` 只监听 IPv6；裸 `--token` 生成路径令牌，`--token <value>` 使用指定令牌。它们都没有账号鉴权，只适合临时可信局域网。
+`ii dav --username <username> --password <password>` 启用 HTTP Basic Auth，两个参数必须同时提供。`--password` 会出现在 shell 历史和进程列表中，只适合你明确接受这一风险的场景。`--tls` 开启 HTTPS；未提供 `--cert` 与 `--key` 时生成仅当前进程有效的自签证书，客户端必须手动信任。公网请使用受信任 PEM 证书，或让 HTTPS 反向代理终止 TLS 并将 `ii dav` 绑定到 `127.0.0.1`。未启用 `--tls` 时，Basic Auth 凭据会以明文传输。
+
+`--port 8080` 固定端口，`--bind ::` 只监听 IPv6；裸 `--token` 生成路径令牌，`--token <value>` 使用指定令牌。路径 token 不是账号鉴权。
 
 ### 局域网发现
 

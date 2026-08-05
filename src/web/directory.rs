@@ -15,8 +15,7 @@ use std::{
 use time::{OffsetDateTime, format_description::FormatItem, macros::format_description};
 use tokio::{
     fs,
-    io::{self, AsyncReadExt, AsyncSeekExt, AsyncWriteExt},
-    net::TcpStream,
+    io::{self, AsyncReadExt, AsyncSeekExt, AsyncWrite, AsyncWriteExt},
 };
 
 const WEB_DIRECTORY_TIME_FORMAT: &[FormatItem<'static>] =
@@ -49,7 +48,7 @@ pub(crate) async fn directory_root(
     Ok(root)
 }
 pub(crate) async fn write_directory(
-    stream: &mut TcpStream,
+    stream: &mut (impl AsyncWrite + Unpin),
     root: &Path,
     web_token: Option<&str>,
     path: &str,
@@ -261,7 +260,7 @@ fn web_upload_controls() -> &'static str {
 }
 
 async fn write_web_file(
-    stream: &mut TcpStream,
+    stream: &mut (impl AsyncWrite + Unpin),
     mut file: fs::File,
     path: &Path,
     size: u64,
