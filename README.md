@@ -19,21 +19,15 @@
   <strong>简体中文</strong> · <a href="README.en.md">English</a>
 </p>
 
-`ii` 面向临时传文件/夹：
+`ii` 是临时文件传输命令行工具：默认 P2P 直连，局域网可发现，无法直连时自动使用 relay。
 
-直发目录 / 一次即走 / 持续发送 / 自动复制到粘贴板或落盘
-
-P2P 直连 / 局域网发现 / `ii discover` / 公网 relay 回退 / 支持 `--s3` / `--webdav` / `--ftp` / `--sftp` 后端中转
-
-`ii send <文件或文件夹> --web` 分享下载 / `ii web [目录]` 浏览目录 / `ii dav [目录]` 挂载目录 / `ii webrtc` 浏览器直传 / `ii tunnel` TCP 端口转发
-
-断点续收 / 秒传跳过 / 冲突覆盖 / 支持传完清理中转
-
-进度速率 / 完成耗时 / 支持诊断本机 / 支持自建中继
+- 发送文件、目录、多文件和管道数据；接收支持断点续传、同 MD5 跳过和冲突覆盖。
+- 可选 S3/R2、WebDAV、FTP、SFTP 中转；传完可删除中转对象。
+- 另有局域网网页、WebDAV、浏览器直传、TCP 隧道和自建 relay。
 
 ## 快速开始
 
-在发送端执行：
+发送端：
 
 ```powershell
 ii send .\video.mp4
@@ -49,18 +43,9 @@ on the other computer:
 ii recv ii1k7v...x9a
 ```
 
-在接收端执行：
+接收端：
 
 ```powershell
-ii recv ii1k7v...x9a
-```
-
-## 常见场景
-
-同事之间临时传一个文件：
-
-```powershell
-ii send .\report.pdf
 ii recv ii1k7v...x9a
 ```
 
@@ -70,33 +55,40 @@ ii recv ii1k7v...x9a
 
 ![接收端截图](screenshot/接收.png)
 
-指定保存目录：
+## 发送
+
+### 文件、目录和多文件
 
 ```powershell
-ii recv ii1k7v...x9a -o D:\Downloads
-```
+# 文件
+ii send .\report.pdf
 
-断网或传到一半失败后，重新执行同一条 `ii recv` 就会继续接收；如果目标文件已经完整且内容相同，会直接跳过；如果同名但内容不同，会覆盖。
-
-`ii send` 和 `ii recv` 都会在终端里实时显示传输进度和速率；完成后会打印最终耗时。`--trace` 主要用于诊断，方便排查连接慢在哪里。
-
-## 发送目录
-
-目录可以直接发送：
-
-```powershell
+# 目录；接收为 <输出目录>\my-folder
 ii send .\my-folder
+
+# 多个文件或目录；接收为 <输出目录>\ii
+ii send .\report.pdf .\images .\notes.txt
+
+# 指定多文件集合的根目录名
+ii send .\report.pdf .\images --name release
 ```
 
-接收端：
+多文件会打包为一个 tar 流，旧版接收端仍按目录 tar 接收。多个输入项的顶层名称不能重复。
+
+### 管道、筛选和限速
 
 ```powershell
-ii recv ii1k7v...x9a -o D:\Downloads
+# 管道输入需要指定接收文件名
+tar czf - .\project | ii send --name project.tar.gz
+
+# 只发送匹配文件；exclude 优先于 include
+ii send .\project --include "**/*.rs" --exclude "target/**"
+
+# 所有接收端共享 8 MiB/s 总发送带宽
+ii send .\video.mp4 --rate 8MiB
 ```
 
-接收结果是 `D:\Downloads\my-folder`，不会变成 `my-folder\my-folder` 两层。
-
-## 进阶用法
+`--include` 和 `--exclude` 可重复使用，匹配输入目录内以 `/` 分隔的相对路径；它们不适用于 `--web`。`--rate` 接受 bytes/s、`KiB`、`MiB`、`GiB`，也限制网页下载和各中转后端的发送流量。
 
 ### 发送控制
 
@@ -108,27 +100,77 @@ ii send .\my-folder -t
 ii send .\video.mp4 -c
 ii send .\video.mp4 -o recv.txt
 
-# 管道输入和标准输出
-tar czf - .\project | ii send --name project.tar.gz
-ii recv ii1k7v...x9a --stdout > project.tar.gz
+# 面向自动化的 JSON Lines
+ii send .\video.mp4 --json
 ```
 
-`-t` 最多同时服务 16 个接收端，另有最多 1000 个连接按先到先服务等待；并发接收会共享发送端带宽，满队列时稍后重试。普通 `ii send` 仍只成功发送一次后退出。
+普通 `ii send` 在首次成功发送后退出。`-t` 最多同时服务 16 个接收端，另有最多 1000 个 FIFO 排队连接；并发接收共享发送端带宽，满队列时稍后重试。`--json` 时 stdout 只输出 JSON Lines。
 
-### 局域网网页
+### 后端中转
+
+| 后端 | 发送命令 | 说明 |
+| --- | --- | --- |
+| S3 / R2 | `ii send .\video.mp4 --s3` | 首次使用按提示配置 |
+| WebDAV | `ii send .\video.mp4 --webdav` | 支持便携 ticket |
+| FTP | `ii send .\video.mp4 --ftp` | 仅明文 `ftp://` |
+| SFTP | `ii send .\video.mp4 --sftp` | 支持密码和私钥 |
+
+`--profile <name>` 选择后端配置；`-p` 将 WebDAV、FTP 或 SFTP 凭据写入 ticket，ticket 未加密，只能交给可信接收方；`-d` 在接收成功后尝试删除中转对象。配置和协议限制见 [ii.md](ii.md)、[ftp.md](ftp.md)、[sftp.md](sftp.md)。
+
+## 接收
 
 ```powershell
-# 分享一个文件或目录
+# 指定保存目录
+ii recv ii1k7v...x9a -o D:\Downloads
+
+# 输出到标准输出
+ii recv ii1k7v...x9a --stdout > project.tar.gz
+
+# 面向自动化的 JSON Lines
+ii recv ii1k7v...x9a --json
+```
+
+断网或传到一半失败后，重新执行同一条 `ii recv` 就会继续接收；如果目标文件已经完整且内容相同，会直接跳过；如果同名但内容不同，会覆盖。`ii send` 和 `ii recv` 都会显示传输进度、速率和完成耗时；`--trace` 输出连接诊断。`--stdout` 不能与 `--json` 同用。
+
+## 扩展能力
+
+### 局域网网页与 WebDAV
+
+```powershell
+# 为一个文件或目录提供下载页
 ii send .\video.mp4 --web
 
-# 浏览目录
-ii web .\shared
+# 浏览目录；加 --upload 后允许上传独立文件
+ii web .\shared --upload --path .\uploads
 
-# 浏览器之间直传文件和文本
+# 用系统文件管理器挂载目录；默认可读写
+ii dav .\shared
+ii dav .\shared --read-only
+```
+
+`ii send --web` 为单个文件或目录提供下载页。`ii web` 显示 nginx 风格目录列表，省略目录时服务当前目录；`--upload` 才开放多文件上传，默认写入启动目录的 `./ii/`，`--path <dir>` 可改为指定目录。`ii dav` 直接读写所服务目录，不使用网页上传目录。
+
+`--port 8080` 固定端口，`--bind ::` 只监听 IPv6；裸 `--token` 生成路径令牌，`--token <value>` 使用指定令牌。它们都没有账号鉴权，只适合临时可信局域网。
+
+### 局域网发现
+
+```powershell
+# 列出同一 LAN 中的 ii send -t、ii web 和 ii dav
+ii discover
+
+# 输出 JSON Lines
+ii discover --json
+```
+
+发现等待三秒，只在本地网络内工作；公告会暴露 ticket 或 token URL，不是访问控制。
+
+### 浏览器直传
+
+```powershell
 ii webrtc
 ```
 
-三者都会打印 LAN URL、其他网卡 URL 和终端二维码。`ii web` 省略目录时服务当前目录。`--port 8080` 固定端口，`--bind ::` 只监听 IPv6；裸 `--token` 生成路径令牌，也可用 `--token <value>` 指定。`ii send --web` 与 `ii web` 默认只读，传入 `--upload` 才开放多文件上传；`--path <dir>` 指定上传目录。`ii discover` 监听本地网络三秒，列出带 `-t` 的发送端、`ii web` 和 `ii dav`；发现公告会向同一 LAN 暴露 ticket 或 URL，不是访问控制。网页服务没有账号鉴权，只适合临时可信局域网。完整规则见 [ii.md](ii.md)，WebRTC 限制见 [webrtc.md](webrtc.md)。
+`ii webrtc` 打开网页后可在两台浏览器之间传文件和文本。它同样支持 `--port`、`--bind` 和 `--token`。限制见 [webrtc.md](webrtc.md)。
 
 ### TCP 隧道
 
@@ -142,33 +184,7 @@ ii tunnel -c ii1k7v...x9a
 
 B 默认监听 `127.0.0.1:8080`，端口被占用时自动递增；`--listen 0.0.0.0:8022` 才会暴露给 B 的局域网。流量经 Iroh 端到端加密，ticket 持有者可访问目标直到 A 停止服务。完整用法见 [ii.md](ii.md)。
 
-### 后端中转
-
-| 后端 | 发送命令 | 说明 |
-| --- | --- | --- |
-| S3 / R2 | `ii send .\video.mp4 --s3` | 首次使用按提示配置 |
-| WebDAV | `ii send .\video.mp4 --webdav` | 支持便携 ticket |
-| FTP | `ii send .\video.mp4 --ftp` | 仅明文 `ftp://` |
-| SFTP | `ii send .\video.mp4 --sftp` | 支持密码和私钥 |
-
-`--profile <name>` 选择后端配置；`-p` 将 WebDAV、FTP 或 SFTP 凭据写入 ticket，ticket 未加密，只能交给可信接收方；`-d` 在接收成功后尝试删除中转对象。配置和协议限制见 [ii.md](ii.md)、[ftp.md](ftp.md)、[sftp.md](sftp.md)。
-
-## 图形界面
-
-Release 同时提供 `ii-gui`。它支持默认自动路径、仅局域网、指定 HTTPS relay、S3 和 WebDAV；FTP/SFTP 仅在 CLI 中提供。
-
-## 诊断
-
-```powershell
-# 查看接收路径和耗时
-ii recv ii1k7v...x9a --trace
-
-# 检查本机网络、端口、权限和版本
-ii doctor
-ii version
-```
-
-## 自托管 Relay
+### 自建 Relay
 
 普通传文件不需要自建 relay。需要固定中继入口时：
 
@@ -187,6 +203,21 @@ ii send .\video.mp4 --relay https://relay.example.com:8443
 ```
 
 省略 `--port` 时随机监听。终端打印实际可用的 IPv4 URL；`0.0.0.0` 只用于监听，云服务器公网 IP 可能需要从控制台取得。`-k` 仅用于自签 HTTPS；指定 HTTP 或 HTTPS relay 后，传输强制经过该 relay。完整 TLS、NAT 与安全边界见 [ii.md](ii.md)。
+
+## 图形界面
+
+Release 同时提供 `ii-gui`。它支持默认自动路径、仅局域网、指定 HTTPS relay、S3 和 WebDAV；FTP/SFTP 仅在 CLI 中提供。
+
+## 诊断
+
+```powershell
+# 查看接收路径和耗时
+ii recv ii1k7v...x9a --trace
+
+# 检查本机网络、端口、权限和版本
+ii doctor
+ii version
+```
 
 ## 详细手册
 

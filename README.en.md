@@ -19,18 +19,15 @@
   <a href="README.md">简体中文</a> · <strong>English</strong>
 </p>
 
-`ii` is built for temporary file transfer:
+`ii` is a CLI for temporary file transfer: it connects peer-to-peer by default, discovers services on the LAN, and falls back to relays when direct connectivity is unavailable.
 
-- The sender serves one successful receive by default, then exits
-- P2P direct / LAN discovery with `ii discover` / public relay fallback / optional S3, WebDAV, FTP, and SFTP backends
-- `ii send <file-or-folder> --web` download sharing / `ii web [directory]` directory browsing / `ii dav [directory]` WebDAV serving / `ii webrtc` browser-to-browser transfer / `ii tunnel` TCP port forwarding
-- Receives resume automatically by default
-- Existing files with the same MD5 are skipped
-- Folders can be sent directly
+- Send files, folders, multiple paths, or piped data. Receives resume, skip matching MD5 files, and overwrite conflicts.
+- Use S3/R2, WebDAV, FTP, or SFTP as optional backends, with cleanup after receiving.
+- It also provides LAN web sharing, WebDAV, browser transfer, TCP tunnels, and self-hosted relays.
 
 ## Quick Start
 
-Run this on the sender:
+Sender:
 
 ```powershell
 ii send .\video.mp4
@@ -46,18 +43,9 @@ on the other computer:
 ii recv ii1k7v...x9a
 ```
 
-Run this on the receiver:
+Receiver:
 
 ```powershell
-ii recv ii1k7v...x9a
-```
-
-## Common Scenarios
-
-Send a temporary file to a coworker:
-
-```powershell
-ii send .\report.pdf
 ii recv ii1k7v...x9a
 ```
 
@@ -67,33 +55,40 @@ What the sender and receiver look like:
 
 ![Receiver screenshot](screenshot/接收.png)
 
-Choose an output directory:
+## Send
+
+### Files, Folders, and Multiple Paths
 
 ```powershell
-ii recv ii1k7v...x9a -o D:\Downloads
-```
+# File
+ii send .\report.pdf
 
-If the network drops halfway, run the same `ii recv` command again and it continues receiving. If the target file already exists with the same content, it is skipped. If the name matches but the content differs, it is overwritten.
-
-`ii send` and `ii recv` both show live transfer progress and speed in the terminal, then print the final elapsed time when done. `--trace` switches to diagnostic output so you can see where the delay comes from.
-
-## Send Folders
-
-Folders can be sent directly:
-
-```powershell
+# Folder; receives as <output-directory>\my-folder
 ii send .\my-folder
+
+# Multiple files or folders; receives as <output-directory>\ii
+ii send .\report.pdf .\images .\notes.txt
+
+# Name the multiple-input collection root
+ii send .\report.pdf .\images --name release
 ```
 
-Receiver:
+Multiple paths are packed into one tar stream, so older receivers still handle them as directory tars. Top-level input names must be unique.
+
+### Pipes, Filters, and Rate Limits
 
 ```powershell
-ii recv ii1k7v...x9a -o D:\Downloads
+# Piped input needs an output file name
+tar czf - .\project | ii send --name project.tar.gz
+
+# Send matching files only; exclude overrides include
+ii send .\project --include "**/*.rs" --exclude "target/**"
+
+# All receivers share an 8 MiB/s total sender limit
+ii send .\video.mp4 --rate 8MiB
 ```
 
-The result is `D:\Downloads\my-folder`, not a duplicated `my-folder\my-folder` nesting.
-
-## Advanced Usage
+`--include` and `--exclude` are repeatable and match `/`-separated paths relative to each input folder; they do not apply to `--web`. `--rate` accepts bytes/s, `KiB`, `MiB`, or `GiB`, and also limits web downloads and backend sends.
 
 ### Send Control
 
@@ -105,27 +100,77 @@ ii send .\my-folder -t
 ii send .\video.mp4 -c
 ii send .\video.mp4 -o recv.txt
 
-# Pipe input and standard output
-tar czf - .\project | ii send --name project.tar.gz
-ii recv ii1k7v...x9a --stdout > project.tar.gz
+# JSON Lines for automation
+ii send .\video.mp4 --json
 ```
 
-`-t` serves up to 16 receivers concurrently and queues up to 1,000 more in first-in, first-out order. Concurrent receivers share sender bandwidth; retry later when the queue is full. Plain `ii send` still exits after its first successful transfer.
+Plain `ii send` exits after its first successful transfer. `-t` serves up to 16 receivers concurrently and queues up to 1,000 more in first-in, first-out order. Concurrent receivers share sender bandwidth; retry later when the queue is full. With `--json`, stdout contains JSON Lines only.
 
-### LAN Web Services
+### Storage Backends
+
+| Backend | Send command | Notes |
+| --- | --- | --- |
+| S3 / R2 | `ii send .\video.mp4 --s3` | Prompts for configuration on first use |
+| WebDAV | `ii send .\video.mp4 --webdav` | Supports portable tickets |
+| FTP | `ii send .\video.mp4 --ftp` | Plaintext `ftp://` only |
+| SFTP | `ii send .\video.mp4 --sftp` | Password and private-key authentication |
+
+`--profile <name>` selects a backend configuration. `-p` writes WebDAV, FTP, or SFTP credentials into the ticket; tickets are not encrypted, so share them only with trusted receivers. `-d` attempts to delete the backend object after a successful receive. See [ii.md](ii.md), [ftp.md](ftp.md), and [sftp.md](sftp.md) for configuration and protocol limits.
+
+## Receive
 
 ```powershell
-# Share a file or folder
+# Choose an output directory
+ii recv ii1k7v...x9a -o D:\Downloads
+
+# Write to standard output
+ii recv ii1k7v...x9a --stdout > project.tar.gz
+
+# JSON Lines for automation
+ii recv ii1k7v...x9a --json
+```
+
+If the network drops halfway, run the same `ii recv` command again and it continues receiving. If the target file already exists with the same content, it is skipped. If the name matches but the content differs, it is overwritten. `ii send` and `ii recv` show progress, speed, and elapsed time; `--trace` prints connection diagnostics. `--stdout` cannot be combined with `--json`.
+
+## Extended Capabilities
+
+### LAN Web Sharing and WebDAV
+
+```powershell
+# Serve one file or folder as a download page
 ii send .\video.mp4 --web
 
-# Browse a directory
-ii web .\shared
+# Browse a directory; --upload enables standalone file uploads
+ii web .\shared --upload --path .\uploads
 
-# Transfer files and text between browsers
+# Mount a directory in a file manager; writable by default
+ii dav .\shared
+ii dav .\shared --read-only
+```
+
+`ii send --web` serves a download page for one file or folder. `ii web` displays an nginx-style directory listing and serves the current directory when no directory is given. `--upload` enables multi-file uploads only; their default destination is `./ii/` under the startup directory, while `--path <dir>` selects another directory. `ii dav` reads and writes its served directory directly, not the web upload directory.
+
+`--port 8080` fixes the port, `--bind ::` listens on IPv6 only, and bare `--token` generates a path token while `--token <value>` uses the supplied token. These services have no account authentication and are for short-lived, trusted LAN use only.
+
+### LAN Discovery
+
+```powershell
+# List ii send -t, ii web, and ii dav services on the same LAN
+ii discover
+
+# JSON Lines output
+ii discover --json
+```
+
+Discovery waits for three seconds and stays on the local network. It exposes tickets or token URLs to the LAN; it is not access control.
+
+### Browser Transfer
+
+```powershell
 ii webrtc
 ```
 
-All three print LAN URLs, other adapter URLs, and a terminal QR code. Without a directory, `ii web` serves the current directory. `--port 8080` fixes the port; `--bind ::` selects IPv6 only. Bare `--token` generates a path token, while `--token <value>` supplies one. `ii send --web` and `ii web` are read-only by default; pass `--upload` to enable multi-file uploads and `--path <dir>` to choose the upload directory. `ii discover` listens on the local network for three seconds and lists `ii send -t`, `ii web`, and `ii dav` services; discovery exposes tickets or URLs to the LAN and is not access control. These services have no account authentication and are for short-lived, trusted LAN use only. See [ii.md](ii.md) for the full rules and [webrtc.md](webrtc.md) for WebRTC limits.
+`ii webrtc` transfers files and text between two browsers. It also supports `--port`, `--bind`, and `--token`. See [webrtc.md](webrtc.md) for limits.
 
 ### TCP Tunnel
 
@@ -139,33 +184,7 @@ ii tunnel -c ii1k7v...x9a
 
 B listens on `127.0.0.1:8080` by default and increments the port when it is occupied. Use `--listen 0.0.0.0:8022` only to expose B's listener to its LAN. Traffic is end-to-end encrypted by Iroh; a ticket holder can use the target until A stops the service. See [ii.md](ii.md) for the full protocol and relay options.
 
-### Storage Backends
-
-| Backend | Send command | Notes |
-| --- | --- | --- |
-| S3 / R2 | `ii send .\video.mp4 --s3` | Prompts for configuration on first use |
-| WebDAV | `ii send .\video.mp4 --webdav` | Supports portable tickets |
-| FTP | `ii send .\video.mp4 --ftp` | Plaintext `ftp://` only |
-| SFTP | `ii send .\video.mp4 --sftp` | Password and private-key authentication |
-
-`--profile <name>` selects a backend configuration. `-p` writes WebDAV, FTP, or SFTP credentials into the ticket; tickets are not encrypted, so share them only with trusted receivers. `-d` attempts to delete the backend object after a successful receive. See [ii.md](ii.md), [ftp.md](ftp.md), and [sftp.md](sftp.md) for configuration and protocol limits.
-
-## Desktop GUI
-
-Releases also include `ii-gui`. It supports the default automatic path, local-only transfers, a chosen HTTPS relay, S3, and WebDAV. FTP and SFTP are CLI-only.
-
-## Diagnostics
-
-```powershell
-# Inspect the receive path and timing
-ii recv ii1k7v...x9a --trace
-
-# Check local networking, ports, permissions, and version
-ii doctor
-ii version
-```
-
-## Self-hosted Relay
+### Self-hosted Relay
 
 You only need this for a fixed relay endpoint.
 
@@ -184,6 +203,21 @@ ii send .\video.mp4 --relay https://relay.example.com:8443
 ```
 
 Without `--port`, the relay chooses a free port. The terminal prints usable IPv4 URLs; `0.0.0.0` is bind-only, and a cloud public IP may need to come from the provider console. `-k` is only for self-signed HTTPS. An explicit HTTP or HTTPS relay forces traffic through that relay. See [ii.md](ii.md) for TLS, NAT, and security boundaries.
+
+## Desktop GUI
+
+Releases also include `ii-gui`. It supports the default automatic path, local-only transfers, a chosen HTTPS relay, S3, and WebDAV. FTP and SFTP are CLI-only.
+
+## Diagnostics
+
+```powershell
+# Inspect the receive path and timing
+ii recv ii1k7v...x9a --trace
+
+# Check local networking, ports, permissions, and version
+ii doctor
+ii version
+```
 
 ## Full Manual
 
