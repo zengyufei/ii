@@ -42,6 +42,10 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: Test CLI
         run: cargo test -p ii --locked
+      - name: Test installer
+        if: runner.os == 'Linux'
+        shell: bash
+        run: bash tests/install.sh
       - name: Build Linux static CLI
         if: runner.os == 'Linux'
         shell: bash
@@ -118,11 +122,18 @@ jobs:
     needs: build-cli
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
       - name: Download artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
           merge-multiple: true
+      - name: Create checksums
+        shell: bash
+        run: |
+          set -euxo pipefail
+          cd artifacts
+          sha256sum ii-* > checksums.txt
       - name: Summarize release artifacts
         shell: bash
         run: |
@@ -140,3 +151,11 @@ jobs:
         with:
           files: artifacts/*
           generate_release_notes: true
+      - name: Verify released installer
+        shell: bash
+        env:
+          II_INSTALL_DIR: ${{ runner.temp }}/ii-bin
+        run: |
+          set -euxo pipefail
+          bash ./install.sh
+          test "$("${II_INSTALL_DIR}/ii" version)" = "${GITHUB_REF_NAME#v}"

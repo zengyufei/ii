@@ -25,6 +25,16 @@
 - 可选通用 S3、Cloudflare R2、Azure Blob、WebDAV、FTP、SFTP 中转；传完可删除中转对象。
 - 另有局域网网页、WebDAV、浏览器直传、TCP 隧道和自建 relay。
 
+## 安装
+
+Linux x86_64 和 Apple Silicon macOS：
+
+```bash
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/zengyufei/ii/master/install.sh | bash
+```
+
+默认安装到 `~/.local/bin/ii`；设置 `II_INSTALL_DIR` 可指定安装目录。Windows x64 请从 [GitHub Releases](https://github.com/zengyufei/ii/releases) 下载。所有发布资产和校验和也可在 Releases 获取。
+
 ## 快速开始
 
 发送端：

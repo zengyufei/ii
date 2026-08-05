@@ -25,6 +25,16 @@
 - Use generic S3, Cloudflare R2, Azure Blob, WebDAV, FTP, or SFTP as optional backends, with cleanup after receiving.
 - It also provides LAN web sharing, WebDAV, browser transfer, TCP tunnels, and self-hosted relays.
 
+## Install
+
+Linux x86_64 and Apple Silicon macOS:
+
+```bash
+curl --proto '=https' --tlsv1.2 -fsSL https://raw.githubusercontent.com/zengyufei/ii/master/install.sh | bash
+```
+
+The default install path is `~/.local/bin/ii`; set `II_INSTALL_DIR` to choose another directory. For Windows x64, download the executable from [GitHub Releases](https://github.com/zengyufei/ii/releases). Releases also provide every published asset and its checksum.
+
 ## Quick Start
 
 Sender:
