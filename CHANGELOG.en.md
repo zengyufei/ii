@@ -2,6 +2,13 @@
 
 All notable changes to `ii` are documented here. The default Chinese version is [CHANGELOG.md](CHANGELOG.md).
 
+## 0.3.3 - 2026-08-05
+
+### Added
+
+- `ii dav` now supports HTTP Basic Auth; `--username` and `--password` must be supplied together.
+- `ii dav` now supports HTTPS: `--tls` generates a temporary self-signed certificate, while `--domain`, `--cert`, and `--key` support custom DNS names and PEM certificates.
+
 ## 0.3.1 - 2026-08-05
 
 ### Added

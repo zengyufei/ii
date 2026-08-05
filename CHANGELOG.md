@@ -2,6 +2,13 @@
 
 本文件记录 `ii` 的重要变更。默认中文版本在这里，英文版本见 [CHANGELOG.en.md](CHANGELOG.en.md)。
 
+## 0.3.3 - 2026-08-05
+
+### 新增
+
+- `ii dav` 支持 HTTP Basic Auth：`--username` 与 `--password` 必须成对提供。
+- `ii dav` 支持 HTTPS：`--tls` 可生成临时自签证书，`--domain`、`--cert`、`--key` 支持自定义域名和 PEM 证书。
+
 ## 0.3.1 - 2026-08-05
 
 ### 新增
