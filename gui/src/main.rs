@@ -609,6 +609,7 @@ fn install_transfer_handlers(
             resume: false,
             local: false,
             trace: false,
+            json: false,
         };
         let sender = background_sender.clone();
         thread::spawn(move || {

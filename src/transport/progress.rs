@@ -2,7 +2,8 @@ use anyhow::{Context, Result};
 use std::{
     borrow::Cow,
     io::{IsTerminal, Write},
-    time::Duration,
+    sync::Mutex,
+    time::{Duration, Instant},
 };
 use tokio::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 
@@ -186,13 +187,35 @@ where
     R: AsyncRead + Unpin,
     W: AsyncWrite + Unpin,
 {
+    copy_with_progress_limited(reader, writer, progress, None).await
+}
+
+pub(crate) async fn copy_with_progress_limited<R, W>(
+    reader: &mut R,
+    writer: &mut W,
+    progress: &mut TransferProgress,
+    rate_limiter: Option<&RateLimiter>,
+) -> Result<u64>
+where
+    R: AsyncRead + Unpin,
+    W: AsyncWrite + Unpin,
+{
     let mut buf = [0u8; 64 * 1024];
     let mut written = 0u64;
+    let read_len = rate_limiter
+        .map(RateLimiter::chunk_size)
+        .unwrap_or(buf.len());
     if !progress.is_multiline() {
         loop {
-            let n = reader.read(&mut buf).await.context("read payload")?;
+            let n = reader
+                .read(&mut buf[..read_len])
+                .await
+                .context("read payload")?;
             if n == 0 {
                 return Ok(written);
+            }
+            if let Some(rate_limiter) = rate_limiter {
+                rate_limiter.wait(n).await;
             }
             writer.write_all(&buf[..n]).await.context("write payload")?;
             let n = n as u64;
@@ -204,7 +227,7 @@ where
     let mut ticker = tokio::time::interval(Duration::from_secs(1));
     ticker.tick().await;
     loop {
-        let read = reader.read(&mut buf);
+        let read = reader.read(&mut buf[..read_len]);
         tokio::pin!(read);
         let n = loop {
             tokio::select! {
@@ -215,10 +238,56 @@ where
         if n == 0 {
             break;
         }
+        if let Some(rate_limiter) = rate_limiter {
+            rate_limiter.wait(n).await;
+        }
         writer.write_all(&buf[..n]).await.context("write payload")?;
         let n = n as u64;
         written = written.saturating_add(n);
         progress.advance(n);
     }
     Ok(written)
+}
+
+#[derive(Debug)]
+pub(crate) struct RateLimiter {
+    bytes_per_second: u64,
+    next: Mutex<Instant>,
+}
+
+impl RateLimiter {
+    pub(crate) fn new(bytes_per_second: u64) -> Self {
+        Self {
+            bytes_per_second,
+            next: Mutex::new(Instant::now()),
+        }
+    }
+
+    pub(crate) fn chunk_size(&self) -> usize {
+        (self.bytes_per_second / 4).clamp(1, 64 * 1024) as usize
+    }
+
+    pub(crate) async fn wait(&self, bytes: usize) {
+        let wait = self.reserve(bytes);
+        if !wait.is_zero() {
+            tokio::time::sleep(wait).await;
+        }
+    }
+
+    pub(crate) fn wait_blocking(&self, bytes: usize) {
+        let wait = self.reserve(bytes);
+        if !wait.is_zero() {
+            std::thread::sleep(wait);
+        }
+    }
+
+    fn reserve(&self, bytes: usize) -> Duration {
+        let now = Instant::now();
+        let mut next = self.next.lock().expect("rate limiter mutex poisoned");
+        let start = (*next).max(now);
+        let duration = Duration::from_secs_f64(bytes as f64 / self.bytes_per_second as f64);
+        let finish = start.checked_add(duration).unwrap_or(start);
+        *next = finish;
+        finish.saturating_duration_since(now)
+    }
 }

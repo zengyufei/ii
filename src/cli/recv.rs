@@ -8,6 +8,7 @@ pub(super) fn parse(args: Vec<String>) -> Result<RecvArgs, ParseAction> {
     let mut resume = false;
     let mut local = false;
     let mut trace = false;
+    let mut json = false;
     let mut iter = ArgsIter::new(args);
 
     while let Some(arg) = iter.next() {
@@ -24,6 +25,7 @@ pub(super) fn parse(args: Vec<String>) -> Result<RecvArgs, ParseAction> {
                 "--resume" => resume = true,
                 "--local" => local = true,
                 "--trace" => trace = true,
+                "--json" => json = true,
                 _ if arg.starts_with('-') => {
                     return Err(ParseAction::error(format!("unknown option `{arg}`")));
                 }
@@ -36,8 +38,12 @@ pub(super) fn parse(args: Vec<String>) -> Result<RecvArgs, ParseAction> {
         }
     }
 
-    if stdout && resume {
-        return Err(ParseAction::error("--stdout conflicts with --resume"));
+    if stdout && (resume || json) {
+        return Err(ParseAction::error(if json {
+            "--stdout conflicts with --json"
+        } else {
+            "--stdout conflicts with --resume"
+        }));
     }
 
     let Some(ticket) = ticket else {
@@ -52,5 +58,6 @@ pub(super) fn parse(args: Vec<String>) -> Result<RecvArgs, ParseAction> {
         resume,
         local,
         trace,
+        json,
     })
 }

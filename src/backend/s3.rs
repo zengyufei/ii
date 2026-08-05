@@ -6,13 +6,16 @@ use crate::{
 use crate::{
     storage,
     transport::{
-        progress::TransferProgress,
+        progress::{RateLimiter, TransferProgress},
         source::{Source, unique_object_id},
     },
 };
 use anyhow::{Context, Result, bail};
-use std::io::{Read, Write};
 use std::path::PathBuf;
+use std::{
+    io::{Read, Write},
+    sync::Arc,
+};
 use tempfile::NamedTempFile;
 use tokio::fs;
 
@@ -46,11 +49,20 @@ pub(crate) fn ensure_success(status: u16) -> Result<()> {
 pub(crate) struct ProgressReader<R> {
     inner: R,
     progress: TransferProgress,
+    rate_limiter: Option<Arc<RateLimiter>>,
 }
 
 impl<R> ProgressReader<R> {
-    pub(crate) fn new(inner: R, progress: TransferProgress) -> Self {
-        Self { inner, progress }
+    pub(crate) fn new(
+        inner: R,
+        progress: TransferProgress,
+        rate_limiter: Option<Arc<RateLimiter>>,
+    ) -> Self {
+        Self {
+            inner,
+            progress,
+            rate_limiter,
+        }
     }
 
     pub(crate) fn finish(&mut self) {
@@ -60,8 +72,17 @@ impl<R> ProgressReader<R> {
 
 impl<R: Read> Read for ProgressReader<R> {
     fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
-        let n = self.inner.read(buf)?;
+        let limit = self
+            .rate_limiter
+            .as_ref()
+            .map(|rate_limiter| rate_limiter.chunk_size())
+            .unwrap_or(buf.len());
+        let len = limit.min(buf.len());
+        let n = self.inner.read(&mut buf[..len])?;
         if n > 0 {
+            if let Some(rate_limiter) = &self.rate_limiter {
+                rate_limiter.wait_blocking(n);
+            }
             self.progress.advance(n as u64);
         }
         Ok(n)
@@ -79,6 +100,7 @@ pub(crate) async fn upload(
     profile: &storage::S3Profile,
     delete_after_recv: bool,
     show_progress: bool,
+    rate_limiter: Option<Arc<RateLimiter>>,
 ) -> Result<S3Upload> {
     let source_path = source.local_path();
     let source_size = source.size();
@@ -94,7 +116,7 @@ pub(crate) async fn upload(
             let file = std::fs::File::open(&source_path)
                 .with_context(|| format!("open source file {}", source_path.display()))?;
             let progress = TransferProgress::new("ii send", show_progress, source_size, 0);
-            let mut file = ProgressReader::new(file, progress);
+            let mut file = ProgressReader::new(file, progress, rate_limiter);
             let status = bucket
                 .put_object_stream(&mut file, &object_path)
                 .context("upload to S3")?;

@@ -7,6 +7,7 @@ pub(super) fn parse(args: Vec<String>) -> Result<WebArgs, ParseAction> {
     while let Some(arg) = iter.next() {
         match split_long_value(&arg) {
             Some(("port", value)) => out.web_port = Some(parse_port("--port", value)?),
+            Some(("bind", value)) => out.web_bind = Some(parse_bind("--bind", value)?),
             Some(("token", value)) => out.web_token = Some(value.to_string()),
             Some(("upload", _)) => {
                 return Err(ParseAction::error("--upload does not take a value"));
@@ -18,6 +19,7 @@ pub(super) fn parse(args: Vec<String>) -> Result<WebArgs, ParseAction> {
             None => match arg.as_str() {
                 "-h" | "--help" => return Err(ParseAction::help(WEB_HELP)),
                 "--port" => out.web_port = Some(parse_port("--port", &iter.value("--port")?)?),
+                "--bind" => out.web_bind = Some(parse_bind("--bind", &iter.value("--bind")?)?),
                 "--token" => out.web_token = Some(web_token(&mut iter)),
                 "--upload" if out.web_upload => {
                     return Err(ParseAction::error("--upload may be specified only once"));

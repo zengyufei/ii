@@ -6,11 +6,13 @@ pub(super) fn parse(args: Vec<String>) -> Result<RelayArgs, ParseAction> {
     let mut cert = None;
     let mut key = None;
     let mut port = None;
+    let mut bind = None;
     let mut iter = ArgsIter::new(args);
 
     while let Some(arg) = iter.next() {
         match split_long_value(&arg) {
             Some(("port", value)) => port = Some(parse_port("--port", value)?),
+            Some(("bind", value)) => bind = Some(parse_bind("--bind", value)?),
             Some(("domain", value)) => domain = Some(parse_tls_domain(value)?),
             Some(("cert", value)) => cert = Some(PathBuf::from(value)),
             Some(("key", value)) => key = Some(PathBuf::from(value)),
@@ -23,6 +25,7 @@ pub(super) fn parse(args: Vec<String>) -> Result<RelayArgs, ParseAction> {
             None => match arg.as_str() {
                 "-h" | "--help" => return Err(ParseAction::help(RELAY_HELP)),
                 "--port" => port = Some(parse_port("--port", &iter.value("--port")?)?),
+                "--bind" => bind = Some(parse_bind("--bind", &iter.value("--bind")?)?),
                 "--tls" => tls = true,
                 "--domain" => domain = Some(parse_tls_domain(&iter.value("--domain")?)?),
                 "--cert" => cert = Some(PathBuf::from(iter.value("--cert")?)),
@@ -50,5 +53,6 @@ pub(super) fn parse(args: Vec<String>) -> Result<RelayArgs, ParseAction> {
         cert,
         key,
         port,
+        bind,
     })
 }

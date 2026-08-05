@@ -2,6 +2,14 @@
 
 本文件记录 `ii` 的重要变更。默认中文版本在这里，英文版本见 [CHANGELOG.en.md](CHANGELOG.en.md)。
 
+## 0.3.0 - 2026-08-05
+
+### 新增
+
+- `ii send` 支持多文件/目录混合发送、`--include`/`--exclude` 筛选、`--rate` 总带宽限制和 `--json` JSON Lines 事件。
+- 新增 `ii discover` 局域网发现，以及 `ii web`、`ii dav`、`ii send --web` 的 `--bind` IPv4/IPv6 监听。
+- 新增读写 `ii dav` 局域网 WebDAV 服务，支持桌面客户端常用请求、Range、chunked PUT 和进程内锁。
+
 ## 0.2.9 - 2026-08-04
 
 ### 变更

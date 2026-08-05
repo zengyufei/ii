@@ -2,6 +2,14 @@
 
 All notable changes to `ii` are documented here. The default Chinese version is [CHANGELOG.md](CHANGELOG.md).
 
+## 0.3.0 - 2026-08-05
+
+### Added
+
+- `ii send` now supports mixed file/folder sends, `--include`/`--exclude` filters, a global `--rate` cap, and JSON Lines events with `--json`.
+- Added `ii discover` LAN discovery and `--bind` IPv4/IPv6 listeners for `ii web`, `ii dav`, and `ii send --web`.
+- Added a read-write `ii dav` LAN WebDAV service with desktop-client methods, Range, chunked PUT, and process-local locks.
+
 ## 0.2.9 - 2026-08-04
 
 ### Changed

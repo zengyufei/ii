@@ -22,8 +22,8 @@
 `ii` is built for temporary file transfer:
 
 - The sender serves one successful receive by default, then exits
-- P2P direct / LAN discovery / public relay fallback / optional S3, WebDAV, FTP, and SFTP backends
-- `ii send <file-or-folder> --web` download sharing / `ii web [directory]` directory browsing / `ii webrtc` browser-to-browser transfer / `ii tunnel` TCP port forwarding
+- P2P direct / LAN discovery with `ii discover` / public relay fallback / optional S3, WebDAV, FTP, and SFTP backends
+- `ii send <file-or-folder> --web` download sharing / `ii web [directory]` directory browsing / `ii dav [directory]` WebDAV serving / `ii webrtc` browser-to-browser transfer / `ii tunnel` TCP port forwarding
 - Receives resume automatically by default
 - Existing files with the same MD5 are skipped
 - Folders can be sent directly
@@ -125,7 +125,7 @@ ii web .\shared
 ii webrtc
 ```
 
-All three print LAN URLs, other adapter URLs, and a terminal QR code. Without a directory, `ii web` serves the current directory. `--port 8080` fixes the port; bare `--token` generates a path token, while `--token <value>` supplies one. `ii send --web` and `ii web` are read-only by default; pass `--upload` to enable multi-file uploads and `--path <dir>` to choose the upload directory. These services have no account authentication and are for short-lived, trusted LAN use only. See [ii.md](ii.md) for the full rules and [webrtc.md](webrtc.md) for WebRTC limits.
+All three print LAN URLs, other adapter URLs, and a terminal QR code. Without a directory, `ii web` serves the current directory. `--port 8080` fixes the port; `--bind ::` selects IPv6 only. Bare `--token` generates a path token, while `--token <value>` supplies one. `ii send --web` and `ii web` are read-only by default; pass `--upload` to enable multi-file uploads and `--path <dir>` to choose the upload directory. `ii discover` listens on the local network for three seconds and lists `ii send -t`, `ii web`, and `ii dav` services; discovery exposes tickets or URLs to the LAN and is not access control. These services have no account authentication and are for short-lived, trusted LAN use only. See [ii.md](ii.md) for the full rules and [webrtc.md](webrtc.md) for WebRTC limits.
 
 ### TCP Tunnel
 

@@ -73,7 +73,14 @@ pub async fn run(args: RelayArgs) -> Result<()> {
 fn print_addresses(args: &RelayArgs, port: u16) {
     let scheme = if args.tls { "https" } else { "http" };
     let (primary, other) = lan_ipv4_hosts();
-    let (url, other_urls) = advertised_urls(scheme, port, args.domain.as_deref(), primary, other);
+    let bind = args.bind.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED));
+    let (url, other_urls) = match bind {
+        IpAddr::V4(Ipv4Addr::UNSPECIFIED) => {
+            advertised_urls(scheme, port, args.domain.as_deref(), primary, other)
+        }
+        host if args.domain.is_none() => (relay_url(scheme, host, port), Vec::new()),
+        _ => advertised_urls(scheme, port, args.domain.as_deref(), primary, other),
+    };
     eprintln!("ii relay: {url}");
     if args.domain.is_none() {
         eprintln!();
@@ -89,6 +96,13 @@ fn print_addresses(args: &RelayArgs, port: u16) {
     eprintln!("ii relay: relay-only mode; no UDP, QUIC, or direct peer path");
     eprintln!();
     eprintln!("press Ctrl+C to stop relay");
+}
+
+fn relay_url(scheme: &str, host: IpAddr, port: u16) -> String {
+    match host {
+        IpAddr::V4(host) => format!("{scheme}://{host}:{port}"),
+        IpAddr::V6(host) => format!("{scheme}://[{host}]:{port}"),
+    }
 }
 
 pub(super) fn advertised_urls(
@@ -111,10 +125,19 @@ pub(super) fn advertised_urls(
 }
 
 pub(crate) fn build_server_config(args: &RelayArgs) -> Result<server::ServerConfig> {
-    let bind_addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), args.port.unwrap_or(0));
+    let bind_addr = SocketAddr::new(
+        args.bind.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
+        args.port.unwrap_or(0),
+    );
     let mut relay_config = if args.tls {
         // TLS mode needs a separate local HTTP listener for captive-portal responses.
-        server::RelayConfig::new(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 0))
+        server::RelayConfig::new(SocketAddr::new(
+            match bind_addr.ip() {
+                IpAddr::V4(_) => IpAddr::V4(Ipv4Addr::LOCALHOST),
+                IpAddr::V6(_) => IpAddr::V6(std::net::Ipv6Addr::LOCALHOST),
+            },
+            0,
+        ))
     } else {
         server::RelayConfig::new(bind_addr)
     };

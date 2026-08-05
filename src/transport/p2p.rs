@@ -2,7 +2,7 @@ use crate::{
     command::RecvArgs,
     ticket::{PayloadKind, ResumeRequest, Ticket},
     transport::{
-        progress::{TransferProgress, copy_with_progress, fmt_bytes, fmt_duration},
+        progress::{RateLimiter, TransferProgress, copy_with_progress, fmt_bytes, fmt_duration},
         source::{Source, md5_path},
     },
 };
@@ -10,6 +10,7 @@ use anyhow::{Context, Result, bail};
 use iroh::Endpoint;
 use std::{
     path::{Path, PathBuf},
+    sync::Arc,
     time::{Duration, Instant},
 };
 use tokio::{
@@ -288,21 +289,23 @@ pub(crate) enum ServeOutcome {
     Ignored,
 }
 
-pub(crate) async fn serve_one(
+pub(crate) async fn serve_one_limited(
     conn: iroh::endpoint::Connection,
     source: &Source,
     show_progress: bool,
+    rate_limiter: Option<Arc<RateLimiter>>,
 ) -> Result<ServeOutcome> {
-    serve_one_inner(conn, source, show_progress, None).await
+    serve_one_inner(conn, source, show_progress, None, rate_limiter).await
 }
 
-pub(crate) async fn serve_one_multiline(
+pub(crate) async fn serve_one_multiline_limited(
     conn: iroh::endpoint::Connection,
     source: &Source,
     show_progress: bool,
     label: String,
+    rate_limiter: Option<Arc<RateLimiter>>,
 ) -> Result<ServeOutcome> {
-    serve_one_inner(conn, source, show_progress, Some(label)).await
+    serve_one_inner(conn, source, show_progress, Some(label), rate_limiter).await
 }
 
 async fn serve_one_inner(
@@ -310,6 +313,7 @@ async fn serve_one_inner(
     source: &Source,
     show_progress: bool,
     multiline_label: Option<String>,
+    rate_limiter: Option<Arc<RateLimiter>>,
 ) -> Result<ServeOutcome> {
     let (mut send, mut recv) =
         match accept_transfer_stream(&conn, multiline_label.as_deref(), show_progress).await {
@@ -328,12 +332,18 @@ async fn serve_one_inner(
     match multiline_label {
         Some(label) => {
             source
-                .stream_to_multiline(&mut send, resume_from, show_progress, label)
+                .stream_to_multiline_limited(
+                    &mut send,
+                    resume_from,
+                    show_progress,
+                    label,
+                    rate_limiter.as_ref(),
+                )
                 .await?;
         }
         None => {
             source
-                .stream_to(&mut send, resume_from, show_progress)
+                .stream_to_limited(&mut send, resume_from, show_progress, rate_limiter.as_ref())
                 .await?
         }
     }
@@ -478,6 +488,7 @@ mod tests {
             resume: false,
             local: false,
             trace: false,
+            json: false,
         }
     }
 }

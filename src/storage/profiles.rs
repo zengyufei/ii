@@ -27,9 +27,25 @@ pub fn load_or_prompt_s3_profile_named(profile_name: &str) -> Result<S3ProfileSe
     load_or_prompt_s3_profile_from_path(path, profile_name)
 }
 
+pub fn load_s3_profile_noninteractive(profile_name: Option<&str>) -> Result<S3ProfileSelection> {
+    load_s3_profile_from_path(
+        default_config_path()?,
+        profile_name.unwrap_or(DEFAULT_S3_PROFILE),
+        false,
+    )
+}
+
 fn load_or_prompt_s3_profile_from_path(
     path: PathBuf,
     profile_name: &str,
+) -> Result<S3ProfileSelection> {
+    load_s3_profile_from_path(path, profile_name, true)
+}
+
+fn load_s3_profile_from_path(
+    path: PathBuf,
+    profile_name: &str,
+    allow_prompt: bool,
 ) -> Result<S3ProfileSelection> {
     let mut config = load_config(&path)?;
     let existed = config.storage.s3.contains_key(profile_name);
@@ -81,7 +97,7 @@ fn load_or_prompt_s3_profile_from_path(
 
     let missing = missing_cloudflare_fields(&profile);
     if !missing.is_empty() {
-        if !std::io::stdin().is_terminal() {
+        if !allow_prompt || !std::io::stdin().is_terminal() {
             bail!(
                 "S3 config is missing {}. Run `ii send <file> --s3` from an interactive terminal once, or edit {} manually.",
                 missing.join(", "),
@@ -120,9 +136,21 @@ pub fn load_or_prompt_webdav_profile_named(profile_name: &str) -> Result<WebDavP
     load_or_prompt_webdav_profile_from_path(path, profile_name)
 }
 
+pub fn load_webdav_profile_noninteractive(profile_name: &str) -> Result<WebDavProfileSelection> {
+    load_webdav_profile_from_path(default_config_path()?, profile_name, false)
+}
+
 fn load_or_prompt_webdav_profile_from_path(
     path: PathBuf,
     profile_name: &str,
+) -> Result<WebDavProfileSelection> {
+    load_webdav_profile_from_path(path, profile_name, true)
+}
+
+fn load_webdav_profile_from_path(
+    path: PathBuf,
+    profile_name: &str,
+    allow_prompt: bool,
 ) -> Result<WebDavProfileSelection> {
     let mut config = load_config(&path)?;
     let mut profile = config
@@ -141,7 +169,7 @@ fn load_or_prompt_webdav_profile_from_path(
 
     let missing = missing_webdav_fields(&profile);
     if !missing.is_empty() {
-        if !std::io::stdin().is_terminal() {
+        if !allow_prompt || !std::io::stdin().is_terminal() {
             bail!(
                 "WebDAV config is missing {}. Run `ii send <file> --webdav` or `ii recv <ticket>` from an interactive terminal once, or edit {} manually.",
                 missing.join(", "),
@@ -192,9 +220,25 @@ pub fn load_or_prompt_ftp_profile_named(profile_name: &str) -> Result<FtpProfile
     load_or_prompt_ftp_profile_from_path(path, profile_name)
 }
 
+pub fn load_ftp_profile_noninteractive(profile_name: Option<&str>) -> Result<FtpProfileSelection> {
+    load_ftp_profile_from_path(
+        default_config_path()?,
+        profile_name.unwrap_or(DEFAULT_FTP_PROFILE),
+        false,
+    )
+}
+
 fn load_or_prompt_ftp_profile_from_path(
     path: PathBuf,
     profile_name: &str,
+) -> Result<FtpProfileSelection> {
+    load_ftp_profile_from_path(path, profile_name, true)
+}
+
+fn load_ftp_profile_from_path(
+    path: PathBuf,
+    profile_name: &str,
+    allow_prompt: bool,
 ) -> Result<FtpProfileSelection> {
     let mut config = load_config(&path)?;
     let mut profile = config
@@ -212,7 +256,7 @@ fn load_or_prompt_ftp_profile_from_path(
 
     let missing = missing_ftp_fields(&profile);
     if !missing.is_empty() {
-        if !std::io::stdin().is_terminal() {
+        if !allow_prompt || !std::io::stdin().is_terminal() {
             bail!(
                 "FTP config is missing {}. Run `ii send <file> --ftp` or `ii recv <ticket>` from an interactive terminal once, or edit {} manually.",
                 missing.join(", "),
@@ -249,9 +293,27 @@ pub fn load_or_prompt_sftp_profile_named(profile_name: &str) -> Result<SftpProfi
     load_or_prompt_sftp_profile_from_path(path, profile_name)
 }
 
+pub fn load_sftp_profile_noninteractive(
+    profile_name: Option<&str>,
+) -> Result<SftpProfileSelection> {
+    load_sftp_profile_from_path(
+        default_config_path()?,
+        profile_name.unwrap_or(DEFAULT_SFTP_PROFILE),
+        false,
+    )
+}
+
 fn load_or_prompt_sftp_profile_from_path(
     path: PathBuf,
     profile_name: &str,
+) -> Result<SftpProfileSelection> {
+    load_sftp_profile_from_path(path, profile_name, true)
+}
+
+fn load_sftp_profile_from_path(
+    path: PathBuf,
+    profile_name: &str,
+    allow_prompt: bool,
 ) -> Result<SftpProfileSelection> {
     let mut config = load_config(&path)?;
     let mut profile = config
@@ -273,7 +335,7 @@ fn load_or_prompt_sftp_profile_from_path(
 
     let missing = missing_sftp_fields(&profile);
     if !missing.is_empty() {
-        if !std::io::stdin().is_terminal() {
+        if !allow_prompt || !std::io::stdin().is_terminal() {
             bail!(
                 "SFTP config is missing {}. Run `ii send <file> --sftp` or `ii recv <ticket>` from an interactive terminal once, or edit {} manually.",
                 missing.join(", "),

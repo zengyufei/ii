@@ -23,9 +23,9 @@
 
 直发目录 / 一次即走 / 持续发送 / 自动复制到粘贴板或落盘
 
-P2P 直连 / 局域网发现 / 公网 relay 回退 / 支持 `--s3` / `--webdav` / `--ftp` / `--sftp` 后端中转
+P2P 直连 / 局域网发现 / `ii discover` / 公网 relay 回退 / 支持 `--s3` / `--webdav` / `--ftp` / `--sftp` 后端中转
 
-`ii send <文件或文件夹> --web` 分享下载 / `ii web [目录]` 浏览目录 / `ii webrtc` 浏览器直传 / `ii tunnel` TCP 端口转发
+`ii send <文件或文件夹> --web` 分享下载 / `ii web [目录]` 浏览目录 / `ii dav [目录]` 挂载目录 / `ii webrtc` 浏览器直传 / `ii tunnel` TCP 端口转发
 
 断点续收 / 秒传跳过 / 冲突覆盖 / 支持传完清理中转
 
@@ -128,7 +128,7 @@ ii web .\shared
 ii webrtc
 ```
 
-三者都会打印 LAN URL、其他网卡 URL 和终端二维码。`ii web` 省略目录时服务当前目录。`--port 8080` 固定端口；裸 `--token` 生成路径令牌，也可用 `--token <value>` 指定。`ii send --web` 与 `ii web` 默认只读，传入 `--upload` 才开放多文件上传；`--path <dir>` 指定上传目录。网页服务没有账号鉴权，只适合临时可信局域网。完整规则见 [ii.md](ii.md)，WebRTC 限制见 [webrtc.md](webrtc.md)。
+三者都会打印 LAN URL、其他网卡 URL 和终端二维码。`ii web` 省略目录时服务当前目录。`--port 8080` 固定端口，`--bind ::` 只监听 IPv6；裸 `--token` 生成路径令牌，也可用 `--token <value>` 指定。`ii send --web` 与 `ii web` 默认只读，传入 `--upload` 才开放多文件上传；`--path <dir>` 指定上传目录。`ii discover` 监听本地网络三秒，列出带 `-t` 的发送端、`ii web` 和 `ii dav`；发现公告会向同一 LAN 暴露 ticket 或 URL，不是访问控制。网页服务没有账号鉴权，只适合临时可信局域网。完整规则见 [ii.md](ii.md)，WebRTC 限制见 [webrtc.md](webrtc.md)。
 
 ### TCP 隧道
 

@@ -4,7 +4,7 @@ use crate::{
     ticket::{PayloadKind, Ticket, WebDavPortableCredentials},
     transport::{
         p2p::{FilePlan, RecvTrace},
-        progress::TransferProgress,
+        progress::{RateLimiter, TransferProgress},
         source::{Source, unique_object_id},
     },
 };
@@ -29,6 +29,7 @@ pub(crate) async fn upload(
     source: &Source,
     profile: &storage::WebDavProfile,
     show_progress: bool,
+    rate_limiter: Option<Arc<RateLimiter>>,
 ) -> Result<WebDavUpload> {
     let client = storage::build_webdav_client(profile)?;
     let object_key = match source.content_md5() {
@@ -52,9 +53,17 @@ pub(crate) async fn upload(
         0,
     )));
     let progress_for_stream = Arc::clone(&progress);
-    let stream = ReaderStream::new(file).inspect_ok(move |bytes| {
-        if let Ok(mut progress) = progress_for_stream.lock() {
-            progress.advance(bytes.len() as u64);
+    let stream = ReaderStream::new(file).and_then(move |bytes| {
+        let progress = Arc::clone(&progress_for_stream);
+        let rate_limiter = rate_limiter.clone();
+        async move {
+            if let Some(rate_limiter) = rate_limiter {
+                rate_limiter.wait(bytes.len()).await;
+            }
+            if let Ok(mut progress) = progress.lock() {
+                progress.advance(bytes.len() as u64);
+            }
+            Ok(bytes)
         }
     });
     let body = reqwest::Body::wrap_stream(stream);
@@ -129,7 +138,11 @@ pub(crate) async fn recv_webdav(
             (profile, Some(save))
         }
         None => {
-            let selection = storage::load_or_prompt_webdav_profile_named(&webdav.profile)?;
+            let selection = if args.json {
+                storage::load_webdav_profile_noninteractive(&webdav.profile)?
+            } else {
+                storage::load_or_prompt_webdav_profile_named(&webdav.profile)?
+            };
             let save = selection
                 .save_after_success
                 .then_some((selection.path.clone(), selection.config.clone()));
@@ -201,6 +214,7 @@ pub(crate) async fn recv_webdav(
 pub(crate) async fn try_delete_webdav_for_ticket(
     webdav: crate::ticket::WebDavTicket,
     trace: &mut RecvTrace,
+    noninteractive: bool,
 ) {
     if !webdav.delete_after_recv {
         return;
@@ -213,7 +227,11 @@ pub(crate) async fn try_delete_webdav_for_ticket(
                 (profile, Some(save))
             }
             None => {
-                let selection = storage::load_or_prompt_webdav_profile_named(&webdav.profile)?;
+                let selection = if noninteractive {
+                    storage::load_webdav_profile_noninteractive(&webdav.profile)?
+                } else {
+                    storage::load_or_prompt_webdav_profile_named(&webdav.profile)?
+                };
                 let save = selection
                     .save_after_success
                     .then_some((selection.path.clone(), selection.config.clone()));

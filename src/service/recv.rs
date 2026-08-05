@@ -28,8 +28,15 @@ pub(super) async fn with_events(
 }
 
 async fn run_impl(args: RecvArgs) -> Result<()> {
+    let json = args.json;
+    if json {
+        crate::json::started("recv");
+    }
     let mut trace = RecvTrace::new(args.trace);
-    let show_progress = should_show_progress(args.trace);
+    let show_progress = !json && should_show_progress(args.trace);
+    if json {
+        crate::json::progress("recv", 0);
+    }
     trace.info(format_args!(
         "mode: {}",
         if args.local {
@@ -71,19 +78,34 @@ async fn run_impl(args: RecvArgs) -> Result<()> {
         let plan = plan_file_receive(&args, &ticket, &path, &trace).await?;
         if plan == FilePlan::Skip {
             trace.info(format_args!("skipped identical file {}", path.display()));
-            eprintln!("ii recv: skipped identical file {}", path.display());
+            if json {
+                crate::json::emit(
+                    "skipped",
+                    &[("path", crate::json::Value::String(&path.to_string_lossy()))],
+                );
+            } else {
+                eprintln!("ii recv: skipped identical file {}", path.display());
+            }
             if let Some(s3) = ticket.s3_route() {
                 crate::backend::s3::try_delete_s3(s3.delete_url.clone(), &mut trace).await;
             }
             if let Some(webdav) = ticket.webdav_route() {
-                crate::backend::webdav::try_delete_webdav_for_ticket(webdav.clone(), &mut trace)
-                    .await;
+                crate::backend::webdav::try_delete_webdav_for_ticket(
+                    webdav.clone(),
+                    &mut trace,
+                    json,
+                )
+                .await;
             }
             if let Some(ftp) = ticket.ftp_route() {
-                crate::backend::ftp::try_delete_ftp_for_ticket(ftp.clone(), &mut trace).await;
+                crate::backend::ftp::try_delete_ftp_for_ticket(ftp.clone(), &mut trace, json).await;
             }
             if let Some(sftp) = ticket.sftp_route() {
-                crate::backend::sftp::try_delete_sftp_for_ticket(sftp.clone(), &mut trace).await;
+                crate::backend::sftp::try_delete_sftp_for_ticket(sftp.clone(), &mut trace, json)
+                    .await;
+            }
+            if json {
+                crate::json::completed("recv");
             }
             return Ok(());
         }
@@ -93,18 +115,16 @@ async fn run_impl(args: RecvArgs) -> Result<()> {
     };
 
     if ticket.s3_route().is_some() {
-        return crate::backend::s3::recv_s3(
-            args,
-            ticket,
-            out_dir,
-            file_target,
-            trace,
-            show_progress,
-        )
-        .await;
+        let result =
+            crate::backend::s3::recv_s3(args, ticket, out_dir, file_target, trace, show_progress)
+                .await;
+        if result.is_ok() && json {
+            crate::json::completed("recv");
+        }
+        return result;
     }
     if ticket.webdav_route().is_some() {
-        return crate::backend::webdav::recv_webdav(
+        let result = crate::backend::webdav::recv_webdav(
             args,
             ticket,
             out_dir,
@@ -113,20 +133,22 @@ async fn run_impl(args: RecvArgs) -> Result<()> {
             show_progress,
         )
         .await;
+        if result.is_ok() && json {
+            crate::json::completed("recv");
+        }
+        return result;
     }
     if ticket.ftp_route().is_some() {
-        return crate::backend::ftp::recv_ftp(
-            args,
-            ticket,
-            out_dir,
-            file_target,
-            trace,
-            show_progress,
-        )
-        .await;
+        let result =
+            crate::backend::ftp::recv_ftp(args, ticket, out_dir, file_target, trace, show_progress)
+                .await;
+        if result.is_ok() && json {
+            crate::json::completed("recv");
+        }
+        return result;
     }
     if ticket.sftp_route().is_some() {
-        return crate::backend::sftp::recv_sftp(
+        let result = crate::backend::sftp::recv_sftp(
             args,
             ticket,
             out_dir,
@@ -135,6 +157,10 @@ async fn run_impl(args: RecvArgs) -> Result<()> {
             show_progress,
         )
         .await;
+        if result.is_ok() && json {
+            crate::json::completed("recv");
+        }
+        return result;
     }
 
     let relay_only = ticket.is_relay_only();
@@ -243,6 +269,16 @@ async fn run_impl(args: RecvArgs) -> Result<()> {
     conn.close(0u32.into(), b"done");
     endpoint.close().await;
     trace.finish(bytes_written);
+    if json {
+        crate::json::progress("recv", bytes_written);
+        crate::json::emit(
+            "completed",
+            &[
+                ("operation", crate::json::Value::String("recv")),
+                ("bytes", crate::json::Value::Number(bytes_written)),
+            ],
+        );
+    }
     Ok(())
 }
 async fn with_events_impl(

@@ -4,19 +4,21 @@
 
 ## 一句话
 
-`ii send` 发，`ii recv` 收，`ii web` 开局域网目录，`ii webrtc` 开浏览器直传，`ii tunnel` 转发 TCP，`ii relay` 管中继，`ii doctor` 查问题，`ii version` 看版本。
+`ii send` 发，`ii recv` 收，`ii web` 开局域网目录，`ii dav` 开 WebDAV，`ii discover` 找本地服务，`ii webrtc` 开浏览器直传，`ii tunnel` 转发 TCP，`ii relay` 管中继，`ii doctor` 查问题，`ii version` 看版本。
 
 ## 命令总览
 
 ```text
 ii help [<command>]
-ii send [<path>] [--name <name>] [-t] [-c] [-o <path>] [--web [--port <port>] [--token [<value>]] [--upload] [--path <dir>] | --s3 | --webdav | --ftp | --sftp] [--profile <name>] [-d] [-p] [--local] [--relay <url> [-k]] [--no-relay]
-ii web [<目录>] [--port <port>] [--token [<value>]] [--upload] [--path <目录>]
-ii webrtc [--port <port>] [--token [<value>]]
+ii send [<path>...] [--name <name>] [--include <glob>] [--exclude <glob>] [--rate <bytes/s>] [--json] [-t] [-c] [-o <path>] [--web [--port <port>] [--bind <ip>] [--token [<value>]] [--upload] [--path <path>] | --s3 | --webdav | --ftp | --sftp] [--profile <name>] [-d] [-p] [--local] [--relay <url> [-k]] [--no-relay]
+ii web [<目录>] [--port <port>] [--bind <ip>] [--token [<value>]] [--upload] [--path <目录>]
+ii dav [<目录>] [--port <port>] [--bind <ip>] [--token [<value>]] [--read-only]
+ii webrtc [--port <port>] [--bind <ip>] [--token [<value>]]
 ii tunnel -s <target-host:port> [--relay <url> [-k]]
 ii tunnel -c <ticket> [--listen <ip:port>]
 ii recv <ticket> [-o <dir>] [--stdout] [--overwrite] [--resume] [--local] [--trace]
 ii relay [--port <port>] [--tls [--domain <name>] [--cert <path> --key <path>]]
+ii discover [--json]
 ii doctor
 ii version
 ```
@@ -99,6 +101,21 @@ tar czf - .\project | ii send --name project.tar.gz
 `--path <dir>`
 : 仅和 `--web --upload` 同用，指定网页上传文件直接写入的目录。相对路径以启动命令当前目录为基准；目录在首次上传时创建。不提供时仍写入当前目录的 `./ii/`。未提供 `--upload` 时本参数会被忽略。`-p` 仍是 FTP/SFTP/WebDAV 的便携 ticket 参数。
 
+`<path>...`
+: 可一次发送多个文件或文件夹。多个输入使用现有目录 ticket 打包到集合根目录，默认根名为 `ii`，可用 `--name` 覆盖；stdin 不能和路径混用，顶层名称重复会报错。
+
+`--include <glob>` / `--exclude <glob>`
+: 可重复使用，仅作用于目录和多路径归档。glob 按每个输入项内部的 `/` 相对路径匹配，exclude 永远优先；筛选后为空会报错。
+
+`--rate <bytes/s>`
+: 限制发送端总带宽，支持正整数 bytes/s 以及 `KiB`、`MiB`、`GiB` 后缀；多接收端共享同一个上限。
+
+`--json`
+: 输出稳定 JSON Lines；stdout 只输出事件，诊断和错误走 stderr。`recv --stdout --json` 不允许使用；JSON 后端缺 profile 时直接失败，不弹配置提示。
+
+`--bind <ip>`
+: 仅和 `--web` 同用，固定监听 IPv4 或 IPv6 地址。未提供时保持 `0.0.0.0` 并打印主 LAN URL 与 `other:`；显式地址只打印该地址，IPv6 URL 使用方括号。
+
 `--local`
 : 只走局域网优先路径，不走公网发现，不走公网 relay。
 
@@ -160,9 +177,28 @@ ii web .\shared --port 8080 --token A1b2C3d4E5f6G7h8 --upload --path .\uploads
 
 `ii web` 不带路径时服务启动命令当前目录；带路径时必须是已有目录，文件路径会报错。网页默认提供 nginx 风格的递归目录浏览：目录可继续进入、`../` 返回父目录、每项显示名称、修改时间和大小；普通文件直接响应，不强制下载。传入 `--upload` 后网页顶部才显示多文件上传控件，不支持上传目录。
 
-命令行会在主 IPv4 LAN URL 上方打印根页二维码，并在 `other:` 下打印其他物理和虚拟网卡 URL；网页不显示二维码。按 `Ctrl+C` 关闭服务。
+命令行会在主 IPv4 LAN URL 上方打印根页二维码，并在 `other:` 下打印其他物理和虚拟网卡 URL；网页不显示二维码。`--bind <ip>` 可固定 IPv4 或 IPv6 listener；显式 bind 只打印该地址。按 `Ctrl+C` 关闭服务。
 
 `--port <port>` 指定 `1` 到 `65535` 的 HTTP 监听端口，未提供时随机选择。裸 `--token` 自动生成 32 字符路径令牌；`--token <value>` 或 `--token=<value>` 使用指定令牌，把目录、文件和已启用的上传 URL 固定到 `/<value>/` 下；遗漏或写错返回 `404`。显式令牌必须为 16 到 128 个 ASCII 字母、数字、`-` 或 `_`。`--upload` 才显示上传控件并开放上传接口；`--path <目录>` 指定上传文件直接写入的目录，相对路径按启动目录解析，首次上传才创建目录，未指定时写入启动目录下的 `./ii/`，未提供 `--upload` 时会被忽略。`-p` 不适用于 `ii web`，仍仅用于 WebDAV、FTP、SFTP 的便携 ticket。
+
+## `ii dav`
+
+```powershell
+ii dav
+ii dav .\shared --port 8080 --bind 192.168.1.20 --token A1b2C3d4E5f6G7h8
+ii dav .\shared --read-only
+```
+
+`ii dav` 把当前目录或指定目录作为局域网 WebDAV 根目录，默认可读写；支持 `OPTIONS`、`PROPFIND`、`GET`、`HEAD`、Range、`PUT`、`MKCOL`、`DELETE`、`MOVE`、`COPY`、`LOCK`、`UNLOCK`，上传支持 `Content-Length`、chunked body 和 `100-continue`。`--read-only` 禁止所有改写。`--token` 是 URL 路径令牌，不是账户认证；服务默认无 TLS 和 Basic Auth，只适合可信局域网。
+
+## `ii discover`
+
+```powershell
+ii discover
+ii discover --json
+```
+
+在本地网络监听三秒，发现正在运行的 `ii send -t`、`ii web` 和 `ii dav`，并输出可直接使用的 `ii recv <ticket>` 或服务 URL。发现同时使用 IPv4 广播和 IPv6 链路本地 all-nodes 多播；公告会向同一 LAN 暴露 ticket 或 token URL，不是访问控制机制。`--json` 输出 JSON Lines，stdout 不混入其他文本。
 
 ## `ii webrtc`
 

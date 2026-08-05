@@ -21,6 +21,7 @@ async fn uploads_stream_overwrite_and_reject_invalid_requests() {
         },
         upload_dir: Some(upload_dir.clone()),
         web_token: None,
+        rate_limiter: None,
     });
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
     let address = listener.local_addr().unwrap();
@@ -91,6 +92,7 @@ async fn upload_reports_directory_creation_failure() {
         },
         upload_dir: Some(upload_path),
         web_token: None,
+        rate_limiter: None,
     });
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
     let address = listener.local_addr().unwrap();

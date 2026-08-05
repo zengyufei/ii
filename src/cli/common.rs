@@ -67,6 +67,16 @@ pub(crate) fn validate_send(args: &SendArgs) -> Result<(), ParseAction> {
     if args.web && args.path.is_none() {
         return Err(ParseAction::error("--web requires a file or folder path"));
     }
+    if args.web && !args.extra_paths.is_empty() {
+        return Err(ParseAction::error(
+            "--web accepts only one file or folder path",
+        ));
+    }
+    if args.web && (!args.include.is_empty() || !args.exclude.is_empty()) {
+        return Err(ParseAction::error(
+            "--include and --exclude cannot be used with --web",
+        ));
+    }
     if args.web && (args.copy || args.output.is_some()) {
         return Err(ParseAction::error("--web cannot be used with -c or -o"));
     }
@@ -81,6 +91,9 @@ pub(crate) fn validate_send(args: &SendArgs) -> Result<(), ParseAction> {
     }
     if args.web_port.is_some() && !args.web {
         return Err(ParseAction::error("--port requires --web"));
+    }
+    if args.web_bind.is_some() && !args.web {
+        return Err(ParseAction::error("--bind requires --web"));
     }
     if let Some(token) = args.web_token.as_deref()
         && !is_valid_web_token(token)
@@ -98,6 +111,40 @@ pub(crate) fn is_valid_web_token(token: &str) -> bool {
         && token
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_'))
+}
+
+pub(crate) fn validate_glob(flag: &str, value: &str) -> Result<String, ParseAction> {
+    glob::Pattern::new(value)
+        .map_err(|err| ParseAction::error(format!("{flag} has an invalid glob: {err}")))?;
+    Ok(value.to_string())
+}
+
+pub(crate) fn parse_rate(flag: &str, value: &str) -> Result<u64, ParseAction> {
+    let (number, multiplier) = [
+        ("GiB", 1024_u64.pow(3)),
+        ("MiB", 1024_u64.pow(2)),
+        ("KiB", 1024),
+    ]
+    .into_iter()
+    .find_map(|(suffix, multiplier)| {
+        value
+            .strip_suffix(suffix)
+            .map(|number| (number, multiplier))
+    })
+    .unwrap_or((value, 1));
+    let number = number.parse::<u64>().map_err(|_| {
+        ParseAction::error(format!(
+            "{flag} expects positive bytes/s or a KiB, MiB, or GiB value"
+        ))
+    })?;
+    number
+        .checked_mul(multiplier)
+        .filter(|rate| *rate > 0)
+        .ok_or_else(|| {
+            ParseAction::error(format!(
+                "{flag} expects positive bytes/s or a KiB, MiB, or GiB value"
+            ))
+        })
 }
 
 pub(crate) fn web_token(iter: &mut ArgsIter) -> String {
@@ -180,6 +227,12 @@ pub(crate) fn parse_port(flag: &str, value: &str) -> Result<u16, ParseAction> {
         )));
     }
     Ok(port)
+}
+
+pub(crate) fn parse_bind(flag: &str, value: &str) -> Result<std::net::IpAddr, ParseAction> {
+    value
+        .parse()
+        .map_err(|_| ParseAction::error(format!("{flag} expects an IPv4 or IPv6 address")))
 }
 
 pub(crate) fn parse_listen_addr(flag: &str, value: &str) -> Result<SocketAddr, ParseAction> {

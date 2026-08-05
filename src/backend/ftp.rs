@@ -5,12 +5,12 @@ use crate::{
     ticket::{FtpPortableCredentials, PayloadKind, Ticket},
     transport::{
         p2p::{FilePlan, RecvTrace},
-        progress::{TransferProgress, copy_with_progress},
+        progress::{RateLimiter, TransferProgress, copy_with_progress, copy_with_progress_limited},
         source::{Source, unique_object_id},
     },
 };
 use anyhow::{Context, Result, bail};
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 use suppaftp::tokio::AsyncFtpStream;
 use tempfile::NamedTempFile;
 use tokio::{
@@ -26,6 +26,7 @@ pub(crate) async fn upload(
     source: &Source,
     profile: &storage::FtpProfile,
     show_progress: bool,
+    rate_limiter: Option<Arc<RateLimiter>>,
 ) -> Result<FtpUpload> {
     let object_key = remote_object_key(&profile.remote_dir, source);
     let mut client = connect(profile).await?;
@@ -41,9 +42,14 @@ pub(crate) async fn upload(
         .await
         .with_context(|| format!("upload FTP object {object_key}"))?;
     let mut progress = TransferProgress::new("ii send", show_progress, source.size(), 0);
-    copy_with_progress(&mut source_file, &mut stream, &mut progress)
-        .await
-        .with_context(|| format!("upload FTP object {object_key}"))?;
+    copy_with_progress_limited(
+        &mut source_file,
+        &mut stream,
+        &mut progress,
+        rate_limiter.as_deref(),
+    )
+    .await
+    .with_context(|| format!("upload FTP object {object_key}"))?;
     stream.flush().await.context("flush FTP upload")?;
     progress.finish();
     client
@@ -125,7 +131,11 @@ pub(crate) async fn recv_ftp(
             (profile, Some(save))
         }
         None => {
-            let selection = storage::load_or_prompt_ftp_profile_named(&ftp.profile)?;
+            let selection = if args.json {
+                storage::load_ftp_profile_noninteractive(Some(&ftp.profile))?
+            } else {
+                storage::load_or_prompt_ftp_profile_named(&ftp.profile)?
+            };
             let save = selection
                 .save_after_success
                 .then_some((selection.path.clone(), selection.config.clone()));
@@ -221,6 +231,7 @@ fn portable_ftp_config(
 pub(crate) async fn try_delete_ftp_for_ticket(
     ftp: crate::ticket::FtpTicket,
     trace: &mut RecvTrace,
+    noninteractive: bool,
 ) {
     if !ftp.delete_after_recv {
         return;
@@ -233,7 +244,11 @@ pub(crate) async fn try_delete_ftp_for_ticket(
                 (profile, Some(save))
             }
             None => {
-                let selection = storage::load_or_prompt_ftp_profile_named(&ftp.profile)?;
+                let selection = if noninteractive {
+                    storage::load_ftp_profile_noninteractive(Some(&ftp.profile))?
+                } else {
+                    storage::load_or_prompt_ftp_profile_named(&ftp.profile)?
+                };
                 let save = selection
                     .save_after_success
                     .then_some((selection.path.clone(), selection.config.clone()));
@@ -436,7 +451,7 @@ mod tests {
             password: "pass".to_string(),
             remote_dir: "ii/".to_string(),
         };
-        let upload = upload(&source, &profile, false).await.unwrap();
+        let upload = upload(&source, &profile, false, None).await.unwrap();
 
         let destination = root.path().join("received.txt");
         let mut client = connect(&profile).await.unwrap();

@@ -1,6 +1,8 @@
-use crate::command::{RecvArgs, SendArgs, TunnelArgs, WebArgs, WebrtcArgs};
+use crate::command::{DavArgs, DiscoverArgs, RecvArgs, SendArgs, TunnelArgs, WebArgs, WebrtcArgs};
 use anyhow::Result;
 
+mod dav;
+mod discover;
 mod recv;
 mod send;
 mod tunnel;
@@ -40,6 +42,14 @@ pub async fn tunnel(args: TunnelArgs) -> Result<()> {
 
 pub async fn recv(args: RecvArgs) -> Result<()> {
     recv::run(args).await
+}
+
+pub async fn discover(args: DiscoverArgs) -> Result<()> {
+    discover::run(args).await
+}
+
+pub async fn dav(args: DavArgs) -> Result<()> {
+    dav::run(args).await
 }
 
 pub async fn recv_with_events(

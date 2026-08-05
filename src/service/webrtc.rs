@@ -11,7 +11,13 @@ pub(super) async fn run(args: WebrtcArgs) -> Result<()> {
 
 async fn run_impl(args: WebrtcArgs) -> Result<()> {
     let server = Arc::new(WebRtcServer::new());
-    let lan = start_lan_web_server(args.web_port, args.web_token.as_deref(), "ii webrtc").await?;
+    let lan = start_lan_web_server(
+        args.web_port,
+        args.web_bind,
+        args.web_token.as_deref(),
+        "ii webrtc",
+    )
+    .await?;
 
     loop {
         tokio::select! {

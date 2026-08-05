@@ -40,6 +40,7 @@ mod tests {
                 cert: None,
                 key: None,
                 port: Some(requested_port),
+                bind: None,
             })
             .unwrap(),
         )
@@ -69,6 +70,7 @@ mod tests {
                 cert: None,
                 key: None,
                 port: None,
+                bind: None,
             })
             .unwrap(),
         )
@@ -159,6 +161,7 @@ mod tests {
                 cert: None,
                 key: None,
                 port: None,
+                bind: None,
             })
             .unwrap(),
         )

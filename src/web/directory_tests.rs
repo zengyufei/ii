@@ -21,6 +21,7 @@ async fn directory_lists_children_rejects_traversal_and_uploads() {
         },
         upload_dir: Some(upload_dir.clone()),
         web_token: None,
+        rate_limiter: None,
     });
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
     let address = listener.local_addr().unwrap();
@@ -89,6 +90,7 @@ async fn directory_files_support_ranges_and_token_scoping() {
         },
         upload_dir: None,
         web_token: Some(token.to_string()),
+        rate_limiter: None,
     });
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
     let address = listener.local_addr().unwrap();

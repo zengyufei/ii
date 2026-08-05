@@ -1,5 +1,8 @@
 use crate::{
-    transport::{progress::fmt_bytes, source::Source},
+    transport::{
+        progress::{RateLimiter, fmt_bytes},
+        source::Source,
+    },
     web::{
         directory,
         qr::{svg as web_qr_svg, terminal as web_qr_terminal},
@@ -9,12 +12,12 @@ use crate::{
 use anyhow::{Context, Result, bail};
 use std::{
     io::IsTerminal,
-    net::{Ipv4Addr, SocketAddr, UdpSocket},
+    net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket},
     path::{Path, PathBuf},
     sync::Arc,
 };
 use tokio::{
-    io::{self, AsyncReadExt, AsyncWriteExt},
+    io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpListener, TcpStream},
 };
 
@@ -33,6 +36,7 @@ pub(crate) struct WebShare {
     pub(crate) content: WebContent,
     pub(crate) upload_dir: Option<PathBuf>,
     pub(crate) web_token: Option<String>,
+    pub(crate) rate_limiter: Option<Arc<RateLimiter>>,
 }
 
 pub(crate) struct WebRequest {
@@ -41,6 +45,7 @@ pub(crate) struct WebRequest {
     pub(crate) content_length: Option<u64>,
     pub(crate) range: WebRange,
     pub(crate) body: Vec<u8>,
+    pub(crate) headers: Vec<(String, String)>,
 }
 
 pub(crate) enum WebRange {
@@ -64,9 +69,14 @@ pub(crate) async fn serve_web(
     mut content: WebContent,
     upload_dir: Option<PathBuf>,
     web_port: Option<u16>,
+    web_bind: Option<IpAddr>,
     web_token: Option<String>,
+    rate_limiter: Option<Arc<RateLimiter>>,
+    json: bool,
 ) -> Result<()> {
-    let lan = start_lan_web_server(web_port, web_token.as_deref(), "ii web").await?;
+    let lan =
+        start_lan_web_server_with_output(web_port, web_bind, web_token.as_deref(), "ii web", !json)
+            .await?;
     if let WebContent::Download {
         download_qr_svg, ..
     } = &mut content
@@ -77,7 +87,21 @@ pub(crate) async fn serve_web(
         content,
         upload_dir,
         web_token,
+        rate_limiter,
     });
+    let _advertiser = crate::discovery::advertise(crate::discovery::Service::Web {
+        url: lan.url.clone(),
+    })
+    .await?;
+    if json {
+        crate::json::emit(
+            "service",
+            &[
+                ("service", crate::json::Value::String("web")),
+                ("url", crate::json::Value::String(&lan.url)),
+            ],
+        );
+    }
 
     loop {
         tokio::select! {
@@ -98,37 +122,101 @@ pub(crate) async fn serve_web(
 
 pub(crate) async fn start_lan_web_server(
     port: Option<u16>,
+    bind: Option<IpAddr>,
     web_token: Option<&str>,
     label: &str,
 ) -> Result<LanWebServer> {
-    let listener = bind_lan_web_listener(port, label).await?;
+    start_lan_web_server_with_output(port, bind, web_token, label, true).await
+}
+
+async fn start_lan_web_server_with_output(
+    port: Option<u16>,
+    bind: Option<IpAddr>,
+    web_token: Option<&str>,
+    label: &str,
+    output: bool,
+) -> Result<LanWebServer> {
+    let listener = bind_lan_web_listener(port, bind, label).await?;
     let port = listener
         .local_addr()
         .with_context(|| format!("read {label} server address"))?
         .port();
-    let (host, other_hosts) = lan_ipv4_hosts();
     let root_path = web_root_path(web_token);
-    let url = format!("http://{host}:{port}{root_path}");
+    let (url, other_urls) = match bind {
+        None | Some(IpAddr::V4(Ipv4Addr::UNSPECIFIED)) => {
+            let (host, other_hosts) = lan_ipv4_hosts();
+            (
+                web_url(IpAddr::V4(host), port, &root_path),
+                other_hosts
+                    .into_iter()
+                    .map(|host| web_url(IpAddr::V4(host), port, &root_path))
+                    .collect(),
+            )
+        }
+        Some(IpAddr::V6(Ipv6Addr::UNSPECIFIED)) => (
+            web_url(IpAddr::V6(local_web_host_v6()), port, &root_path),
+            Vec::new(),
+        ),
+        Some(host) => (web_url(host, port, &root_path), Vec::new()),
+    };
 
-    if std::io::stdout().is_terminal() {
-        print!("{}", web_qr_terminal(&url)?);
+    if output {
+        if std::io::stdout().is_terminal() {
+            print!("{}", web_qr_terminal(&url)?);
+        }
+        println!("{label}: {url}");
+        println!();
+        println!("other:");
+        for url in other_urls {
+            println!("{url}");
+        }
+        println!();
+        println!("press Ctrl+C to stop sharing");
     }
-    println!("{label}: {url}");
-    println!();
-    println!("other:");
-    for host in other_hosts {
-        println!("http://{host}:{port}{root_path}");
-    }
-    println!();
-    println!("press Ctrl+C to stop sharing");
 
     Ok(LanWebServer { listener, url })
 }
 
-pub(crate) async fn bind_lan_web_listener(port: Option<u16>, label: &str) -> Result<TcpListener> {
-    TcpListener::bind((Ipv4Addr::UNSPECIFIED, port.unwrap_or(0)))
-        .await
-        .with_context(|| format!("bind {label} server"))
+pub(crate) async fn bind_lan_web_listener(
+    port: Option<u16>,
+    bind: Option<IpAddr>,
+    label: &str,
+) -> Result<TcpListener> {
+    let address = SocketAddr::new(
+        bind.unwrap_or(IpAddr::V4(Ipv4Addr::UNSPECIFIED)),
+        port.unwrap_or(0),
+    );
+    let socket = socket2::Socket::new(
+        socket2::Domain::for_address(address),
+        socket2::Type::STREAM,
+        Some(socket2::Protocol::TCP),
+    )
+    .with_context(|| format!("create {label} server socket"))?;
+    socket
+        .set_reuse_address(true)
+        .with_context(|| format!("configure {label} server socket"))?;
+    if address.is_ipv6() {
+        socket
+            .set_only_v6(true)
+            .with_context(|| format!("configure IPv6 {label} server socket"))?;
+    }
+    socket
+        .bind(&address.into())
+        .with_context(|| format!("bind {label} server"))?;
+    socket
+        .listen(1024)
+        .with_context(|| format!("listen on {label} server"))?;
+    socket
+        .set_nonblocking(true)
+        .with_context(|| format!("configure {label} server"))?;
+    TcpListener::from_std(socket.into()).with_context(|| format!("start {label} server"))
+}
+
+fn web_url(host: IpAddr, port: u16, root_path: &str) -> String {
+    match host {
+        IpAddr::V4(host) => format!("http://{host}:{port}{root_path}"),
+        IpAddr::V6(host) => format!("http://[{host}]:{port}{root_path}"),
+    }
 }
 pub(crate) fn web_upload_dir(start_dir: &Path, configured_dir: Option<&Path>) -> PathBuf {
     match configured_dir {
@@ -158,6 +246,27 @@ pub(crate) fn local_web_host() -> Ipv4Addr {
         }
     }
     Ipv4Addr::LOCALHOST
+}
+
+pub(crate) fn local_web_host_v6() -> Ipv6Addr {
+    let socket = match UdpSocket::bind((Ipv6Addr::UNSPECIFIED, 0)) {
+        Ok(socket) => socket,
+        Err(_) => return Ipv6Addr::LOCALHOST,
+    };
+    if socket
+        .connect((
+            Ipv6Addr::new(0x2606, 0x4700, 0x4700, 0, 0, 0, 0, 0x1111),
+            80,
+        ))
+        .is_ok()
+    {
+        if let Ok(SocketAddr::V6(address)) = socket.local_addr() {
+            if !address.ip().is_unspecified() {
+                return *address.ip();
+            }
+        }
+    }
+    Ipv6Addr::LOCALHOST
 }
 
 pub(crate) fn lan_ipv4_hosts() -> (Ipv4Addr, Vec<Ipv4Addr>) {
@@ -409,7 +518,15 @@ pub(crate) async fn serve_web_connection(
                     )
                     .await
                 }
-                "download" => write_web_download(&mut stream, source, download_name).await,
+                "download" => {
+                    write_web_download(
+                        &mut stream,
+                        source,
+                        download_name,
+                        share.rate_limiter.as_deref(),
+                    )
+                    .await
+                }
                 _ => write_web_error(&mut stream, "404 Not Found", "not found").await,
             },
             WebContent::Directory { root } => {
@@ -511,22 +628,22 @@ pub(crate) async fn read_web_request(stream: &mut TcpStream) -> Result<WebReques
 
     let mut content_length = None;
     let mut range = WebRange::None;
+    let mut parsed_headers = Vec::new();
     for line in lines {
         let (name, value) = line.split_once(':').context("request header is invalid")?;
+        let value = value.trim().to_string();
         if name.eq_ignore_ascii_case("content-length") {
-            let length = value
-                .trim()
-                .parse::<u64>()
-                .context("Content-Length is invalid")?;
+            let length = value.parse::<u64>().context("Content-Length is invalid")?;
             if content_length.replace(length).is_some() {
                 bail!("Content-Length is duplicated");
             }
         } else if name.eq_ignore_ascii_case("range") {
             range = match range {
-                WebRange::None => WebRange::Header(value.trim().to_string()),
+                WebRange::None => WebRange::Header(value.clone()),
                 WebRange::Header(_) | WebRange::Invalid => WebRange::Invalid,
             };
         }
+        parsed_headers.push((name.to_ascii_lowercase(), value));
     }
 
     Ok(WebRequest {
@@ -535,7 +652,17 @@ pub(crate) async fn read_web_request(stream: &mut TcpStream) -> Result<WebReques
         content_length,
         range,
         body: request.split_off(header_end),
+        headers: parsed_headers,
     })
+}
+
+impl WebRequest {
+    pub(crate) fn header(&self, name: &str) -> Option<&str> {
+        self.headers
+            .iter()
+            .find(|(header, _)| header.eq_ignore_ascii_case(name))
+            .map(|(_, value)| value.as_str())
+    }
 }
 
 async fn write_web_page(
@@ -565,6 +692,7 @@ async fn write_web_download(
     stream: &mut TcpStream,
     source: &Source,
     download_name: &str,
+    rate_limiter: Option<&RateLimiter>,
 ) -> Result<()> {
     let header = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: application/octet-stream\r\nContent-Length: {}\r\nContent-Disposition: attachment; filename=\"{}\"\r\nConnection: close\r\n\r\n",
@@ -576,9 +704,26 @@ async fn write_web_download(
         .await
         .context("write download headers")?;
     let mut file = source.open_file().await?;
-    io::copy(&mut file, stream)
-        .await
-        .context("write download")?;
+    let mut buf = [0u8; 64 * 1024];
+    let read_len = rate_limiter
+        .map(RateLimiter::chunk_size)
+        .unwrap_or(buf.len());
+    loop {
+        let n = file
+            .read(&mut buf[..read_len])
+            .await
+            .context("read download")?;
+        if n == 0 {
+            break;
+        }
+        if let Some(rate_limiter) = rate_limiter {
+            rate_limiter.wait(n).await;
+        }
+        stream
+            .write_all(&buf[..n])
+            .await
+            .context("write download")?;
+    }
     stream.shutdown().await.context("finish download")?;
     Ok(())
 }

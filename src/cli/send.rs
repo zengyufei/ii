@@ -11,7 +11,12 @@ pub(super) fn parse(args: Vec<String>) -> Result<SendArgs, ParseAction> {
             Some(("profile", value)) => out.profile = Some(value.to_string()),
             Some(("relay", value)) => out.relay = Some(parse_relay_url(value)?),
             Some(("port", value)) => out.web_port = Some(parse_port("--port", value)?),
+            Some(("bind", value)) => out.web_bind = Some(parse_bind("--bind", value)?),
             Some(("token", value)) => out.web_token = Some(value.to_string()),
+            Some(("include", value)) => out.include.push(validate_glob("--include", value)?),
+            Some(("exclude", value)) => out.exclude.push(validate_glob("--exclude", value)?),
+            Some(("rate", value)) => out.rate = Some(parse_rate("--rate", value)?),
+            Some(("json", _)) => return Err(ParseAction::error("--json does not take a value")),
             Some(("upload", _)) => {
                 return Err(ParseAction::error("--upload does not take a value"));
             }
@@ -33,7 +38,16 @@ pub(super) fn parse(args: Vec<String>) -> Result<SendArgs, ParseAction> {
                 "--sftp" => out.sftp = true,
                 "--web" => out.web = true,
                 "--port" => out.web_port = Some(parse_port("--port", &iter.value("--port")?)?),
+                "--bind" => out.web_bind = Some(parse_bind("--bind", &iter.value("--bind")?)?),
                 "--token" => out.web_token = Some(web_token(&mut iter)),
+                "--include" => out
+                    .include
+                    .push(validate_glob("--include", &iter.value("--include")?)?),
+                "--exclude" => out
+                    .exclude
+                    .push(validate_glob("--exclude", &iter.value("--exclude")?)?),
+                "--rate" => out.rate = Some(parse_rate("--rate", &iter.value("--rate")?)?),
+                "--json" => out.json = true,
                 "--upload" if out.web_upload => {
                     return Err(ParseAction::error("--upload may be specified only once"));
                 }
@@ -48,8 +62,11 @@ pub(super) fn parse(args: Vec<String>) -> Result<SendArgs, ParseAction> {
                     return Err(ParseAction::error(format!("unknown option `{arg}`")));
                 }
                 _ => {
-                    if out.path.replace(PathBuf::from(&arg)).is_some() {
-                        return Err(ParseAction::error("send accepts only one path"));
+                    let path = PathBuf::from(&arg);
+                    if out.path.is_none() {
+                        out.path = Some(path);
+                    } else {
+                        out.extra_paths.push(path);
                     }
                 }
             },

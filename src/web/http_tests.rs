@@ -7,7 +7,11 @@ use super::{
     test_support::*,
 };
 use crate::transport::source::Source;
-use std::{net::Ipv4Addr, path::Path, sync::Arc};
+use std::{
+    net::{IpAddr, Ipv4Addr, Ipv6Addr},
+    path::Path,
+    sync::Arc,
+};
 use tokio::net::TcpListener;
 
 #[tokio::test]
@@ -26,6 +30,7 @@ async fn download_share_serves_page_download_and_token_routes() {
         },
         upload_dir: None,
         web_token: Some(token.to_string()),
+        rate_limiter: None,
     });
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
     let address = listener.local_addr().unwrap();
@@ -115,23 +120,35 @@ fn lan_url_helpers_preserve_default_token_and_upload_paths() {
 
 #[tokio::test]
 async fn lan_listener_uses_random_or_requested_port() {
-    let random = bind_lan_web_listener(None, "test").await.unwrap();
+    let random = bind_lan_web_listener(None, None, "test").await.unwrap();
     assert_ne!(random.local_addr().unwrap().port(), 0);
     drop(random);
 
     let reservation = TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0)).await.unwrap();
     let port = reservation.local_addr().unwrap().port();
     drop(reservation);
-    let requested = bind_lan_web_listener(Some(port), "test").await.unwrap();
+    let requested = bind_lan_web_listener(Some(port), None, "test")
+        .await
+        .unwrap();
     assert_eq!(requested.local_addr().unwrap().port(), port);
     drop(requested);
 
     let occupied = TcpListener::bind((Ipv4Addr::UNSPECIFIED, 0)).await.unwrap();
     assert!(
-        bind_lan_web_listener(Some(occupied.local_addr().unwrap().port()), "test")
+        bind_lan_web_listener(Some(occupied.local_addr().unwrap().port()), None, "test")
             .await
             .is_err()
     );
+}
+
+#[tokio::test]
+async fn explicit_ipv6_listener_uses_a_bracketed_url() {
+    let lan = start_lan_web_server(None, Some(IpAddr::V6(Ipv6Addr::LOCALHOST)), None, "test").await;
+    let Ok(lan) = lan else {
+        return;
+    };
+    assert!(lan.listener.local_addr().unwrap().is_ipv6());
+    assert!(lan.url.starts_with("http://[::1]:"));
 }
 
 #[tokio::test]
@@ -140,7 +157,7 @@ async fn lan_server_url_uses_requested_port_and_token_path() {
     let port = reservation.local_addr().unwrap().port();
     drop(reservation);
 
-    let lan = start_lan_web_server(Some(port), Some("A1b2C3d4E5f6G7h8"), "test")
+    let lan = start_lan_web_server(Some(port), None, Some("A1b2C3d4E5f6G7h8"), "test")
         .await
         .unwrap();
     assert_eq!(lan.listener.local_addr().unwrap().port(), port);

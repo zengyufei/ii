@@ -5,8 +5,8 @@ use crate::{
     ticket::{FtpPortableCredentials, Ticket, WebDavPortableCredentials},
     transport::{
         iroh::{FILE_ALPN, bind_endpoint, endpoint_policy_for_send, should_wait_online},
-        p2p::{ServeOutcome, serve_one},
-        progress::should_show_progress,
+        p2p::{ServeOutcome, serve_one_limited},
+        progress::{RateLimiter, should_show_progress},
         source::Source,
     },
 };
@@ -35,6 +35,17 @@ const DEFAULT_TRANSFER_LIMITS: TransferLimits = TransferLimits {
     queued: MAX_QUEUED_TRANSFERS,
 };
 
+async fn source_from_args(args: &SendArgs) -> Result<Source> {
+    Source::open_paths(
+        args.path.clone(),
+        &args.extra_paths,
+        args.name.clone(),
+        &args.include,
+        &args.exclude,
+    )
+    .await
+}
+
 struct QueuedConnection {
     number: usize,
     conn: iroh::endpoint::Connection,
@@ -52,15 +63,33 @@ pub(super) async fn with_events(
 }
 
 async fn run_impl(args: SendArgs) -> Result<()> {
+    let json = args.json;
+    if json {
+        crate::json::started("send");
+    }
     if args.web {
-        return send_web(args).await;
+        let result = send_web(args).await;
+        if result.is_ok() && json {
+            crate::json::completed("send");
+        }
+        return result;
     }
     let copy = args.copy;
     let output = args.output.clone();
-    send_inner(args, move |ticket| {
-        print_ticket(ticket, copy, output.clone())
+    let result = send_inner(args, move |ticket| {
+        if json {
+            crate::json::emit("ticket", &[("ticket", crate::json::Value::String(ticket))]);
+            crate::json::progress("send", 0);
+            Ok(())
+        } else {
+            print_ticket(ticket, copy, output.clone())
+        }
     })
-    .await
+    .await;
+    if result.is_ok() && json {
+        crate::json::completed("send");
+    }
+    result
 }
 async fn send_with_events_impl(
     args: SendArgs,
@@ -88,7 +117,7 @@ async fn send_inner<F>(args: SendArgs, ticket_ready: F) -> Result<()>
 where
     F: Fn(&str) -> Result<()> + Send + Sync,
 {
-    let show_progress = should_show_progress(false);
+    let show_progress = !args.json && should_show_progress(false);
     if args.delete_after_recv && !args.s3 && !args.webdav && !args.ftp && !args.sftp {
         bail!("-d requires --s3, --webdav, --ftp or --sftp");
     }
@@ -108,7 +137,8 @@ where
         return send_sftp(args, show_progress, &ticket_ready).await;
     }
 
-    let source = Source::open(args.path.clone(), args.name.clone()).await?;
+    let source = source_from_args(&args).await?;
+    let rate_limiter = args.rate.map(RateLimiter::new).map(Arc::new);
     let endpoint = bind_endpoint(endpoint_policy_for_send(&args)?, FILE_ALPN).await?;
 
     if should_wait_online(&args) {
@@ -148,15 +178,34 @@ where
     let ticket_str = ticket.encode()?;
     ticket_ready(&ticket_str)?;
 
+    let _advertiser = if args.keep_alive {
+        Some(
+            crate::discovery::advertise(crate::discovery::Service::Send {
+                ticket: ticket_str.clone(),
+                name: source.name().to_string(),
+                kind: match source.kind() {
+                    crate::ticket::PayloadKind::File => "file".to_string(),
+                    crate::ticket::PayloadKind::Dir => "dir".to_string(),
+                    crate::ticket::PayloadKind::Stdin => "stdin".to_string(),
+                },
+                size: source.size(),
+            })
+            .await?,
+        )
+    } else {
+        None
+    };
+
     if args.keep_alive {
-        let accepted = serve_keep_alive(&endpoint, Arc::new(source), show_progress).await;
+        let accepted =
+            serve_keep_alive(&endpoint, Arc::new(source), show_progress, rate_limiter).await;
         if accepted == 0 {
             eprintln!("ii send: no receiver connected");
         }
         return Ok(());
     }
 
-    let accepted = serve_once(&endpoint, &source, show_progress).await;
+    let accepted = serve_once(&endpoint, &source, show_progress, rate_limiter).await;
 
     endpoint.close().await;
     if accepted == 0 {
@@ -165,7 +214,12 @@ where
     Ok(())
 }
 
-async fn serve_once(endpoint: &iroh::Endpoint, source: &Source, show_progress: bool) -> usize {
+async fn serve_once(
+    endpoint: &iroh::Endpoint,
+    source: &Source,
+    show_progress: bool,
+    rate_limiter: Option<Arc<RateLimiter>>,
+) -> usize {
     let mut accepted = 0;
     loop {
         tokio::select! {
@@ -188,7 +242,7 @@ async fn serve_once(endpoint: &iroh::Endpoint, source: &Source, show_progress: b
                         continue;
                     }
                 };
-                match serve_one(conn, &source, show_progress).await {
+                match serve_one_limited(conn, source, show_progress, rate_limiter.clone()).await {
                     Ok(ServeOutcome::Sent) => {
                         accepted += 1;
                         break;
@@ -207,15 +261,34 @@ async fn serve_keep_alive(
     endpoint: &iroh::Endpoint,
     source: Arc<Source>,
     show_progress: bool,
+    rate_limiter: Option<Arc<RateLimiter>>,
 ) -> usize {
-    serve_keep_alive_with_limits(endpoint, source, show_progress, DEFAULT_TRANSFER_LIMITS).await
+    serve_keep_alive_with_limits_and_rate(
+        endpoint,
+        source,
+        show_progress,
+        DEFAULT_TRANSFER_LIMITS,
+        rate_limiter,
+    )
+    .await
 }
 
+#[cfg(test)]
 async fn serve_keep_alive_with_limits(
     endpoint: &iroh::Endpoint,
     source: Arc<Source>,
     show_progress: bool,
     limits: TransferLimits,
+) -> usize {
+    serve_keep_alive_with_limits_and_rate(endpoint, source, show_progress, limits, None).await
+}
+
+async fn serve_keep_alive_with_limits_and_rate(
+    endpoint: &iroh::Endpoint,
+    source: Arc<Source>,
+    show_progress: bool,
+    limits: TransferLimits,
+    rate_limiter: Option<Arc<RateLimiter>>,
 ) -> usize {
     let mut accepted = 0;
     let mut next_number = 1;
@@ -230,6 +303,7 @@ async fn serve_keep_alive_with_limits(
             &source,
             show_progress,
             limits.active,
+            rate_limiter.as_ref(),
         );
 
         tokio::select! {
@@ -248,7 +322,13 @@ async fn serve_keep_alive_with_limits(
                         let queued = QueuedConnection { number: next_number, conn };
                         next_number += 1;
                         if transfers.len() < limits.active {
-                            start_transfer(&mut transfers, queued, Arc::clone(&source), show_progress);
+                            start_transfer(
+                                &mut transfers,
+                                queued,
+                                Arc::clone(&source),
+                                show_progress,
+                                rate_limiter.clone(),
+                            );
                         } else {
                             waiting.push_back(queued);
                         }
@@ -297,12 +377,19 @@ fn start_queued_transfers(
     source: &Arc<Source>,
     show_progress: bool,
     max_active: usize,
+    rate_limiter: Option<&Arc<RateLimiter>>,
 ) {
     while transfers.len() < max_active {
         let Some(queued) = waiting.pop_front() else {
             break;
         };
-        start_transfer(transfers, queued, Arc::clone(source), show_progress);
+        start_transfer(
+            transfers,
+            queued,
+            Arc::clone(source),
+            show_progress,
+            rate_limiter.cloned(),
+        );
     }
 }
 
@@ -311,13 +398,15 @@ fn start_transfer(
     queued: QueuedConnection,
     source: Arc<Source>,
     show_progress: bool,
+    rate_limiter: Option<Arc<RateLimiter>>,
 ) {
     transfers.spawn(async move {
-        let result = crate::transport::p2p::serve_one_multiline(
+        let result = crate::transport::p2p::serve_one_multiline_limited(
             queued.conn,
             source.as_ref(),
             show_progress,
             format!("ii send #{}", queued.number),
+            rate_limiter,
         )
         .await;
         if let Err(err) = &result {
@@ -331,16 +420,21 @@ async fn send_s3<F>(args: SendArgs, show_progress: bool, ticket_ready: &F) -> Re
 where
     F: Fn(&str) -> Result<()> + Send + Sync,
 {
-    let selection = match args.profile.as_deref() {
-        Some(profile) => storage::load_or_prompt_s3_profile_named(profile)?,
-        None => storage::load_or_prompt_s3_profile()?,
+    let selection = if args.json {
+        storage::load_s3_profile_noninteractive(args.profile.as_deref())?
+    } else {
+        match args.profile.as_deref() {
+            Some(profile) => storage::load_or_prompt_s3_profile_named(profile)?,
+            None => storage::load_or_prompt_s3_profile()?,
+        }
     };
-    let source = Source::open(args.path.clone(), args.name.clone()).await?;
+    let source = source_from_args(&args).await?;
     let upload = crate::backend::s3::upload(
         &source,
         &selection.profile,
         args.delete_after_recv,
         show_progress,
+        args.rate.map(RateLimiter::new).map(Arc::new),
     )
     .await?;
     if selection.save_after_success {
@@ -364,12 +458,22 @@ async fn send_webdav<F>(args: SendArgs, show_progress: bool, ticket_ready: &F) -
 where
     F: Fn(&str) -> Result<()> + Send + Sync,
 {
-    let selection = match args.profile.as_deref() {
-        Some(profile) => storage::load_or_prompt_webdav_profile_named(profile)?,
-        None => storage::load_or_prompt_webdav_profile()?,
+    let selection = if args.json {
+        storage::load_webdav_profile_noninteractive(args.profile.as_deref().unwrap_or("default"))?
+    } else {
+        match args.profile.as_deref() {
+            Some(profile) => storage::load_or_prompt_webdav_profile_named(profile)?,
+            None => storage::load_or_prompt_webdav_profile()?,
+        }
     };
-    let source = Source::open(args.path.clone(), args.name.clone()).await?;
-    let upload = crate::backend::webdav::upload(&source, &selection.profile, show_progress).await?;
+    let source = source_from_args(&args).await?;
+    let upload = crate::backend::webdav::upload(
+        &source,
+        &selection.profile,
+        show_progress,
+        args.rate.map(RateLimiter::new).map(Arc::new),
+    )
+    .await?;
     if selection.save_after_success {
         storage::save_config(&selection.path, &selection.config)?;
     }
@@ -410,12 +514,22 @@ async fn send_ftp<F>(args: SendArgs, show_progress: bool, ticket_ready: &F) -> R
 where
     F: Fn(&str) -> Result<()> + Send + Sync,
 {
-    let selection = match args.profile.as_deref() {
-        Some(profile) => storage::load_or_prompt_ftp_profile_named(profile)?,
-        None => storage::load_or_prompt_ftp_profile()?,
+    let selection = if args.json {
+        storage::load_ftp_profile_noninteractive(args.profile.as_deref())?
+    } else {
+        match args.profile.as_deref() {
+            Some(profile) => storage::load_or_prompt_ftp_profile_named(profile)?,
+            None => storage::load_or_prompt_ftp_profile()?,
+        }
     };
-    let source = Source::open(args.path.clone(), args.name.clone()).await?;
-    let upload = crate::backend::ftp::upload(&source, &selection.profile, show_progress).await?;
+    let source = source_from_args(&args).await?;
+    let upload = crate::backend::ftp::upload(
+        &source,
+        &selection.profile,
+        show_progress,
+        args.rate.map(RateLimiter::new).map(Arc::new),
+    )
+    .await?;
     if selection.save_after_success {
         storage::save_config(&selection.path, &selection.config)?;
     }
@@ -447,12 +561,22 @@ async fn send_sftp<F>(args: SendArgs, show_progress: bool, ticket_ready: &F) -> 
 where
     F: Fn(&str) -> Result<()> + Send + Sync,
 {
-    let selection = match args.profile.as_deref() {
-        Some(profile) => storage::load_or_prompt_sftp_profile_named(profile)?,
-        None => storage::load_or_prompt_sftp_profile()?,
+    let selection = if args.json {
+        storage::load_sftp_profile_noninteractive(args.profile.as_deref())?
+    } else {
+        match args.profile.as_deref() {
+            Some(profile) => storage::load_or_prompt_sftp_profile_named(profile)?,
+            None => storage::load_or_prompt_sftp_profile()?,
+        }
     };
-    let source = Source::open(args.path.clone(), args.name.clone()).await?;
-    let upload = crate::backend::sftp::upload(&source, &selection.profile, show_progress).await?;
+    let source = source_from_args(&args).await?;
+    let upload = crate::backend::sftp::upload(
+        &source,
+        &selection.profile,
+        show_progress,
+        args.rate.map(RateLimiter::new).map(Arc::new),
+    )
+    .await?;
     if selection.save_after_success {
         storage::save_config(&selection.path, &selection.config)?;
     }
@@ -623,6 +747,7 @@ mod tests {
                 cert: None,
                 key: None,
                 port: None,
+                bind: None,
             })
             .unwrap(),
         )

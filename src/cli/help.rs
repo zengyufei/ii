@@ -3,11 +3,13 @@ ii file transfer
 
 Usage:
   ii help [command]
-  ii send [options] [path]
-  ii web [directory] [--port <port>] [--token [value]] [--upload] [--path <dir>]
-  ii webrtc [--port <port>] [--token [value]]
+  ii send [options] [path...]
+  ii web [directory] [--port <port>] [--bind <ip>] [--token [value]] [--upload] [--path <dir>]
+  ii dav [directory] [--port <port>] [--bind <ip>] [--token [value]] [--read-only]
+  ii webrtc [--port <port>] [--bind <ip>] [--token [value]]
   ii tunnel (-s <target-host:port> | -c <ticket>) [--listen <ip:port>] [--relay <url> [-k]]
   ii recv [options] <ticket>
+  ii discover [--json]
   ii relay [options]
   ii doctor
   ii version
@@ -15,10 +17,14 @@ Usage:
 
 pub(crate) const SEND_HELP: &str = "\
 Usage:
-  ii send [options] [path]
+  ii send [options] [path...]
 
 Options:
   --name <name>
+  --include <glob>
+  --exclude <glob>
+  --rate <bytes/s>
+  --json
   -t
   -c, --copy
   -o, --output <path>
@@ -28,6 +34,7 @@ Options:
   --sftp
   --web
   --port <port>
+  --bind <ip>
   --token [value]
   --upload
   --path <dir>
@@ -42,10 +49,11 @@ Options:
 
 pub(crate) const WEB_HELP: &str = "\
 Usage:
-  ii web [directory] [--port <port>] [--token [value]] [--upload] [--path <dir>]
+  ii web [directory] [--port <port>] [--bind <ip>] [--token [value]] [--upload] [--path <dir>]
 
 Options:
   --port <port>
+  --bind <ip>
   --token [value]
   --upload
   --path <dir>
@@ -53,10 +61,11 @@ Options:
 
 pub(crate) const WEBRTC_HELP: &str = "\
 Usage:
-  ii webrtc [--port <port>] [--token [value]]
+  ii webrtc [--port <port>] [--bind <ip>] [--token [value]]
 
 Options:
   --port <port>
+  --bind <ip>
   --token [value]
 ";
 
@@ -84,6 +93,7 @@ Options:
   --resume
   --local
   --trace
+  --json
 ";
 
 pub(crate) const RELAY_HELP: &str = "\
@@ -92,10 +102,30 @@ Usage:
 
 Options:
   --port <port>         HTTP or HTTPS listener port; defaults to a random free port
+  --bind <ip>           Listener IPv4 or IPv6 address; defaults to 0.0.0.0
   --tls                 Enable HTTPS with an ii-generated self-signed certificate
   --domain <name>       TLS DNS name used for the advertised URL and self-signed certificate
   --cert <path>         PEM certificate chain; replaces the generated certificate
   --key <path>          PEM private key; requires --cert
+";
+
+pub(crate) const DAV_HELP: &str = "\
+Usage:
+  ii dav [directory] [--port <port>] [--bind <ip>] [--token [value]] [--read-only]
+
+Options:
+  --port <port>
+  --bind <ip>
+  --token [value]
+  --read-only
+";
+
+pub(crate) const DISCOVER_HELP: &str = "\
+Usage:
+  ii discover [--json]
+
+Options:
+  --json
 ";
 
 pub(crate) const DOCTOR_HELP: &str = "Usage:\n  ii doctor";

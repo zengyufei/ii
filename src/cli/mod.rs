@@ -1,6 +1,8 @@
 use std::{path::PathBuf, process};
 
 mod common;
+mod dav;
+mod discover;
 mod help;
 mod recv;
 mod relay;
@@ -68,10 +70,12 @@ where
         "help" => return Err(help_for(rest)),
         "send" => Command::Send(send::parse(rest)?),
         "web" => Command::Web(web::parse(rest)?),
+        "dav" => Command::Dav(dav::parse(rest)?),
         "webrtc" => Command::Webrtc(webrtc::parse(rest)?),
         "tunnel" => Command::Tunnel(tunnel::parse(rest)?),
         "recv" => Command::Recv(recv::parse(rest)?),
         "relay" => Command::Relay(relay::parse(rest)?),
+        "discover" => Command::Discover(discover::parse(rest)?),
         "doctor" => reject_extra("doctor", rest).map(|_| Command::Doctor)?,
         "version" => reject_extra("version", rest).map(|_| Command::Version)?,
         other => return Err(ParseAction::error(format!("unknown command `{other}`"))),
@@ -87,10 +91,12 @@ fn help_for(args: Vec<String>) -> ParseAction {
         [topic] => match topic.as_str() {
             "send" => ParseAction::help(SEND_HELP),
             "web" => ParseAction::help(WEB_HELP),
+            "dav" => ParseAction::help(DAV_HELP),
             "webrtc" => ParseAction::help(WEBRTC_HELP),
             "tunnel" => ParseAction::help(TUNNEL_HELP),
             "recv" => ParseAction::help(RECV_HELP),
             "relay" => ParseAction::help(RELAY_HELP),
+            "discover" => ParseAction::help(DISCOVER_HELP),
             "doctor" => ParseAction::help(DOCTOR_HELP),
             "version" => ParseAction::help(VERSION_HELP),
             _ => ParseAction::error(format!("unknown help topic `{topic}`")),
@@ -811,6 +817,69 @@ mod tests {
                 assert_eq!(args.relay.unwrap().as_str(), "http://127.0.0.1:3340/")
             }
             _ => panic!("expected send command"),
+        }
+    }
+
+    #[test]
+    fn send_accepts_multiple_paths_filters_rate_and_json() {
+        let cli = Cli::parse_from([
+            "ii",
+            "send",
+            "one",
+            "two",
+            "--include",
+            "**/*.rs",
+            "--exclude",
+            "target/**",
+            "--rate",
+            "2MiB",
+            "--json",
+        ]);
+        match cli.command {
+            Command::Send(args) => {
+                assert_eq!(args.extra_paths, [PathBuf::from("two")]);
+                assert_eq!(args.include, ["**/*.rs"]);
+                assert_eq!(args.exclude, ["target/**"]);
+                assert_eq!(args.rate, Some(2 * 1024 * 1024));
+                assert!(args.json);
+            }
+            _ => panic!("expected send command"),
+        }
+    }
+
+    #[test]
+    fn rate_parser_rejects_zero_and_overflow() {
+        assert!(matches!(parse_rate("--rate", "1"), Ok(1)));
+        assert!(matches!(parse_rate("--rate", "4KiB"), Ok(4096)));
+        assert!(parse_rate("--rate", "0").is_err());
+        assert!(parse_rate("--rate", "18446744073709551615GiB").is_err());
+    }
+
+    #[test]
+    fn discover_and_dav_parse_their_options() {
+        assert!(matches!(
+            Cli::parse_from(["ii", "discover", "--json"]).command,
+            Command::Discover(DiscoverArgs { json: true })
+        ));
+        match Cli::parse_from([
+            "ii",
+            "dav",
+            "share",
+            "--bind",
+            "::1",
+            "--read-only",
+            "--token",
+            "A1b2C3d4E5f6G7h8",
+        ])
+        .command
+        {
+            Command::Dav(args) => {
+                assert_eq!(args.dir, Some(PathBuf::from("share")));
+                assert_eq!(args.web_bind, Some("::1".parse().unwrap()));
+                assert!(args.read_only);
+                assert!(args.web_token.is_some());
+            }
+            _ => panic!("expected dav command"),
         }
     }
 }

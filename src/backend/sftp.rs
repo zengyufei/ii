@@ -5,7 +5,7 @@ use crate::{
     ticket::{PayloadKind, SftpPortableAuth, SftpPortableCredentials, Ticket},
     transport::{
         p2p::{FilePlan, RecvTrace},
-        progress::{TransferProgress, copy_with_progress},
+        progress::{RateLimiter, TransferProgress, copy_with_progress, copy_with_progress_limited},
         source::{Source, unique_object_id},
     },
 };
@@ -107,6 +107,7 @@ pub(crate) async fn upload(
     source: &Source,
     profile: &storage::SftpProfile,
     show_progress: bool,
+    rate_limiter: Option<Arc<RateLimiter>>,
 ) -> Result<SftpUpload> {
     let object_key = remote_object_key(&profile.remote_dir, source);
     let connection = connect(profile).await?;
@@ -125,9 +126,14 @@ pub(crate) async fn upload(
         .await
         .with_context(|| format!("open SFTP object {object_key}"))?;
     let mut progress = TransferProgress::new("ii send", show_progress, source.size(), 0);
-    copy_with_progress(&mut source_file, &mut remote, &mut progress)
-        .await
-        .with_context(|| format!("upload SFTP object {object_key}"))?;
+    copy_with_progress_limited(
+        &mut source_file,
+        &mut remote,
+        &mut progress,
+        rate_limiter.as_deref(),
+    )
+    .await
+    .with_context(|| format!("upload SFTP object {object_key}"))?;
     remote.flush().await.context("flush SFTP upload")?;
     remote.shutdown().await.context("finish SFTP upload")?;
     progress.finish();
@@ -210,7 +216,11 @@ pub(crate) async fn recv_sftp(
             (profile, None)
         }
         None => {
-            let selection = storage::load_or_prompt_sftp_profile_named(&sftp.profile)?;
+            let selection = if args.json {
+                storage::load_sftp_profile_noninteractive(Some(&sftp.profile))?
+            } else {
+                storage::load_or_prompt_sftp_profile_named(&sftp.profile)?
+            };
             let save = selection
                 .save_after_success
                 .then_some((selection.path.clone(), selection.config.clone()));
@@ -364,6 +374,7 @@ fn portable_sftp_config(
 pub(crate) async fn try_delete_sftp_for_ticket(
     sftp: crate::ticket::SftpTicket,
     trace: &mut RecvTrace,
+    noninteractive: bool,
 ) {
     if !sftp.delete_after_recv {
         return;
@@ -378,7 +389,11 @@ pub(crate) async fn try_delete_sftp_for_ticket(
                 (profile, None)
             }
             None => {
-                let selection = storage::load_or_prompt_sftp_profile_named(&sftp.profile)?;
+                let selection = if noninteractive {
+                    storage::load_sftp_profile_noninteractive(Some(&sftp.profile))?
+                } else {
+                    storage::load_or_prompt_sftp_profile_named(&sftp.profile)?
+                };
                 let save = selection
                     .save_after_success
                     .then_some((selection.path.clone(), selection.config.clone()));
@@ -601,7 +616,7 @@ mod tests {
             private_key_path: None,
             private_key_passphrase: None,
         };
-        let upload = upload(&source, &profile, false).await.unwrap();
+        let upload = upload(&source, &profile, false, None).await.unwrap();
 
         let destination = root.path().join("received.txt");
         let connection = connect(&profile).await.unwrap();

@@ -1,9 +1,11 @@
+pub(crate) mod dav;
 pub(crate) mod directory;
 pub(crate) mod http;
 pub(crate) mod qr;
 pub(crate) mod upload;
 pub(crate) mod webrtc;
 
+pub(crate) use dav::serve_dav;
 pub(crate) use directory::directory_root;
 pub(crate) use http::{
     WebContent, lan_ipv4_hosts, serve_web, start_lan_web_server, web_upload_dir,
