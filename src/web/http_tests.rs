@@ -1,7 +1,7 @@
 use super::{
     http::{
-        WebContent, WebShare, bind_lan_web_listener, serve_web_connection, start_lan_web_server,
-        web_other_hosts, web_root_path, web_upload_dir,
+        WebContent, WebServeLifetime, WebShare, bind_lan_web_listener, serve_web_connection,
+        serve_web_listener, start_lan_web_server, web_other_hosts, web_root_path, web_upload_dir,
     },
     qr::svg as web_qr_svg,
     test_support::*,
@@ -11,8 +11,123 @@ use std::{
     net::{IpAddr, Ipv4Addr, Ipv6Addr},
     path::Path,
     sync::Arc,
+    time::Duration,
 };
-use tokio::net::TcpListener;
+use tokio::{net::TcpListener, time::timeout};
+
+async fn download_share(
+    path: std::path::PathBuf,
+    upload_dir: Option<std::path::PathBuf>,
+) -> Arc<WebShare> {
+    Arc::new(WebShare {
+        content: WebContent::Download {
+            source: Source::from_file(path, None).await.unwrap(),
+            download_name: "hello.txt".to_string(),
+            download_qr_svg: web_qr_svg("http://192.168.1.2:3456/download").unwrap(),
+        },
+        upload_dir,
+        web_token: None,
+        rate_limiter: None,
+    })
+}
+
+async fn assert_listener_is_running(server: &mut tokio::task::JoinHandle<anyhow::Result<()>>) {
+    assert!(timeout(Duration::from_millis(100), server).await.is_err());
+}
+
+#[tokio::test]
+async fn one_download_listener_ignores_page_and_upload_then_stops() {
+    let dir = tempfile::tempdir().unwrap();
+    let source_path = dir.path().join("hello.txt");
+    let upload_dir = dir.path().join("ii");
+    std::fs::write(&source_path, b"web payload").unwrap();
+    let share = download_share(source_path, Some(upload_dir.clone())).await;
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let mut server = tokio::spawn(serve_web_listener(
+        listener,
+        share,
+        WebServeLifetime::OneSuccessfulDownload,
+    ));
+
+    assert!(request(address, "/").await.starts_with(b"HTTP/1.1 200 OK"));
+    assert_listener_is_running(&mut server).await;
+
+    assert!(
+        upload_request(address, "notes.txt", b"upload")
+            .await
+            .starts_with(b"HTTP/1.1 201 Created")
+    );
+    assert_eq!(
+        std::fs::read(upload_dir.join("notes.txt")).unwrap(),
+        b"upload"
+    );
+    assert_listener_is_running(&mut server).await;
+
+    assert!(
+        request(address, "/download")
+            .await
+            .starts_with(b"HTTP/1.1 200 OK")
+    );
+    timeout(Duration::from_secs(1), &mut server)
+        .await
+        .expect("listener should stop after the completed download")
+        .unwrap()
+        .unwrap();
+}
+
+#[tokio::test]
+async fn one_download_listener_ignores_failed_download() {
+    let dir = tempfile::tempdir().unwrap();
+    let source_path = dir.path().join("hello.txt");
+    std::fs::write(&source_path, b"web payload").unwrap();
+    let share = download_share(source_path.clone(), None).await;
+    std::fs::remove_file(source_path).unwrap();
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let mut server = tokio::spawn(serve_web_listener(
+        listener,
+        share,
+        WebServeLifetime::OneSuccessfulDownload,
+    ));
+
+    assert!(
+        request(address, "/download")
+            .await
+            .starts_with(b"HTTP/1.1 200 OK")
+    );
+    assert_listener_is_running(&mut server).await;
+    assert!(request(address, "/").await.starts_with(b"HTTP/1.1 200 OK"));
+    assert_listener_is_running(&mut server).await;
+    server.abort();
+    let _ = server.await;
+}
+
+#[tokio::test]
+async fn keep_alive_web_listener_serves_multiple_downloads() {
+    let dir = tempfile::tempdir().unwrap();
+    let source_path = dir.path().join("hello.txt");
+    std::fs::write(&source_path, b"web payload").unwrap();
+    let share = download_share(source_path, None).await;
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let mut server = tokio::spawn(serve_web_listener(
+        listener,
+        share,
+        WebServeLifetime::UntilCtrlC,
+    ));
+
+    for _ in 0..2 {
+        assert!(
+            request(address, "/download")
+                .await
+                .starts_with(b"HTTP/1.1 200 OK")
+        );
+        assert_listener_is_running(&mut server).await;
+    }
+    server.abort();
+    let _ = server.await;
+}
 
 #[tokio::test]
 async fn download_share_serves_page_download_and_token_routes() {

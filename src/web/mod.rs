@@ -8,7 +8,7 @@ pub(crate) mod webrtc;
 pub(crate) use dav::serve_dav;
 pub(crate) use directory::directory_root;
 pub(crate) use http::{
-    WebContent, lan_ipv4_hosts, serve_web, start_lan_web_server, web_upload_dir,
+    WebContent, WebServeLifetime, lan_ipv4_hosts, serve_web, start_lan_web_server, web_upload_dir,
 };
 pub(crate) use webrtc::{WebRtcServer, serve_connection as serve_webrtc_connection};
 

@@ -19,6 +19,7 @@ use std::{
 use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     net::{TcpListener, TcpStream},
+    sync::mpsc,
 };
 
 pub(crate) enum WebContent {
@@ -65,6 +66,18 @@ pub(crate) struct LanWebServer {
     pub(crate) url: String,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WebServeLifetime {
+    OneSuccessfulDownload,
+    UntilCtrlC,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum WebConnectionOutcome {
+    Handled,
+    DownloadCompleted,
+}
+
 pub(crate) async fn serve_web(
     mut content: WebContent,
     upload_dir: Option<PathBuf>,
@@ -73,6 +86,7 @@ pub(crate) async fn serve_web(
     web_token: Option<String>,
     rate_limiter: Option<Arc<RateLimiter>>,
     json: bool,
+    lifetime: WebServeLifetime,
 ) -> Result<()> {
     let lan = start_lan_web_server_with_output(
         web_port,
@@ -110,15 +124,36 @@ pub(crate) async fn serve_web(
         );
     }
 
+    serve_web_listener(lan.listener, share, lifetime).await
+}
+
+pub(crate) async fn serve_web_listener(
+    listener: TcpListener,
+    share: Arc<WebShare>,
+    lifetime: WebServeLifetime,
+) -> Result<()> {
+    let (download_done_tx, mut download_done_rx) = mpsc::unbounded_channel();
+    let download_done_tx =
+        (lifetime == WebServeLifetime::OneSuccessfulDownload).then_some(download_done_tx);
+
     loop {
         tokio::select! {
+            biased;
             _ = tokio::signal::ctrl_c() => break,
-            accepted = lan.listener.accept() => {
+            Some(()) = download_done_rx.recv(), if download_done_tx.is_some() => break,
+            accepted = listener.accept() => {
                 let (stream, _) = accepted.context("accept web connection")?;
                 let share = Arc::clone(&share);
+                let download_done_tx = download_done_tx.clone();
                 tokio::spawn(async move {
-                    if let Err(err) = serve_web_connection(stream, share).await {
-                        eprintln!("ii web: request failed: {err:#}");
+                    match serve_web_connection(stream, share).await {
+                        Ok(WebConnectionOutcome::DownloadCompleted) => {
+                            if let Some(download_done_tx) = download_done_tx {
+                                let _ = download_done_tx.send(());
+                            }
+                        }
+                        Ok(WebConnectionOutcome::Handled) => {}
+                        Err(err) => eprintln!("ii web: request failed: {err:#}"),
                     }
                 });
             }
@@ -511,20 +546,22 @@ fn web_interface_ipv4_addrs() -> Vec<Ipv4Addr> {
 pub(crate) async fn serve_web_connection(
     mut stream: TcpStream,
     share: Arc<WebShare>,
-) -> Result<()> {
+) -> Result<WebConnectionOutcome> {
     let request = match read_web_request(&mut stream).await {
         Ok(request) => request,
         Err(err) => {
             let message = format!("bad request: {err}");
-            return write_web_error(&mut stream, "400 Bad Request", &message).await;
+            write_web_error(&mut stream, "400 Bad Request", &message).await?;
+            return Ok(WebConnectionOutcome::Handled);
         }
     };
 
     let Some(path) = web_request_path(&share, &request.target) else {
-        return write_web_error(&mut stream, "404 Not Found", "not found").await;
+        write_web_error(&mut stream, "404 Not Found", "not found").await?;
+        return Ok(WebConnectionOutcome::Handled);
     };
 
-    match request.method.as_str() {
+    let outcome = match request.method.as_str() {
         "GET" => match &share.content {
             WebContent::Download {
                 source,
@@ -539,7 +576,8 @@ pub(crate) async fn serve_web_connection(
                         download_qr_svg,
                         share.upload_dir.is_some(),
                     )
-                    .await
+                    .await?;
+                    WebConnectionOutcome::Handled
                 }
                 "download" => {
                     write_web_download(
@@ -548,9 +586,13 @@ pub(crate) async fn serve_web_connection(
                         download_name,
                         share.rate_limiter.as_deref(),
                     )
-                    .await
+                    .await?;
+                    WebConnectionOutcome::DownloadCompleted
                 }
-                _ => write_web_error(&mut stream, "404 Not Found", "not found").await,
+                _ => {
+                    write_web_error(&mut stream, "404 Not Found", "not found").await?;
+                    WebConnectionOutcome::Handled
+                }
             },
             WebContent::Directory { root } => {
                 directory::write_directory(
@@ -563,7 +605,8 @@ pub(crate) async fn serve_web_connection(
                     false,
                     share.upload_dir.is_some(),
                 )
-                .await
+                .await?;
+                WebConnectionOutcome::Handled
             }
         },
         "HEAD" => match &share.content {
@@ -578,10 +621,13 @@ pub(crate) async fn serve_web_connection(
                     true,
                     share.upload_dir.is_some(),
                 )
-                .await
+                .await?;
+                WebConnectionOutcome::Handled
             }
             WebContent::Download { .. } => {
-                write_web_error(&mut stream, "405 Method Not Allowed", "method not allowed").await
+                write_web_error(&mut stream, "405 Method Not Allowed", "method not allowed")
+                    .await?;
+                WebConnectionOutcome::Handled
             }
         },
         "POST" if path.starts_with("upload?name=") => match &share.upload_dir {
@@ -593,13 +639,24 @@ pub(crate) async fn serve_web_connection(
                     request.content_length,
                     &request.body,
                 )
-                .await
+                .await?;
+                WebConnectionOutcome::Handled
             }
-            None => write_web_error(&mut stream, "404 Not Found", "not found").await,
+            None => {
+                write_web_error(&mut stream, "404 Not Found", "not found").await?;
+                WebConnectionOutcome::Handled
+            }
         },
-        "POST" => write_web_error(&mut stream, "404 Not Found", "not found").await,
-        _ => write_web_error(&mut stream, "405 Method Not Allowed", "method not allowed").await,
-    }
+        "POST" => {
+            write_web_error(&mut stream, "404 Not Found", "not found").await?;
+            WebConnectionOutcome::Handled
+        }
+        _ => {
+            write_web_error(&mut stream, "405 Method Not Allowed", "method not allowed").await?;
+            WebConnectionOutcome::Handled
+        }
+    };
+    Ok(outcome)
 }
 
 fn web_request_path<'a>(share: &WebShare, target: &'a str) -> Option<&'a str> {

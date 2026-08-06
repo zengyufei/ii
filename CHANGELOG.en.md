@@ -2,6 +2,12 @@
 
 All notable changes to `ii` are documented here. The default Chinese version is [CHANGELOG.md](CHANGELOG.md).
 
+## 0.3.4 - 2026-08-06
+
+### Changed
+
+- `ii send --web` now exits after its first completed download by default; add `-t` to keep serving. Page visits, uploads, and failed downloads do not end the service.
+
 ## 0.3.3 - 2026-08-05
 
 ### Added

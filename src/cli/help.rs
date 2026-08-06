@@ -25,7 +25,7 @@ Options:
   --exclude <glob>
   --rate <bytes/s>
   --json
-  -t
+  -t                    Keep serving after success; required for repeated --web downloads
   -c, --copy
   -o, --output <path>
   --s3                 Generic S3-compatible object storage

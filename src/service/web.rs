@@ -2,7 +2,7 @@ use crate::{
     command::{SendArgs, WebArgs},
     ticket::PayloadKind,
     transport::{progress::RateLimiter, source::Source},
-    web::{WebContent, directory_root, serve_web, web_upload_dir},
+    web::{WebContent, WebServeLifetime, directory_root, serve_web, web_upload_dir},
 };
 use anyhow::{Context, Result};
 use std::sync::Arc;
@@ -34,6 +34,11 @@ pub(super) async fn send_web(args: SendArgs) -> Result<()> {
         args.web_token,
         args.rate.map(RateLimiter::new).map(Arc::new),
         args.json,
+        if args.keep_alive {
+            WebServeLifetime::UntilCtrlC
+        } else {
+            WebServeLifetime::OneSuccessfulDownload
+        },
     )
     .await
 }
@@ -51,6 +56,7 @@ async fn run_impl(args: WebArgs) -> Result<()> {
         args.web_token,
         None,
         false,
+        WebServeLifetime::UntilCtrlC,
     )
     .await
 }
