@@ -6,17 +6,27 @@ All notable changes to `ii` are documented here. The default Chinese version is 
 
 ### Added
 
+- Added the `ii http` read-only directory site, `ii paste` text sharing, `ii drop` resumable upload drop box, `ii pac` PAC hosting, and `ii speed` bidirectional HTTP chunked throughput tests. They reuse LAN URLs, QR codes, tokens, and discovery.
+- Added the `ii proxy` HTTP forward proxy, `ii tcp`/`ii udp` fixed-target forwarders, `ii ping` TCP connect latency probe, `ii port` concurrent port checker, `ii health` HTTP(S)/TCP health check, and `ii wake` Wake-on-LAN sender.
+
+## 0.3.6 - 2026-08-07
+
+### Added
+
+- `ii recv --trace` now reports Iroh's selected LAN, direct, or relay path and RTT.
+- `ii send`, `ii watch`, and `ii queue` accept repeated `--relay`; multiple explicit relays are probed for reachability and latency, while default n0 relay behavior is unchanged.
+- `ii send --web` and `ii web --upload` support resumable browser uploads; reselecting the same file after a disconnect or refresh continues it.
+- Added `ii socks5`, an ordinary SOCKS5 proxy with `CONNECT`, `UDP ASSOCIATE`, `BIND`, IPv4, IPv6, domain targets, and optional username/password authentication.
+
+## 0.3.5 - 2026-08-07
+
+### Added
+
 - `ii send` and `ii recv` support `--checksum md5|sha256`; checksums are calculated and printed locally only, never stored in tickets or compared automatically.
 - `ii send <file> --preserve-metadata` uses the existing tar payload to retain single-file mtime, permissions, and read-only metadata; directory and multi-path archives support `--symlinks follow|preserve|reject`.
 - Added process-local FIFO `ii queue` and polling `ii watch`, including delay, repeat, stability detection, and existing sending backends.
 - `ii send`, `ii recv`, `ii watch`, and `ii queue` support `--quic-port` to fix the P2P Iroh UDP port; `ii doctor --nat` reports a short-lived UDP, NAT, and relay probe.
 - `ii web --once` exits after the first complete ordinary-file download; directory pages, HEAD, Range, uploads, and failed requests do not stop it.
-- `ii recv --trace` now reports Iroh's selected LAN, direct, or relay path and RTT.
-- `ii send`, `ii watch`, and `ii queue` accept repeated `--relay`; multiple explicit relays are probed for reachability and latency, while default n0 relay behavior is unchanged.
-- `ii send --web` and `ii web --upload` support resumable browser uploads; reselecting the same file after a disconnect or refresh continues it.
-- Added `ii socks5`, an ordinary SOCKS5 proxy with `CONNECT`, `UDP ASSOCIATE`, `BIND`, IPv4, IPv6, domain targets, and optional username/password authentication.
-- Added the `ii http` read-only directory site, `ii paste` text sharing, `ii drop` resumable upload drop box, `ii pac` PAC hosting, and `ii speed` bidirectional HTTP chunked throughput tests. They reuse LAN URLs, QR codes, tokens, and discovery.
-- Added the `ii proxy` HTTP forward proxy, `ii tcp`/`ii udp` fixed-target forwarders, `ii ping` TCP connect latency probe, `ii port` concurrent port checker, `ii health` HTTP(S)/TCP health check, and `ii wake` Wake-on-LAN sender.
 
 ## 0.3.4 - 2026-08-06
 
@@ -30,6 +40,16 @@ All notable changes to `ii` are documented here. The default Chinese version is 
 
 - `ii dav` now supports HTTP Basic Auth; `--username` and `--password` must be supplied together.
 - `ii dav` now supports HTTPS: `--tls` generates a temporary self-signed certificate, while `--domain`, `--cert`, and `--key` support custom DNS names and PEM certificates.
+
+## 0.3.2 - 2026-08-05
+
+### Added
+
+- Added `install.sh` for Linux x86_64 and Apple Silicon macOS. It downloads the latest Release, verifies SHA-256, and installs to `~/.local/bin` or `II_INSTALL_DIR`.
+
+### Changed
+
+- Release assets now include `checksums.txt`, and Linux CI verifies the installed version through the installer.
 
 ## 0.3.1 - 2026-08-05
 

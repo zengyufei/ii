@@ -6,17 +6,27 @@
 
 ### 新增
 
+- 新增 `ii http` 只读目录站、`ii paste` 文本分享、`ii drop` 续传上传收集箱、`ii pac` PAC 托管与 `ii speed` 双向 HTTP chunked 测速；它们复用 LAN URL、二维码、token 和发现服务。
+- 新增 `ii proxy` HTTP 正向代理、`ii tcp`/`ii udp` 固定目标转发、`ii ping` TCP connect 延迟探测、`ii port` 并发端口检查、`ii health` HTTP(S)/TCP 健康检查和 `ii wake` Wake-on-LAN。
+
+## 0.3.6 - 2026-08-07
+
+### 新增
+
+- `ii recv --trace` 输出 Iroh 实际选中的 LAN、直连或 relay 路径及 RTT。
+- `ii send`、`ii watch`、`ii queue` 的 `--relay` 可重复指定；多个显式 relay 会按探测到的可达性和延迟择优，默认 n0 relay 行为不变。
+- `ii send --web` 与 `ii web --upload` 支持浏览器分块上传续传，断网或刷新后重新选择同一文件即可继续。
+- 新增 `ii socks5` 普通 SOCKS5 代理，支持 `CONNECT`、`UDP ASSOCIATE`、`BIND`、IPv4、IPv6、域名目标和可选用户名密码认证。
+
+## 0.3.5 - 2026-08-07
+
+### 新增
+
 - `ii send` 和 `ii recv` 支持 `--checksum md5|sha256`；校验和仅在本地计算和输出，不写入 ticket，也不自动比较。
 - `ii send <file> --preserve-metadata` 可用现有 tar 载荷保留单文件的 mtime、权限和只读属性；目录和多路径归档支持 `--symlinks follow|preserve|reject`。
 - 新增进程内 FIFO `ii queue` 与轮询式 `ii watch`，支持延迟、定时、稳定检测和现有发送后端。
 - `ii send`、`ii recv`、`ii watch`、`ii queue` 支持 `--quic-port` 固定 P2P Iroh UDP 端口；`ii doctor --nat` 输出短生命周期的 UDP、NAT 和 relay 探测结果。
 - `ii web --once` 在第一次完整普通文件下载后关闭；目录页、HEAD、Range、上传和失败请求不会触发关闭。
-- `ii recv --trace` 输出 Iroh 实际选中的 LAN、直连或 relay 路径及 RTT。
-- `ii send`、`ii watch`、`ii queue` 的 `--relay` 可重复指定；多个显式 relay 会按探测到的可达性和延迟择优，默认 n0 relay 行为不变。
-- `ii send --web` 与 `ii web --upload` 支持浏览器分块上传续传，断网或刷新后重新选择同一文件即可继续。
-- 新增 `ii socks5` 普通 SOCKS5 代理，支持 `CONNECT`、`UDP ASSOCIATE`、`BIND`、IPv4、IPv6、域名目标和可选用户名密码认证。
-- 新增 `ii http` 只读目录站、`ii paste` 文本分享、`ii drop` 续传上传收集箱、`ii pac` PAC 托管与 `ii speed` 双向 HTTP chunked 测速；它们复用 LAN URL、二维码、token 和发现服务。
-- 新增 `ii proxy` HTTP 正向代理、`ii tcp`/`ii udp` 固定目标转发、`ii ping` TCP connect 延迟探测、`ii port` 并发端口检查、`ii health` HTTP(S)/TCP 健康检查和 `ii wake` Wake-on-LAN。
 
 ## 0.3.4 - 2026-08-06
 
@@ -30,6 +40,16 @@
 
 - `ii dav` 支持 HTTP Basic Auth：`--username` 与 `--password` 必须成对提供。
 - `ii dav` 支持 HTTPS：`--tls` 可生成临时自签证书，`--domain`、`--cert`、`--key` 支持自定义域名和 PEM 证书。
+
+## 0.3.2 - 2026-08-05
+
+### 新增
+
+- 新增 Linux x86_64 和 Apple Silicon macOS 的 `install.sh` 安装脚本，可下载最新 Release、校验 SHA-256 并安装到 `~/.local/bin` 或 `II_INSTALL_DIR`。
+
+### 变更
+
+- Release 产物新增 `checksums.txt`，并在 Linux CI 中验证安装脚本安装后的版本。
 
 ## 0.3.1 - 2026-08-05
 
