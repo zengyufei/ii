@@ -9,6 +9,18 @@ Usage:
   ii web [directory] [--port <port>] [--bind <ip>] [--token [value]] [--upload] [--path <dir>] [--once]
   ii dav [directory] [--port <port>] [--bind <ip>] [--token [value]] [--read-only] [--username <username> --password <password>] [--tls [--domain <name>] [--cert <path> --key <path>]]
   ii socks5 [--port <port>] [--bind <ip>] [--username <user> --password <pass>]
+  ii http [directory] [--port <port>] [--bind <ip>] [--token [value]]
+  ii paste [text] [--port <port>] [--bind <ip>] [--token [value]] [--ttl <duration>]
+  ii drop [directory] [--port <port>] [--bind <ip>] [--token [value]]
+  ii proxy [--port <port>] [--bind <ip>] [--username <user> --password <pass>]
+  ii tcp <host:port> [--port <port>] [--bind <ip>]
+  ii udp <host:port> [--port <port>] [--bind <ip>]
+  ii ping <host:port> [--count <n>] [--interval <duration>] [--timeout <duration>]
+  ii speed (serve [--port <port>] [--bind <ip>] [--token [value]] | <http-url> [--duration <duration>])
+  ii wake <mac> [--broadcast <ip>] [--port <port>]
+  ii port <host> <port...> [--timeout <duration>]
+  ii health <http-url|host:port> [--interval <duration>] [--timeout <duration>]
+  ii pac --proxy <http://host:port|socks5://host:port> [--port <port>] [--bind <ip>] [--token [value]]
   ii webrtc [--port <port>] [--bind <ip>] [--token [value]]
   ii tunnel (-s <target-host:port> | -c <ticket>) [--listen <ip:port>] [--relay <url> [-k]]
   ii recv [options] <ticket>
@@ -183,6 +195,91 @@ Options:
   --bind <ip>                Listener IPv4 or IPv6 address; defaults to 0.0.0.0
   --username <user>          Enable SOCKS5 username/password authentication
   --password <pass>          SOCKS5 password; requires --username
+";
+
+pub(crate) const HTTP_HELP: &str = "\
+Usage:
+  ii http [directory] [--port <port>] [--bind <ip>] [--token [value]]
+
+Options:
+  --port <port>
+  --bind <ip>
+  --token [value]
+";
+
+pub(crate) const PASTE_HELP: &str = "\
+Usage:
+  ii paste [text] [--port <port>] [--bind <ip>] [--token [value]] [--ttl <duration>]
+
+Without text, reads stdin until EOF. Use -- before text beginning with '-'.
+
+Options:
+  --port <port>
+  --bind <ip>
+  --token [value]
+  --ttl <duration>
+";
+
+pub(crate) const DROP_HELP: &str = "\
+Usage:
+  ii drop [directory] [--port <port>] [--bind <ip>] [--token [value]]
+
+Options:
+  --port <port>
+  --bind <ip>
+  --token [value]
+";
+
+pub(crate) const PROXY_HELP: &str = "\
+Usage:
+  ii proxy [--port <port>] [--bind <ip>] [--username <user> --password <pass>]
+
+Options:
+  --port <port>
+  --bind <ip>
+  --username <user>
+  --password <pass>
+";
+
+pub(crate) const TCP_HELP: &str = "\
+Usage:
+  ii tcp <host:port> [--port <port>] [--bind <ip>]
+";
+
+pub(crate) const UDP_HELP: &str = "\
+Usage:
+  ii udp <host:port> [--port <port>] [--bind <ip>]
+";
+
+pub(crate) const PING_HELP: &str = "\
+Usage:
+  ii ping <host:port> [--count <n>] [--interval <duration>] [--timeout <duration>]
+";
+
+pub(crate) const SPEED_HELP: &str = "\
+Usage:
+  ii speed serve [--port <port>] [--bind <ip>] [--token [value]]
+  ii speed <http-url> [--duration <duration>]
+";
+
+pub(crate) const WAKE_HELP: &str = "\
+Usage:
+  ii wake <mac> [--broadcast <ip>] [--port <port>]
+";
+
+pub(crate) const PORT_HELP: &str = "\
+Usage:
+  ii port <host> <port...> [--timeout <duration>]
+";
+
+pub(crate) const HEALTH_HELP: &str = "\
+Usage:
+  ii health <http-url|host:port> [--interval <duration>] [--timeout <duration>]
+";
+
+pub(crate) const PAC_HELP: &str = "\
+Usage:
+  ii pac --proxy <http://host:port|socks5://host:port> [--port <port>] [--bind <ip>] [--token [value]]
 ";
 
 pub(crate) const DISCOVER_HELP: &str = "\

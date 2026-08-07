@@ -2,7 +2,7 @@
 
 本文件记录 `ii` 的重要变更。默认中文版本在这里，英文版本见 [CHANGELOG.en.md](CHANGELOG.en.md)。
 
-## Unreleased
+## 0.3.7 - 2026-08-07
 
 ### 新增
 
@@ -15,6 +15,8 @@
 - `ii send`、`ii watch`、`ii queue` 的 `--relay` 可重复指定；多个显式 relay 会按探测到的可达性和延迟择优，默认 n0 relay 行为不变。
 - `ii send --web` 与 `ii web --upload` 支持浏览器分块上传续传，断网或刷新后重新选择同一文件即可继续。
 - 新增 `ii socks5` 普通 SOCKS5 代理，支持 `CONNECT`、`UDP ASSOCIATE`、`BIND`、IPv4、IPv6、域名目标和可选用户名密码认证。
+- 新增 `ii http` 只读目录站、`ii paste` 文本分享、`ii drop` 续传上传收集箱、`ii pac` PAC 托管与 `ii speed` 双向 HTTP chunked 测速；它们复用 LAN URL、二维码、token 和发现服务。
+- 新增 `ii proxy` HTTP 正向代理、`ii tcp`/`ii udp` 固定目标转发、`ii ping` TCP connect 延迟探测、`ii port` 并发端口检查、`ii health` HTTP(S)/TCP 健康检查和 `ii wake` Wake-on-LAN。
 
 ## 0.3.4 - 2026-08-06
 

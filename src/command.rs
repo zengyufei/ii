@@ -40,6 +40,18 @@ pub enum Command {
     Web(WebArgs),
     Dav(DavArgs),
     Socks5(Socks5Args),
+    Http(HttpArgs),
+    Paste(PasteArgs),
+    Drop(DropArgs),
+    Proxy(ProxyArgs),
+    Tcp(ForwardArgs),
+    Udp(ForwardArgs),
+    Ping(PingArgs),
+    Speed(SpeedArgs),
+    Wake(WakeArgs),
+    Port(PortArgs),
+    Health(HealthArgs),
+    Pac(PacArgs),
     Webrtc(WebrtcArgs),
     Tunnel(TunnelArgs),
     Recv(RecvArgs),
@@ -146,6 +158,93 @@ pub struct Socks5Args {
     pub bind: Option<IpAddr>,
     pub username: Option<String>,
     pub password: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct LanHttpArgs {
+    pub port: Option<u16>,
+    pub bind: Option<IpAddr>,
+    pub token: Option<String>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct HttpArgs {
+    pub dir: Option<PathBuf>,
+    pub listen: LanHttpArgs,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct PasteArgs {
+    pub text: Option<String>,
+    pub ttl: Option<std::time::Duration>,
+    pub listen: LanHttpArgs,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct DropArgs {
+    pub dir: Option<PathBuf>,
+    pub listen: LanHttpArgs,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct ProxyArgs {
+    pub port: Option<u16>,
+    pub bind: Option<IpAddr>,
+    pub username: Option<String>,
+    pub password: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct ForwardArgs {
+    pub target: String,
+    pub port: Option<u16>,
+    pub bind: Option<IpAddr>,
+}
+
+#[derive(Debug, Clone)]
+pub struct PingArgs {
+    pub target: String,
+    pub count: u32,
+    pub interval: std::time::Duration,
+    pub timeout: std::time::Duration,
+}
+
+#[derive(Debug, Clone)]
+pub enum SpeedArgs {
+    Serve {
+        listen: LanHttpArgs,
+    },
+    Test {
+        url: String,
+        duration: std::time::Duration,
+    },
+}
+
+#[derive(Debug, Clone)]
+pub struct WakeArgs {
+    pub mac: [u8; 6],
+    pub broadcast: IpAddr,
+    pub port: u16,
+}
+
+#[derive(Debug, Clone)]
+pub struct PortArgs {
+    pub host: String,
+    pub ports: Vec<u16>,
+    pub timeout: std::time::Duration,
+}
+
+#[derive(Debug, Clone)]
+pub struct HealthArgs {
+    pub target: String,
+    pub interval: Option<std::time::Duration>,
+    pub timeout: std::time::Duration,
+}
+
+#[derive(Debug, Clone)]
+pub struct PacArgs {
+    pub proxy: String,
+    pub listen: LanHttpArgs,
 }
 
 #[derive(Debug, Clone)]

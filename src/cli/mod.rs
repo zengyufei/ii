@@ -5,6 +5,7 @@ mod dav;
 mod discover;
 mod help;
 mod jobs;
+mod network;
 mod recv;
 mod relay;
 mod send;
@@ -76,6 +77,18 @@ where
         "web" => Command::Web(web::parse(rest)?),
         "dav" => Command::Dav(dav::parse(rest)?),
         "socks5" => Command::Socks5(socks5::parse(rest)?),
+        "http" => Command::Http(network::http(rest)?),
+        "paste" => Command::Paste(network::paste(rest)?),
+        "drop" => Command::Drop(network::drop(rest)?),
+        "proxy" => Command::Proxy(network::proxy(rest)?),
+        "tcp" => Command::Tcp(network::tcp(rest)?),
+        "udp" => Command::Udp(network::udp(rest)?),
+        "ping" => Command::Ping(network::ping(rest)?),
+        "speed" => Command::Speed(network::speed(rest)?),
+        "wake" => Command::Wake(network::wake(rest)?),
+        "port" => Command::Port(network::port(rest)?),
+        "health" => Command::Health(network::health(rest)?),
+        "pac" => Command::Pac(network::pac(rest)?),
         "webrtc" => Command::Webrtc(webrtc::parse(rest)?),
         "tunnel" => Command::Tunnel(tunnel::parse(rest)?),
         "recv" => Command::Recv(recv::parse(rest)?),
@@ -121,6 +134,18 @@ fn help_for(args: Vec<String>) -> ParseAction {
             "web" => ParseAction::help(WEB_HELP),
             "dav" => ParseAction::help(DAV_HELP),
             "socks5" => ParseAction::help(SOCKS5_HELP),
+            "http" => ParseAction::help(HTTP_HELP),
+            "paste" => ParseAction::help(PASTE_HELP),
+            "drop" => ParseAction::help(DROP_HELP),
+            "proxy" => ParseAction::help(PROXY_HELP),
+            "tcp" => ParseAction::help(TCP_HELP),
+            "udp" => ParseAction::help(UDP_HELP),
+            "ping" => ParseAction::help(PING_HELP),
+            "speed" => ParseAction::help(SPEED_HELP),
+            "wake" => ParseAction::help(WAKE_HELP),
+            "port" => ParseAction::help(PORT_HELP),
+            "health" => ParseAction::help(HEALTH_HELP),
+            "pac" => ParseAction::help(PAC_HELP),
             "webrtc" => ParseAction::help(WEBRTC_HELP),
             "tunnel" => ParseAction::help(TUNNEL_HELP),
             "recv" => ParseAction::help(RECV_HELP),

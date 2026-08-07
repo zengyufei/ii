@@ -2,6 +2,7 @@ use super::{ChecksumAlgorithm, SendArgs, SymlinkPolicy, help::*};
 use rand::RngExt;
 use std::{fmt, net::SocketAddr};
 
+#[derive(Debug)]
 pub(crate) enum ParseAction {
     Print { text: String, code: i32 },
 }

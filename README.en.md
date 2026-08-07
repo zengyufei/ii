@@ -30,12 +30,18 @@
 
 ### `ii web`
 
-- Run a temporary LAN file site from the current directory for browsing, downloads, and uploads.
-- Import a phone photo library by starting `ii web` on a computer and uploading photos or videos after scanning its QR code.
+- Run a temporary LAN file site from the current directory for browsing and downloads; add `--upload` to accept uploads.
+- Import a phone photo library by starting `ii web --upload` on a computer and uploading photos or videos after scanning its QR code.
 - Distribute meeting materials through a QR code for direct download.
 - Serve local static assets such as installers, videos, or web files to TVs, tablets, and development devices.
-- Collect files from several people into a chosen directory.
+- Use `ii drop` as the upload-only, no-browsing, no-download subset of `ii web` to collect files from several people.
+- Use `ii http` as the read-only subset entry point for default `ii web`; it adds no transfer capability.
 - Provide a file portal on an offline LAN without cloud storage, accounts, or Internet access.
+
+### `ii paste`
+
+- Share Wi-Fi passwords, meeting codes, log excerpts, configuration, or short commands on the LAN; phones can scan and copy them.
+- Let scripts read temporary text through the `raw` URL without running another text service.
 
 ### `ii dav`
 
@@ -55,6 +61,16 @@
 - Provide a configurable proxy address to games, media players, or IoT devices that support one.
 - Compare DNS and connection paths across enterprise, VPN, and home networks.
 
+### `ii proxy`
+
+- Provide an ordinary HTTP forward proxy for browsers, downloaders, and other tools that support HTTP proxies.
+- Let LAN devices use a computer with a VPN, special routes, or access to the target network as their proxy exit.
+
+### `ii pac`
+
+- Host a PAC URL so browsers connect directly to LAN addresses and use a chosen HTTP or SOCKS5 proxy for other destinations.
+- Distribute proxy rules across a temporary office network, VPN, or test network without configuring each machine manually.
+
 ### `ii relay`
 
 - Self-host an Iroh relay as the explicit cross-network forwarding path for `ii send --relay`.
@@ -67,11 +83,46 @@
 - Make a machine without a public IP reachable remotely.
 - Provide temporary remote assistance without configuring router port forwarding.
 
+### `ii tcp`
+
+- Forward a local listening port to a fixed TCP target such as SSH, a database, a development site, or an internal service.
+- Forward a known TCP service for tests, short integration work, or temporary port mapping.
+
+### `ii udp`
+
+- Forward UDP traffic to a fixed target for games, device discovery, or custom UDP protocol debugging.
+- Let LAN devices reach a UDP service through the current machine when they cannot reach it directly.
+
 ### `ii discover`
 
 - Scan for running `ii` services on the LAN.
 - Find same-subnet send jobs, directory sites, and WebDAV services without typing IP addresses.
 - Discover shared endpoints quickly in meeting rooms, labs, and server rooms.
+
+### `ii ping`
+
+- Measure TCP connection latency to quickly determine whether a service is reachable or the network is unstable.
+- Compare connection quality across enterprise, VPN, home, or different egress networks.
+
+### `ii speed`
+
+- Run `ii speed serve` on one device and `ii speed` on another to measure actual LAN download and upload throughput.
+- Diagnose links whose advertised Wi-Fi bandwidth is high but whose file transfer speed is poor, without an Internet speed test.
+
+### `ii wake`
+
+- Send a Wake-on-LAN magic packet to a sleeping computer or NAS on the same subnet.
+- Wake a target device before remote file transfer, backup, or access.
+
+### `ii port`
+
+- Check whether multiple TCP ports on one host are open, refused, or timed out in one command.
+- Diagnose firewalls, service listeners, port mappings, and network policy issues.
+
+### `ii health`
+
+- Check an HTTP(S) health endpoint or a bare TCP service.
+- Monitor a service continuously and print only state changes for lightweight supervision or scripts.
 
 ## Install
 
@@ -238,10 +289,33 @@ ii dav .\shared --port 8443 --username alice --password secret --tls --domain da
 
 `ii web --once` exits only after the first complete ordinary-file `GET 200`. HEAD, Range, directory pages, 404 responses, and uploads do not consume the one-shot lifetime, and `--once` conflicts with `--upload`.
 
+### Lightweight LAN Services
+
+```powershell
+# Read-only directory site with browsing, Range, media playback, and downloads
+ii http .\public
+
+# Text clipboard; without text, reads stdin; raw returns plain text
+ii paste "meeting code: 123456" --ttl 30m
+Get-Content .\note.txt -Raw | ii paste --token
+
+# Upload-only drop box; defaults to .\ii\ under the startup directory
+ii drop .\incoming
+
+# Host a PAC file for an existing HTTP or SOCKS5 proxy
+ii pac --proxy socks5://192.168.1.10:1080
+
+# LAN throughput server and client
+ii speed serve --port 9000
+ii speed http://192.168.1.10:9000/ --duration 15s
+```
+
+`ii http` has no upload or write endpoint. `ii drop` provides resumable multi-file uploads only: it does not list or download files, and an explicit directory is the upload destination. `ii paste` provides a copyable root page and a `text/plain` `raw` endpoint; `--ttl` stops it at expiry. `ii pac` returns a PAC file at its root URL: private, loopback, `.local`, and plain host names use `DIRECT`; other destinations use the selected proxy. All five commands accept `--port`, `--bind`, and `--token [value]`, print a QR code, LAN URL, and `other:`, and advertise through `ii discover`.
+
 ### LAN Discovery
 
 ```powershell
-# List ii send -t, ii web, and ii dav services on the same LAN
+# List ii send -t, web/dav, and lightweight HTTP services on the same LAN
 ii discover
 
 # JSON Lines output
@@ -316,6 +390,28 @@ ii version
 ```
 
 `ii doctor --nat` runs a short-lived UDP/NAT/relay probe and reports bound UDP sockets, IPv4/IPv6, NAT mapping behavior, the preferred relay, and relay reachability. Hairpin is explicitly unavailable because Iroh does not expose that probe.
+
+## Proxy, Forwarding, and Network Tools
+
+```powershell
+# HTTP forward proxy, with optional Basic authentication
+ii proxy --port 8080
+ii proxy --username alice --password secret
+
+# Forward a local TCP or UDP port to one fixed target
+ii tcp db.internal:5432 --port 15432
+ii udp game.internal:27015 --port 27015
+
+# TCP connect latency, port checks, and a continuous health check
+ii ping api.example.com:443 --count 4
+ii port api.example.com 80 443 8443
+ii health https://api.example.com/health --interval 10s
+
+# Send a Wake-on-LAN magic packet
+ii wake aa:bb:cc:dd:ee:ff --broadcast 192.168.1.255
+```
+
+`ii proxy` supports HTTP/1.0 and HTTP/1.1 absolute-form requests plus `CONNECT`. Ordinary HTTP requests use one connection per request; it does not decrypt TLS, cache, or proxy WebSockets. `ii tcp` and `ii udp` forward to one fixed target; UDP keeps one upstream session per client address and removes idle sessions after five minutes. `ii ping` measures TCP connect latency rather than sending ICMP. `ii port` checks TCP ports concurrently. `ii health` considers only HTTP(S) `2xx/3xx` healthy, or checks TCP connectivity for a bare `host:port`.
 
 ## Full Manual
 

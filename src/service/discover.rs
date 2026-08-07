@@ -45,6 +45,13 @@ pub(super) async fn run(args: DiscoverArgs) -> Result<()> {
                         ("url", crate::json::Value::String(url)),
                     ],
                 ),
+                Service::Http { kind, url } => crate::json::emit(
+                    "service",
+                    &[
+                        ("service", crate::json::Value::String(kind)),
+                        ("url", crate::json::Value::String(url)),
+                    ],
+                ),
             }
         } else {
             match service {
@@ -54,6 +61,7 @@ pub(super) async fn run(args: DiscoverArgs) -> Result<()> {
                 }
                 Service::Web { url } => println!("web: {url}"),
                 Service::Dav { url } => println!("dav: {url}"),
+                Service::Http { kind, url } => println!("{kind}: {url}"),
             }
         }
     }

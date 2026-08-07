@@ -670,6 +670,7 @@ pub(crate) async fn serve_web_connection(
                     upload::write_upload_chunk(
                         &mut stream,
                         upload_dir,
+                        "ii web",
                         path,
                         request.content_length,
                         request.header("content-range"),
@@ -691,6 +692,7 @@ pub(crate) async fn serve_web_connection(
                     upload::write_upload(
                         &mut stream,
                         upload_dir,
+                        "ii web",
                         path,
                         request.content_length,
                         &request.body,

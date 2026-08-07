@@ -2,7 +2,7 @@
 
 All notable changes to `ii` are documented here. The default Chinese version is [CHANGELOG.md](CHANGELOG.md).
 
-## Unreleased
+## 0.3.7 - 2026-08-07
 
 ### Added
 
@@ -15,6 +15,8 @@ All notable changes to `ii` are documented here. The default Chinese version is 
 - `ii send`, `ii watch`, and `ii queue` accept repeated `--relay`; multiple explicit relays are probed for reachability and latency, while default n0 relay behavior is unchanged.
 - `ii send --web` and `ii web --upload` support resumable browser uploads; reselecting the same file after a disconnect or refresh continues it.
 - Added `ii socks5`, an ordinary SOCKS5 proxy with `CONNECT`, `UDP ASSOCIATE`, `BIND`, IPv4, IPv6, domain targets, and optional username/password authentication.
+- Added the `ii http` read-only directory site, `ii paste` text sharing, `ii drop` resumable upload drop box, `ii pac` PAC hosting, and `ii speed` bidirectional HTTP chunked throughput tests. They reuse LAN URLs, QR codes, tokens, and discovery.
+- Added the `ii proxy` HTTP forward proxy, `ii tcp`/`ii udp` fixed-target forwarders, `ii ping` TCP connect latency probe, `ii port` concurrent port checker, `ii health` HTTP(S)/TCP health check, and `ii wake` Wake-on-LAN sender.
 
 ## 0.3.4 - 2026-08-06
 

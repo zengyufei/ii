@@ -30,6 +30,10 @@ pub(crate) enum Service {
     Dav {
         url: String,
     },
+    Http {
+        kind: String,
+        url: String,
+    },
 }
 
 #[derive(Debug, Serialize, Deserialize, PartialEq, Eq)]
@@ -286,5 +290,18 @@ mod tests {
         assert_eq!(decode(&bytes), Some(packet));
         assert!(decode(b"IID0").is_none());
         assert!(decode(&vec![0; MAX_PACKET + 1]).is_none());
+    }
+
+    #[test]
+    fn http_service_round_trips() {
+        let packet = Packet::Response {
+            id: 9,
+            nonce: 13,
+            service: Service::Http {
+                kind: "paste".to_string(),
+                url: "http://192.168.1.2:5001/".to_string(),
+            },
+        };
+        assert_eq!(decode(&encode(&packet)), Some(packet));
     }
 }

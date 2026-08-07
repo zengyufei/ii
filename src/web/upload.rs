@@ -230,6 +230,7 @@ pub(crate) async fn session_head(
 pub(crate) async fn write_upload_chunk(
     stream: &mut TcpStream,
     upload_dir: &Path,
+    label: &str,
     target: &str,
     content_length: Option<u64>,
     content_range: Option<&str>,
@@ -353,7 +354,7 @@ pub(crate) async fn write_upload_chunk(
         )
         .await;
     }
-    println!("ii web: uploaded {}", target_path.display());
+    println!("{label}: uploaded {}", target_path.display());
     write_web_response_with_headers(
         stream,
         "201 Created",
@@ -471,6 +472,7 @@ pub(crate) async fn create_file(upload_dir: &Path, name: &str) -> Result<(PathBu
 pub(crate) async fn write_upload(
     stream: &mut TcpStream,
     upload_dir: &Path,
+    label: &str,
     target: &str,
     content_length: Option<u64>,
     initial_body: &[u8],
@@ -544,7 +546,7 @@ pub(crate) async fn write_upload(
         return write_web_error(stream, "500 Internal Server Error", &message).await;
     }
 
-    println!("ii web: uploaded {}", path.display());
+    println!("{label}: uploaded {}", path.display());
     let message = format!(
         "saved: {}",
         path.file_name().unwrap_or_default().to_string_lossy()

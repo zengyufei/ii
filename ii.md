@@ -4,7 +4,7 @@
 
 ## 一句话
 
-`ii send` 发，`ii recv` 收，`ii web` 开局域网目录，`ii dav` 开 WebDAV，`ii discover` 找本地服务，`ii webrtc` 开浏览器直传，`ii tunnel` 转发 TCP，`ii socks5` 开普通代理，`ii relay` 管中继，`ii doctor` 查问题，`ii version` 看版本。
+`ii send` 发，`ii recv` 收，`ii web` 开局域网目录，`ii dav` 开 WebDAV，`ii http`、`ii paste`、`ii drop`、`ii pac`、`ii speed` 开轻量 LAN 服务，`ii proxy`、`ii tcp`、`ii udp` 开代理或转发，`ii ping`、`ii port`、`ii health`、`ii wake` 查网络或唤醒设备，`ii discover` 找本地服务，`ii webrtc` 开浏览器直传，`ii tunnel` 转发 TCP，`ii socks5` 开普通代理，`ii relay` 管中继，`ii doctor` 查问题，`ii version` 看版本。
 
 ## 命令总览
 
@@ -16,6 +16,19 @@ ii queue <path...> [--after <duration>|--every <duration>] [发送选项]
 ii web [<目录>] [--port <port>] [--bind <ip>] [--token [<value>]] [--upload] [--path <目录>] [--once]
 ii dav [<目录>] [--port <port>] [--bind <ip>] [--token [<value>]] [--read-only] [--username <username> --password <password>] [--tls [--domain <name>] [--cert <path> --key <path>]]
 ii socks5 [--port <port>] [--bind <ip>] [--username <user> --password <pass>]
+ii http [<目录>] [--port <port>] [--bind <ip>] [--token [<value>]]
+ii paste [<text>] [--port <port>] [--bind <ip>] [--token [<value>]] [--ttl <duration>]
+ii drop [<目录>] [--port <port>] [--bind <ip>] [--token [<value>]]
+ii proxy [--port <port>] [--bind <ip>] [--username <user> --password <pass>]
+ii tcp <host:port> [--port <port>] [--bind <ip>]
+ii udp <host:port> [--port <port>] [--bind <ip>]
+ii ping <host:port> [--count <n>] [--interval <duration>] [--timeout <duration>]
+ii speed serve [--port <port>] [--bind <ip>] [--token [<value>]]
+ii speed <http-url> [--duration <duration>]
+ii wake <mac> [--broadcast <ip>] [--port <port>]
+ii port <host> <port...> [--timeout <duration>]
+ii health <http-url|host:port> [--interval <duration>] [--timeout <duration>]
+ii pac --proxy <http://host:port|socks5://host:port> [--port <port>] [--bind <ip>] [--token [<value>]]
 ii webrtc [--port <port>] [--bind <ip>] [--token [<value>]]
 ii tunnel -s <target-host:port> [--relay <url> [-k]]
 ii tunnel -c <ticket> [--listen <ip:port>]
@@ -26,7 +39,7 @@ ii doctor [--nat]
 ii version
 ```
 
-`ii help` 显示命令总览；`ii help send`、`ii help watch`、`ii help queue`、`ii help web`、`ii help dav`、`ii help socks5`、`ii help webrtc`、`ii help tunnel`、`ii help recv`、`ii help relay`、`ii help discover`、`ii help doctor`、`ii help version` 显示对应命令帮助，内容与 `<command> --help` 相同。
+`ii help` 显示命令总览；`ii help <command>` 可显示上述每个命令的对应帮助，内容与 `<command> --help` 相同。
 
 ## 核心规则
 
@@ -266,6 +279,30 @@ ii web .\shared --port 8080 --token A1b2C3d4E5f6G7h8 --upload --path .\uploads
 
 `--port <port>` 指定 `1` 到 `65535` 的 HTTP 监听端口，未提供时随机选择。裸 `--token` 自动生成 32 字符路径令牌；`--token <value>` 或 `--token=<value>` 使用指定令牌，把目录、文件和已启用的上传 URL 固定到 `/<value>/` 下；遗漏或写错返回 `404`。显式令牌必须为 16 到 128 个 ASCII 字母、数字、`-` 或 `_`。`--upload` 才显示上传控件并开放上传接口；`--path <目录>` 指定上传文件直接写入的目录，相对路径按启动目录解析，首次上传才创建目录，未指定时写入启动目录下的 `./ii/`，未提供 `--upload` 时会被忽略。`-p` 不适用于 `ii web`，仍仅用于 WebDAV、FTP、SFTP 的便携 ticket。
 
+## 轻量局域网服务
+
+```powershell
+ii http .\public
+ii paste "meeting code: 123456" --ttl 30m
+Get-Content .\note.txt -Raw | ii paste --token
+ii drop .\incoming
+ii pac --proxy socks5://192.168.1.10:1080
+ii speed serve --port 9000
+ii speed http://192.168.1.10:9000/ --duration 15s
+```
+
+`ii http [目录]` 是只读 nginx 风格目录服务：递归浏览、普通文件、Range、媒体播放和下载都与 `ii web` 目录页一致，但永远没有上传或写入接口。无目录时服务启动目录。
+
+`ii paste [text]` 分享一段文本；没有位置参数时从 stdin 读取到 EOF。根页显示可复制文本，`raw` 返回 `text/plain`。`--ttl <duration>` 在正整数 `ms`、`s`、`m`、`h` 时间后自动关闭；文本以 `-` 开头时使用 `ii paste -- <text>`。
+
+`ii drop [目录]` 只显示多文件上传页，支持现有的 1 MiB 分块续传，不列目录、不下载、不删除。无目录时首次上传会创建启动目录下的 `./ii/`；指定相对目录也以启动目录为基准，指定绝对目录原样使用。同名文件在完成后原子覆盖。
+
+`ii pac --proxy <url>` 在根 URL 返回 `application/x-ns-proxy-autoconfig` PAC 内容。代理 URL 只能是无凭据、无 query/fragment 的 `http://host:port` 或 `socks5://host:port`；localhost、回环、RFC1918 IPv4、IPv6 loopback/link-local、`.local` 和无点主机名返回 `DIRECT`，其他目标使用指定代理。
+
+`ii speed serve` 提供专用上下行测速端点；`ii speed <http-url>` 顺序跑下载和上传，默认各十秒，输出有效载荷、平均速率和总耗时。服务端和客户端使用 HTTP chunked 流，不伪造 `Content-Length`。
+
+这五个服务都使用 `--port`、`--bind`、`--token [value]`：默认监听 IPv4 `0.0.0.0` 的随机端口，显式 IPv6 只监听 IPv6；终端打印二维码、主 LAN URL 与 `other:`。服务会被 `ii discover` 公告。
+
 ## `ii dav`
 
 ```powershell
@@ -293,6 +330,25 @@ ii socks5 --bind 192.168.1.20 --username alice --password secret
 
 支持 SOCKS5 `CONNECT`、`UDP ASSOCIATE`、`BIND`，以及 IPv4、IPv6 和域名目标。域名由代理端解析。没有认证参数时使用 SOCKS5 无认证方式；`--username <user>` 和 `--password <pass>` 必须成对提供，提供后只接受 RFC 1929 用户名密码认证。
 
+## 代理、转发与网络工具
+
+```powershell
+ii proxy --port 8080
+ii proxy --username alice --password secret
+ii tcp db.internal:5432 --port 15432
+ii udp game.internal:27015 --port 27015
+ii ping api.example.com:443 --count 4
+ii port api.example.com 80 443 8443
+ii health https://api.example.com/health --interval 10s
+ii wake aa:bb:cc:dd:ee:ff --broadcast 192.168.1.255
+```
+
+`ii proxy` 是普通 HTTP 正向代理。支持 HTTP/1.0、HTTP/1.1 absolute-form 请求和 `CONNECT`；普通请求强制 `Connection: close` 后转发一条请求，`CONNECT` 进入双向 TCP 流。它不做 TLS 解密、缓存或 WebSocket 代理。`--username` 和 `--password` 必须成对提供；提供后只接受 `Proxy-Authorization: Basic`。
+
+`ii tcp <host:port>` 为每个进入的 TCP 连接双向转发到固定目标。`ii udp <host:port>` 为每个客户端地址维护一个上游 UDP socket，域名在创建会话时解析，五分钟无流量后清理。两者都支持 IPv4、IPv6 或域名目标，`--port` 与 `--bind` 控制本地 listener。
+
+`ii ping <host:port>` 是 TCP connect 延迟探测，不发送原始 ICMP；默认四次、间隔一秒、每次三秒超时，并输出 min/avg/max。`ii port <host> <port...>` 并发检查每个 TCP 端口，按输入顺序输出 `open`、`closed` 或 `timeout`。`ii health <http-url|host:port>` 对 HTTP/HTTPS 的 `2xx/3xx` 判健康，对裸地址检查 TCP；不带 `--interval` 只检查一次并以失败状态退出，带间隔时只在状态变化时输出并持续运行。`ii wake <mac>` 发送 102 字节 Wake-on-LAN magic packet，MAC 可用冒号或短横线，默认发往 `255.255.255.255:9`。
+
 ## `ii discover`
 
 ```powershell
@@ -300,7 +356,7 @@ ii discover
 ii discover --json
 ```
 
-在本地网络监听三秒，发现正在运行的 `ii send -t`、`ii web` 和 `ii dav`，并输出可直接使用的 `ii recv <ticket>` 或服务 URL。发现同时使用 IPv4 广播和 IPv6 链路本地 all-nodes 多播；公告会向同一 LAN 暴露 ticket 或 token URL，不是访问控制机制。`--json` 输出 JSON Lines，stdout 不混入其他文本。
+在本地网络监听三秒，发现正在运行的 `ii send -t`、`ii web`、`ii dav`、`ii http`、`ii paste`、`ii drop`、`ii pac` 和 `ii speed serve`，并输出可直接使用的 `ii recv <ticket>` 或服务 URL。发现同时使用 IPv4 广播和 IPv6 链路本地 all-nodes 多播；公告会向同一 LAN 暴露 ticket 或 token URL，不是访问控制机制。`--json` 输出 JSON Lines，stdout 不混入其他文本。
 
 ## `ii webrtc`
 

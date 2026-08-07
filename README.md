@@ -30,12 +30,18 @@
 
 ### `ii web`
 
-- 临时局域网文件站：当前目录一键公开浏览、下载和上传。
-- 手机相册导入：电脑开 `ii web`，手机扫码上传照片或视频。
+- 临时局域网文件站：当前目录一键公开浏览和下载；加 `--upload` 后也可上传。
+- 手机相册导入：电脑开 `ii web --upload`，手机扫码上传照片或视频。
 - 会议资料分发：用二维码让参会者直接下载。
 - 本地静态资源站：给电视、平板和开发设备访问安装包、视频或网页文件。
-- 临时文件收集箱：多人向指定目录上传材料。
+- 临时文件收集箱：用 `ii drop` 建立只上传、不浏览、不下载的 `ii web` 子集服务，集中收集材料。
+- 只读目录快捷入口：`ii http` 是默认只读 `ii web` 的子集入口，不增加任何传输能力。
 - 离线局域网环境的文件门户：不依赖云盘、账号或外网。
+
+### `ii paste`
+
+- 在局域网分享 Wi-Fi 密码、会议码、日志片段、配置或短命令；手机扫码即可复制。
+- 用 `raw` 地址让脚本读取临时文本，不必额外搭建文本服务。
 
 ### `ii dav`
 
@@ -55,6 +61,16 @@
 - 给支持代理配置的游戏、媒体播放器或 IoT 设备提供代理地址。
 - 临时比较企业网络、VPN 和家庭网络下的 DNS 与连接路径。
 
+### `ii proxy`
+
+- 给浏览器、下载器和其他支持 HTTP 代理的工具提供普通 HTTP 正向代理。
+- 让局域网设备经一台具备 VPN、特殊路由或目标网络访问能力的电脑访问网络。
+
+### `ii pac`
+
+- 托管 PAC 地址，让浏览器自动对内网地址直连、其余地址走指定 HTTP 或 SOCKS5 代理。
+- 在临时办公网、VPN 或测试网络中统一分发代理规则，不必逐台手动配置。
+
 ### `ii relay`
 
 - 自建 Iroh relay，作为 `ii send --relay` 的指定跨网转发路径。
@@ -67,11 +83,46 @@
 - 让没有公网 IP 的机器被远端访问。
 - 用于临时远程协助，无需配置路由器端口转发。
 
+### `ii tcp`
+
+- 将本地监听端口转发到固定 TCP 目标，例如 SSH、数据库、开发站或内部服务。
+- 在测试、短期联调和端口映射场景中转发一个已知 TCP 服务。
+
+### `ii udp`
+
+- 将 UDP 流量转发到固定目标，适合游戏、设备发现和自定义 UDP 协议调试。
+- 让无法直接访问目标 UDP 服务的局域网设备经当前电脑中转。
+
 ### `ii discover`
 
 - 扫描局域网内正在运行的 `ii` 服务。
 - 找到同网段的发送任务、目录站和 WebDAV 服务，不必手输 IP。
 - 在会议室、实验室或机房快速发现共享端点。
+
+### `ii ping`
+
+- 测量 TCP 建连延迟，快速判断某个服务地址是否可达、网络是否抖动。
+- 对比企业网络、VPN、家庭网络或不同出口下的连接质量。
+
+### `ii speed`
+
+- 两台设备分别运行 `ii speed serve` 和 `ii speed`，测量真实局域网上下行吞吐。
+- 排查 Wi-Fi 标称带宽很高但实际传文件很慢的链路问题，不依赖外网测速站。
+
+### `ii wake`
+
+- 向同网段休眠电脑或 NAS 发送 Wake-on-LAN 魔术包。
+- 在远程传文件、备份或访问前先唤醒目标设备。
+
+### `ii port`
+
+- 一次检查同一主机的多个 TCP 端口是否开放、拒绝或超时。
+- 排查防火墙、服务监听、端口映射和网络策略问题。
+
+### `ii health`
+
+- 检查 HTTP(S) 健康端点或裸 TCP 服务是否可用。
+- 持续监控服务状态，只在状态变化时输出，适合轻量值守和脚本集成。
 
 ## 安装
 
@@ -238,10 +289,33 @@ ii dav .\shared --port 8443 --username alice --password secret --tls --domain da
 
 `ii web --once` 只在第一次完整的普通文件 `GET 200` 后退出；HEAD、Range、目录页、404 和上传不会消耗这次机会，且不能和 `--upload` 同用。
 
+### 轻量局域网服务
+
+```powershell
+# 只读目录站；支持浏览、Range、媒体播放和下载
+ii http .\public
+
+# 文字剪贴板；无参数时从 stdin 读取，raw 返回纯文本
+ii paste "meeting code: 123456" --ttl 30m
+Get-Content .\note.txt -Raw | ii paste --token
+
+# 纯上传收集箱；默认写到启动目录的 .\ii\
+ii drop .\incoming
+
+# 为现有 HTTP/SOCKS5 代理托管 PAC 文件
+ii pac --proxy socks5://192.168.1.10:1080
+
+# 局域网吞吐测试服务端和客户端
+ii speed serve --port 9000
+ii speed http://192.168.1.10:9000/ --duration 15s
+```
+
+`ii http` 没有上传和写入接口；`ii drop` 只有多文件上传和断点续传，不列目录也不提供下载，指定目录直接作为上传目录。`ii paste` 根页可复制内容，`raw` 返回 `text/plain`，`--ttl` 到期自动关闭。`ii pac` 根 URL 返回 PAC 文件，内网、回环、`.local` 和无点主机名走 `DIRECT`，其他目标走指定代理。它们都支持 `--port`、`--bind`、`--token [value]`，终端输出二维码、LAN URL 和 `other:`；也会被 `ii discover` 发现。
+
 ### 局域网发现
 
 ```powershell
-# 列出同一 LAN 中的 ii send -t、ii web 和 ii dav
+# 列出同一 LAN 中的 ii send -t、web/dav 和轻量 HTTP 服务
 ii discover
 
 # 输出 JSON Lines
@@ -316,6 +390,28 @@ ii version
 ```
 
 `ii doctor --nat` 会运行一次短生命周期 UDP/NAT/relay 探测，输出实际 UDP socket、IPv4/IPv6、NAT 映射、首选 relay 和 relay 在线结果；Iroh 未公开 hairpin 探测时会明确标记为不可用。
+
+## 代理、转发与网络工具
+
+```powershell
+# HTTP 正向代理；可选 Basic 认证
+ii proxy --port 8080
+ii proxy --username alice --password secret
+
+# 将本地 TCP/UDP 端口转发到固定目标
+ii tcp db.internal:5432 --port 15432
+ii udp game.internal:27015 --port 27015
+
+# TCP connect 探测、端口检查、持续健康检查
+ii ping api.example.com:443 --count 4
+ii port api.example.com 80 443 8443
+ii health https://api.example.com/health --interval 10s
+
+# 发送 Wake-on-LAN 魔术包
+ii wake aa:bb:cc:dd:ee:ff --broadcast 192.168.1.255
+```
+
+`ii proxy` 支持 HTTP/1.0、HTTP/1.1 absolute-form 请求与 `CONNECT`，普通 HTTP 请求一连接一请求，不做 TLS 解密、缓存或 WebSocket 代理。`ii tcp` 和 `ii udp` 是固定目标转发器；UDP 按客户端地址维护上游会话，空闲五分钟清理。`ii ping` 是 TCP connect 延迟探测，不发送 ICMP；`ii port` 并发检查 TCP 端口；`ii health` 对 HTTP(S) 仅将 `2xx/3xx` 视为健康，或检查裸 `host:port` 的 TCP 连通性。
 
 ## 详细手册
 
