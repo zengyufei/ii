@@ -18,7 +18,7 @@ unused-async = "warn"
 
 [package]
 name = "ii"
-version = "0.3.5"
+version = "0.3.6"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true

@@ -11,6 +11,10 @@ All notable changes to `ii` are documented here. The default Chinese version is 
 - Added process-local FIFO `ii queue` and polling `ii watch`, including delay, repeat, stability detection, and existing sending backends.
 - `ii send`, `ii recv`, `ii watch`, and `ii queue` support `--quic-port` to fix the P2P Iroh UDP port; `ii doctor --nat` reports a short-lived UDP, NAT, and relay probe.
 - `ii web --once` exits after the first complete ordinary-file download; directory pages, HEAD, Range, uploads, and failed requests do not stop it.
+- `ii recv --trace` now reports Iroh's selected LAN, direct, or relay path and RTT.
+- `ii send`, `ii watch`, and `ii queue` accept repeated `--relay`; multiple explicit relays are probed for reachability and latency, while default n0 relay behavior is unchanged.
+- `ii send --web` and `ii web --upload` support resumable browser uploads; reselecting the same file after a disconnect or refresh continues it.
+- Added `ii socks5`, an ordinary SOCKS5 proxy with `CONNECT`, `UDP ASSOCIATE`, `BIND`, IPv4, IPv6, domain targets, and optional username/password authentication.
 
 ## 0.3.4 - 2026-08-06
 

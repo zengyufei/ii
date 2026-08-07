@@ -9,7 +9,12 @@ pub(super) fn parse(args: Vec<String>) -> Result<SendArgs, ParseAction> {
             Some(("name", value)) => out.name = Some(value.to_string()),
             Some(("output", value)) => out.output = Some(PathBuf::from(value)),
             Some(("profile", value)) => out.profile = Some(value.to_string()),
-            Some(("relay", value)) => out.relay = Some(parse_relay_url(value)?),
+            Some(("relay", value)) => {
+                let relay = parse_relay_url(value)?;
+                if !out.relay.contains(&relay) {
+                    out.relay.push(relay);
+                }
+            }
             Some(("port", value)) => out.web_port = Some(parse_port("--port", value)?),
             Some(("bind", value)) => out.web_bind = Some(parse_bind("--bind", value)?),
             Some(("token", value)) => out.web_token = Some(value.to_string()),
@@ -75,7 +80,12 @@ pub(super) fn parse(args: Vec<String>) -> Result<SendArgs, ParseAction> {
                 "--path" => out.web_upload_dir = Some(PathBuf::from(iter.value("--path")?)),
                 "-p" => out.portable_webdav = true,
                 "--local" => out.local = true,
-                "--relay" => out.relay = Some(parse_relay_url(&iter.value("--relay")?)?),
+                "--relay" => {
+                    let relay = parse_relay_url(&iter.value("--relay")?)?;
+                    if !out.relay.contains(&relay) {
+                        out.relay.push(relay);
+                    }
+                }
                 "-k" => out.accept_self_signed_relay = true,
                 "--no-relay" => out.no_relay = true,
                 _ if arg.starts_with('-') => {

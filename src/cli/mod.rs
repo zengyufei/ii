@@ -8,6 +8,7 @@ mod jobs;
 mod recv;
 mod relay;
 mod send;
+mod socks5;
 mod tunnel;
 mod web;
 mod webrtc;
@@ -74,6 +75,7 @@ where
         "queue" => Command::Queue(jobs::parse_queue(rest)?),
         "web" => Command::Web(web::parse(rest)?),
         "dav" => Command::Dav(dav::parse(rest)?),
+        "socks5" => Command::Socks5(socks5::parse(rest)?),
         "webrtc" => Command::Webrtc(webrtc::parse(rest)?),
         "tunnel" => Command::Tunnel(tunnel::parse(rest)?),
         "recv" => Command::Recv(recv::parse(rest)?),
@@ -118,6 +120,7 @@ fn help_for(args: Vec<String>) -> ParseAction {
             "queue" => ParseAction::help(QUEUE_HELP),
             "web" => ParseAction::help(WEB_HELP),
             "dav" => ParseAction::help(DAV_HELP),
+            "socks5" => ParseAction::help(SOCKS5_HELP),
             "webrtc" => ParseAction::help(WEBRTC_HELP),
             "tunnel" => ParseAction::help(TUNNEL_HELP),
             "recv" => ParseAction::help(RECV_HELP),
@@ -883,9 +886,54 @@ mod tests {
         let cli = Cli::parse_from(["ii", "send", "file.txt", "--relay", "http://127.0.0.1:3340"]);
         match cli.command {
             Command::Send(args) => {
-                assert_eq!(args.relay.unwrap().as_str(), "http://127.0.0.1:3340/")
+                assert_eq!(args.relay[0].as_str(), "http://127.0.0.1:3340/")
             }
             _ => panic!("expected send command"),
+        }
+    }
+
+    #[test]
+    fn send_accepts_multiple_distinct_relays_and_deduplicates() {
+        let cli = Cli::parse_from([
+            "ii",
+            "send",
+            "file.txt",
+            "--relay",
+            "https://relay-a.example",
+            "--relay=https://relay-b.example",
+            "--relay",
+            "https://relay-a.example",
+        ]);
+        match cli.command {
+            Command::Send(args) => {
+                assert_eq!(args.relay.len(), 2);
+                assert_eq!(args.relay[0].as_str(), "https://relay-a.example/");
+                assert_eq!(args.relay[1].as_str(), "https://relay-b.example/");
+            }
+            _ => panic!("expected send command"),
+        }
+    }
+
+    #[test]
+    fn socks5_accepts_listener_and_credentials() {
+        let cli = Cli::parse_from([
+            "ii",
+            "socks5",
+            "--port=1080",
+            "--bind",
+            "127.0.0.1",
+            "--username",
+            "alice",
+            "--password=secret",
+        ]);
+        match cli.command {
+            Command::Socks5(args) => {
+                assert_eq!(args.port, Some(1080));
+                assert_eq!(args.bind, Some("127.0.0.1".parse().unwrap()));
+                assert_eq!(args.username.as_deref(), Some("alice"));
+                assert_eq!(args.password.as_deref(), Some("secret"));
+            }
+            _ => panic!("expected socks5 command"),
         }
     }
 

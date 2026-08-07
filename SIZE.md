@@ -35,8 +35,9 @@ All measurements use `cargo build -p ii --release --locked` followed by UPX
 | Seven extension plan: multi-send, filters, rate, JSON, discover, bind, DAV | 6,315,008 | 2,265,600 | +60,928 | `cargo test -p ii --offline --no-fail-fast -- --test-threads=1` (121 tests), workspace check, `cargo build -p ii --release --locked`, `cargo bloat --crates`, UPX `5.1.0 --best --lzma`, `upx -t` |
 | Generic S3/R2 split and Azure Blob backend | 6,413,312 | 2,436,608 | +171,008 | `cargo test -p ii --locked` (131 tests), `cargo check -p ii-gui --locked`, `cargo bloat --crates`, UPX `5.1.0 --best --lzma`, `upx -t` |
 | Nine low-volume extensions: checksums, metadata, queue/watch, NAT probe, symlink policy, QUIC port, and `web --once` | 6,650,368 | 2,353,152 | -83,456 | `cargo test -p ii --locked` (146 tests), fmt check, diff check, `cargo bloat -p ii --release --crates -n 15`, standard `cargo build -p ii --release --locked`, UPX `5.1.0 --best --lzma`, `upx -t` |
+| Path diagnostics, relay selection, resumable web upload, and SOCKS5 | 6,727,168 | 2,377,728 | +24,576 | `cargo test -p ii --locked` (157 tests), fmt check, diff check, `cargo bloat -p ii --release --crates -n 15`, standard `cargo build -p ii --release --locked`, UPX `5.1.0 --best --lzma`, `upx -t` |
 
-Equivalent release rebuilds have varied by up to `1,536` UPX bytes; the latest
+Equivalent release rebuilds have varied by up to `3,072` UPX bytes; the latest
 measurement is recorded with the pinned `5.1.0` packer.
 
 ## QR Dependency Audit

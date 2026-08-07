@@ -20,6 +20,7 @@ use tokio::{
     io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt},
     net::{TcpListener, TcpStream},
     sync::mpsc,
+    time::{self, Duration},
 };
 
 pub(crate) enum WebContent {
@@ -36,6 +37,7 @@ pub(crate) enum WebContent {
 pub(crate) struct WebShare {
     pub(crate) content: WebContent,
     pub(crate) upload_dir: Option<PathBuf>,
+    pub(crate) upload_sessions: upload::UploadSessions,
     pub(crate) web_token: Option<String>,
     pub(crate) rate_limiter: Option<Arc<RateLimiter>>,
 }
@@ -107,6 +109,7 @@ pub(crate) async fn serve_web(
     let share = Arc::new(WebShare {
         content,
         upload_dir,
+        upload_sessions: upload::sessions(),
         web_token,
         rate_limiter,
     });
@@ -135,12 +138,14 @@ pub(crate) async fn serve_web_listener(
     let (download_done_tx, mut download_done_rx) = mpsc::unbounded_channel();
     let download_done_tx =
         (lifetime == WebServeLifetime::OneSuccessfulDownload).then_some(download_done_tx);
+    let mut cleanup_tick = time::interval(Duration::from_secs(60));
 
     loop {
         tokio::select! {
             biased;
             _ = tokio::signal::ctrl_c() => break,
             Some(()) = download_done_rx.recv(), if download_done_tx.is_some() => break,
+            _ = cleanup_tick.tick() => upload::cleanup_expired(&share.upload_sessions).await,
             accepted = listener.accept() => {
                 let (stream, _) = accepted.context("accept web connection")?;
                 let share = Arc::clone(&share);
@@ -159,6 +164,7 @@ pub(crate) async fn serve_web_listener(
             }
         }
     }
+    upload::cleanup_all(&share.upload_sessions).await;
     Ok(())
 }
 
@@ -614,6 +620,18 @@ pub(crate) async fn serve_web_connection(
                 }
             }
         },
+        "HEAD" if path.starts_with("upload?name=") && path.contains("&upload=") => {
+            match &share.upload_dir {
+                Some(_) => {
+                    upload::session_head(&mut stream, path, &share.upload_sessions).await?;
+                    WebConnectionOutcome::Handled
+                }
+                None => {
+                    write_web_error(&mut stream, "404 Not Found", "not found").await?;
+                    WebConnectionOutcome::Handled
+                }
+            }
+        }
         "HEAD" => match &share.content {
             WebContent::Directory { root } => {
                 directory::write_directory(
@@ -635,16 +653,10 @@ pub(crate) async fn serve_web_connection(
                 WebConnectionOutcome::Handled
             }
         },
-        "POST" if path.starts_with("upload?name=") => match &share.upload_dir {
+        "POST" if path.starts_with("upload/init?") => match &share.upload_dir {
             Some(upload_dir) => {
-                upload::write_upload(
-                    &mut stream,
-                    upload_dir,
-                    path,
-                    request.content_length,
-                    &request.body,
-                )
-                .await?;
+                upload::create_session(&mut stream, upload_dir, path, &share.upload_sessions)
+                    .await?;
                 WebConnectionOutcome::Handled
             }
             None => {
@@ -652,6 +664,46 @@ pub(crate) async fn serve_web_connection(
                 WebConnectionOutcome::Handled
             }
         },
+        "PATCH" if path.starts_with("upload?name=") && path.contains("&upload=") => {
+            match &share.upload_dir {
+                Some(upload_dir) => {
+                    upload::write_upload_chunk(
+                        &mut stream,
+                        upload_dir,
+                        path,
+                        request.content_length,
+                        request.header("content-range"),
+                        &request.body,
+                        &share.upload_sessions,
+                    )
+                    .await?;
+                    WebConnectionOutcome::Handled
+                }
+                None => {
+                    write_web_error(&mut stream, "404 Not Found", "not found").await?;
+                    WebConnectionOutcome::Handled
+                }
+            }
+        }
+        "POST" if path.starts_with("upload?name=") && !path.contains("&upload=") => {
+            match &share.upload_dir {
+                Some(upload_dir) => {
+                    upload::write_upload(
+                        &mut stream,
+                        upload_dir,
+                        path,
+                        request.content_length,
+                        &request.body,
+                    )
+                    .await?;
+                    WebConnectionOutcome::Handled
+                }
+                None => {
+                    write_web_error(&mut stream, "404 Not Found", "not found").await?;
+                    WebConnectionOutcome::Handled
+                }
+            }
+        }
         "POST" => {
             write_web_error(&mut stream, "404 Not Found", "not found").await?;
             WebConnectionOutcome::Handled
@@ -758,7 +810,9 @@ async fn write_web_page(
     upload_enabled: bool,
 ) -> Result<()> {
     let name = html_escape(download_name);
-    let upload_controls = upload_enabled.then_some("<div class=\"upload\"><input id=\"upload\" type=\"file\" multiple aria-label=\"Upload files\"><button id=\"upload-button\" type=\"button\">Upload</button><output id=\"upload-status\" aria-live=\"polite\"></output></div><script>const input=document.getElementById('upload');const button=document.getElementById('upload-button');const status=document.getElementById('upload-status');button.addEventListener('click',async()=>{const files=[...input.files];if(!files.length)return;button.disabled=true;status.textContent='';for(const file of files){const row=document.createElement('div');row.textContent=file.name;status.append(row);try{const response=await fetch('upload?name='+encodeURIComponent(file.name),{method:'POST',body:file});const text=await response.text();row.textContent=response.ok?text:file.name+': '+text;}catch(error){row.textContent=file.name+': '+error;}}button.disabled=false;input.value='';});</script>").unwrap_or_default();
+    let upload_controls = upload_enabled
+        .then(upload::html_controls)
+        .unwrap_or_default();
     let body = format!(
         "<!doctype html><meta charset=\"utf-8\"><meta name=\"viewport\" content=\"width=device-width, initial-scale=1\"><title>{name}</title><style>body{{margin:0;background:#f5f5f5;color:#171717;font-family:system-ui,-apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif}}main{{box-sizing:border-box;width:min(100%,32rem);margin:0 auto;padding:2rem 1.25rem 2.5rem;text-align:center}}svg{{display:block;width:min(72vw,17.5rem);height:auto;margin:0 auto 1.5rem;background:#fff}}h1{{margin:0;overflow-wrap:anywhere;font-size:1.5rem;line-height:1.3}}.meta{{margin:0.75rem 0 1.5rem;color:#555;font-size:1rem}}a,button{{box-sizing:border-box;display:block;width:100%;min-height:3rem;padding:0.75rem 1rem;border:0;border-radius:0.25rem;background:#1769aa;color:#fff;font:inherit;font-weight:600;line-height:1.5;text-align:center;text-decoration:none}}button:disabled{{opacity:.6}}.upload{{display:grid;gap:.75rem;margin-top:1.5rem;padding-top:1.5rem;border-top:1px solid #ccc;text-align:left}}input{{box-sizing:border-box;width:100%;min-height:3rem;padding:.625rem;border:1px solid #999;border-radius:.25rem;background:#fff;color:#171717;font:inherit}}output{{display:grid;gap:.375rem;overflow-wrap:anywhere;color:#555;font-size:.875rem;line-height:1.4}}@media (max-width:30rem){{main{{padding:1.5rem 1rem 2rem}}svg{{width:min(82vw,17.5rem);margin-bottom:1.25rem}}h1{{font-size:1.25rem}}.meta{{margin:0.625rem 0 1.25rem}}}}</style><main>{}<h1>{name}</h1><p class=\"meta\">{}</p><a href=\"download\">Download</a>{upload_controls}</main>",
         download_qr_svg,

@@ -234,7 +234,7 @@ async fn web_directory_page_body(
     body.push_str(&html_escape(&title));
     body.push_str("</h1>");
     if upload_enabled {
-        body.push_str(web_upload_controls());
+        body.push_str(crate::web::upload::html_controls());
     }
     body.push_str("<hr><pre>Name                             Last modified       Size\n----------------------------------------------------------------\n");
     body.push_str(&rows);
@@ -267,10 +267,6 @@ pub(crate) fn web_directory_href(segments: &[String], is_dir: bool) -> String {
         href.push('/');
     }
     href
-}
-
-fn web_upload_controls() -> &'static str {
-    "<section class=\"upload\"><input id=\"upload\" type=\"file\" multiple aria-label=\"Upload files\"><button id=\"upload-button\" type=\"button\">Upload</button><output id=\"upload-status\" aria-live=\"polite\"></output></section><script>const input=document.getElementById('upload');const button=document.getElementById('upload-button');const status=document.getElementById('upload-status');button.addEventListener('click',async()=>{const files=[...input.files];if(!files.length)return;button.disabled=true;status.textContent='';for(const file of files){const row=document.createElement('div');row.textContent=file.name;status.append(row);try{const response=await fetch('upload?name='+encodeURIComponent(file.name),{method:'POST',body:file});const text=await response.text();row.textContent=response.ok?text:file.name+': '+text;}catch(error){row.textContent=file.name+': '+error;}}button.disabled=false;input.value='';});</script>"
 }
 
 async fn write_web_file(

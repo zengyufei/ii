@@ -39,6 +39,7 @@ pub async fn run_cli() -> Result<()> {
         Command::Queue(args) => service::queue(args).await,
         Command::Web(args) => service::web(args).await,
         Command::Dav(args) => service::dav(args).await,
+        Command::Socks5(args) => service::socks5(args).await,
         Command::Webrtc(args) => service::webrtc(args).await,
         Command::Tunnel(args) => service::tunnel(args).await,
         Command::Recv(args) => service::recv(args).await,

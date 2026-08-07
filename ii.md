@@ -4,7 +4,7 @@
 
 ## 一句话
 
-`ii send` 发，`ii recv` 收，`ii web` 开局域网目录，`ii dav` 开 WebDAV，`ii discover` 找本地服务，`ii webrtc` 开浏览器直传，`ii tunnel` 转发 TCP，`ii relay` 管中继，`ii doctor` 查问题，`ii version` 看版本。
+`ii send` 发，`ii recv` 收，`ii web` 开局域网目录，`ii dav` 开 WebDAV，`ii discover` 找本地服务，`ii webrtc` 开浏览器直传，`ii tunnel` 转发 TCP，`ii socks5` 开普通代理，`ii relay` 管中继，`ii doctor` 查问题，`ii version` 看版本。
 
 ## 命令总览
 
@@ -15,6 +15,7 @@ ii watch <目录> [--interval <duration>] [--stabilize <duration>] [发送选项
 ii queue <path...> [--after <duration>|--every <duration>] [发送选项]
 ii web [<目录>] [--port <port>] [--bind <ip>] [--token [<value>]] [--upload] [--path <目录>] [--once]
 ii dav [<目录>] [--port <port>] [--bind <ip>] [--token [<value>]] [--read-only] [--username <username> --password <password>] [--tls [--domain <name>] [--cert <path> --key <path>]]
+ii socks5 [--port <port>] [--bind <ip>] [--username <user> --password <pass>]
 ii webrtc [--port <port>] [--bind <ip>] [--token [<value>]]
 ii tunnel -s <target-host:port> [--relay <url> [-k]]
 ii tunnel -c <ticket> [--listen <ip:port>]
@@ -25,7 +26,7 @@ ii doctor [--nat]
 ii version
 ```
 
-`ii help` 显示命令总览；`ii help send`、`ii help watch`、`ii help queue`、`ii help web`、`ii help dav`、`ii help webrtc`、`ii help tunnel`、`ii help recv`、`ii help relay`、`ii help discover`、`ii help doctor`、`ii help version` 显示对应命令帮助，内容与 `<command> --help` 相同。
+`ii help` 显示命令总览；`ii help send`、`ii help watch`、`ii help queue`、`ii help web`、`ii help dav`、`ii help socks5`、`ii help webrtc`、`ii help tunnel`、`ii help recv`、`ii help relay`、`ii help discover`、`ii help doctor`、`ii help version` 显示对应命令帮助，内容与 `<command> --help` 相同。
 
 ## 核心规则
 
@@ -98,7 +99,7 @@ tar czf - .\project | ii send --name project.tar.gz
 : 仅和 `--web` 同用。裸 `--token` 自动生成 32 字符路径令牌，并把真实 URL 打印到终端；`--token <value>` 或 `--token=<value>` 使用指定令牌。令牌会把网页、下载和已启用的上传 URL 固定到 `/<value>/` 路径下；遗漏或写错路径会返回 `404`。显式 `value` 必须为 16 到 128 个 ASCII 字母、数字、`-` 或 `_`。不提供 `--token` 时仍使用原来的无令牌 URL。
 
 `--upload`
-: 仅和 `--web` 同用，显示网页多文件上传控件并开放上传接口。默认上传目录是启动命令当前目录的 `./ii/`，不支持上传目录。
+: 仅和 `--web` 同用，显示网页多文件上传控件并开放上传接口。默认上传目录是启动命令当前目录的 `./ii/`，不支持上传目录。浏览器按 1 MiB 分块流式写入；断网或刷新后重新选择同一文件会继续未完成上传。
 
 `--path <dir>`
 : 仅和 `--web --upload` 同用，指定网页上传文件直接写入的目录。相对路径以启动命令当前目录为基准；目录在首次上传时创建。不提供时仍写入当前目录的 `./ii/`。未提供 `--upload` 时本参数会被忽略。`-p` 仍是 FTP/SFTP/WebDAV 的便携 ticket 参数。
@@ -134,8 +135,8 @@ tar czf - .\project | ii send --name project.tar.gz
 : 只走局域网优先路径，不走公网发现，不走公网 relay。
 
 `--relay <url>`
-: 使用 HTTP 或 HTTPS relay-only 模式，URL 必须是 `http://主机[:端口]` 或 `https://主机[:端口]`。
-  发送端和接收端都只通过该 relay 传输，不尝试 UDP、局域网发现或点对点直连。
+: 使用 HTTP 或 HTTPS relay-only 模式，URL 必须是 `http://主机[:端口]` 或 `https://主机[:端口]`。可重复指定多个显式 relay；两个及以上时发送端先探测可达性和延迟，选择最快可达节点。
+  发送端和接收端都只通过选中的 relay 传输，不尝试 UDP、局域网发现或点对点直连。
   HTTPS 默认按系统证书链校验，适合 `ii relay --tls --cert --key` 的手工证书模式。
 
 `-k`
@@ -257,7 +258,7 @@ ii web .\shared
 ii web .\shared --port 8080 --token A1b2C3d4E5f6G7h8 --upload --path .\uploads
 ```
 
-`ii web` 不带路径时服务启动命令当前目录；带路径时必须是已有目录，文件路径会报错。网页默认提供 nginx 风格的递归目录浏览：目录可继续进入、`../` 返回父目录、每项显示名称、修改时间和大小；普通文件直接响应，不强制下载。传入 `--upload` 后网页顶部才显示多文件上传控件，不支持上传目录。
+`ii web` 不带路径时服务启动命令当前目录；带路径时必须是已有目录，文件路径会报错。网页默认提供 nginx 风格的递归目录浏览：目录可继续进入、`../` 返回父目录、每项显示名称、修改时间和大小；普通文件直接响应，不强制下载。传入 `--upload` 后网页顶部才显示多文件上传控件，不支持上传目录；浏览器按 1 MiB 分块上传，刷新或断网后重新选择同一文件即可继续。
 
 命令行会在主 IPv4 LAN URL 上方打印根页二维码，并在 `other:` 下打印其他物理和虚拟网卡 URL；网页不显示二维码。`--bind <ip>` 可固定 IPv4 或 IPv6 listener；显式 bind 只打印该地址。按 `Ctrl+C` 关闭服务。
 
@@ -279,6 +280,18 @@ ii dav .\shared --port 8443 --username alice --password secret --tls --domain da
 `--username <username>` 与 `--password <password>` 必须成对提供，启用所有 DAV 方法的 HTTP Basic Auth。用户名不能为空，且不能包含 `:`、CR 或 LF；密码不能为空，且不能包含 CR 或 LF。`--password` 会进入 shell 历史和进程列表。
 
 `--tls` 开启 HTTPS。没有 `--cert` 与 `--key` 时，`ii` 仅为当前进程生成自签证书；客户端必须手动信任。`--domain` 指定证书 DNS 名称和输出 URL；只允许与 `--tls` 同用。已有 PEM 完整证书链和私钥时，成对提供 `--cert`、`--key`；它们也要求 `--tls`。对公网提供服务时必须使用 TLS：可由 `ii dav --tls` 直接终止，或由 HTTPS 反向代理终止并把 `ii dav` 绑定到 `127.0.0.1`。明文 HTTP 下 Basic Auth 凭据可被窃听。
+
+## `ii socks5`
+
+```powershell
+ii socks5
+ii socks5 --port 1080
+ii socks5 --bind 192.168.1.20 --username alice --password secret
+```
+
+`ii socks5` 是普通 SOCKS5 网络代理，不经过 Iroh、ticket 或 relay。默认监听 `0.0.0.0` 的随机端口，终端打印实际监听地址；`--port <port>` 固定端口，`--bind <ip>` 指定 IPv4 或 IPv6 监听地址。
+
+支持 SOCKS5 `CONNECT`、`UDP ASSOCIATE`、`BIND`，以及 IPv4、IPv6 和域名目标。域名由代理端解析。没有认证参数时使用 SOCKS5 无认证方式；`--username <user>` 和 `--password <pass>` 必须成对提供，提供后只接受 RFC 1929 用户名密码认证。
 
 ## `ii discover`
 
@@ -327,7 +340,7 @@ ii tunnel -s 192.168.1.10:5000 --relay http://公网IP:8443
 
 `--relay <url>` 可为 `http://主机[:端口]` 或 `https://主机[:端口]`，使本次 tunnel 强制走该 relay；`-k` 仅和 HTTPS `-s --relay` 同用，接受自签 relay。ticket 会把 relay URL 和自签信任策略带给 B，B 不需要再次配置。relay 只转发加密 Iroh 流量，不会把目标 TCP 端口直接暴露到公网。
 
-ticket 内有一次随机访问密钥。持有 ticket 的设备可以接入，直到 A 按 `Ctrl+C` 停止 tunnel；不要泄露 ticket。首版不支持 UDP、SOCKS、反向 tunnel 或后台守护。
+ticket 内有一次随机访问密钥。持有 ticket 的设备可以接入，直到 A 按 `Ctrl+C` 停止 tunnel；不要泄露 ticket。tunnel 本身不支持 UDP、SOCKS 或反向 tunnel；普通 SOCKS5 代理使用独立的 `ii socks5`。
 
 ## `ii recv`
 
@@ -384,7 +397,7 @@ ii recv ii1k7v...x9a --local --trace
 : 只走局域网优先路径，不碰公网 relay。
 
 `--trace`
-: 输出接收过程的分段耗时、地址统计、写入字节数和平均速度，便于排查为什么慢。
+: 输出接收过程的分段耗时、地址统计、最终选中的 LAN/直连/relay 路径、RTT、写入字节数和平均速度，便于排查为什么慢。
 
 `--checksum md5|sha256`
 : 接收完成后计算并输出实际文件或目录 tar 流；不与发送端自动比对，且不能与 `--stdout` 同用。
@@ -455,8 +468,9 @@ ticket 里可以带足够完成连接、恢复传输和重复文件判定的最�
 
 `--relay` 的意思是：
 
-- 强制指定某个 relay
-- 不按默认 relay 列表自动挑
+- 指定一个 relay 时强制使用它
+- 重复指定多个 relay 时只在这些显式 relay 中探测并选择最快可达节点
+- 不影响默认 n0 relay 的自动路径选择
 
 ### `--no-relay`
 

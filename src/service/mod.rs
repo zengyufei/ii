@@ -1,6 +1,6 @@
 use crate::command::{
-    DavArgs, DiscoverArgs, QueueArgs, RecvArgs, SendArgs, TunnelArgs, WatchArgs, WebArgs,
-    WebrtcArgs,
+    DavArgs, DiscoverArgs, QueueArgs, RecvArgs, SendArgs, Socks5Args, TunnelArgs, WatchArgs,
+    WebArgs, WebrtcArgs,
 };
 use anyhow::Result;
 
@@ -9,6 +9,7 @@ mod discover;
 mod queue;
 mod recv;
 mod send;
+mod socks5;
 mod tunnel;
 mod watch;
 mod web;
@@ -63,6 +64,10 @@ pub async fn discover(args: DiscoverArgs) -> Result<()> {
 
 pub async fn dav(args: DavArgs) -> Result<()> {
     dav::run(args).await
+}
+
+pub async fn socks5(args: Socks5Args) -> Result<()> {
+    socks5::run(args).await
 }
 
 pub async fn recv_with_events(

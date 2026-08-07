@@ -39,6 +39,7 @@ pub enum Command {
     Queue(QueueArgs),
     Web(WebArgs),
     Dav(DavArgs),
+    Socks5(Socks5Args),
     Webrtc(WebrtcArgs),
     Tunnel(TunnelArgs),
     Recv(RecvArgs),
@@ -85,7 +86,7 @@ pub struct SendArgs {
     pub web_upload_dir: Option<PathBuf>,
     pub portable_webdav: bool,
     pub local: bool,
-    pub relay: Option<iroh::RelayUrl>,
+    pub relay: Vec<iroh::RelayUrl>,
     pub accept_self_signed_relay: bool,
     pub no_relay: bool,
 }
@@ -137,6 +138,14 @@ pub struct DavArgs {
     pub domain: Option<String>,
     pub cert: Option<PathBuf>,
     pub key: Option<PathBuf>,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct Socks5Args {
+    pub port: Option<u16>,
+    pub bind: Option<IpAddr>,
+    pub username: Option<String>,
+    pub password: Option<String>,
 }
 
 #[derive(Debug, Clone)]

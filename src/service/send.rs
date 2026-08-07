@@ -4,7 +4,10 @@ use crate::{
     storage,
     ticket::{FtpPortableCredentials, Ticket, WebDavPortableCredentials},
     transport::{
-        iroh::{FILE_ALPN, bind_endpoint, endpoint_policy_for_send, should_wait_online},
+        iroh::{
+            FILE_ALPN, RelayProbe, bind_endpoint, endpoint_policy_for_send, probe_relays,
+            should_wait_online,
+        },
         p2p::{ServeOutcome, serve_one_limited},
         progress::{RateLimiter, should_show_progress},
         source::Source,
@@ -18,6 +21,7 @@ use std::{
     path::PathBuf,
     process::{Command, Stdio},
     sync::Arc,
+    time::{Duration, Instant},
 };
 use tokio::task::JoinSet;
 
@@ -68,6 +72,69 @@ async fn report_checksum(args: &SendArgs, source: &Source) -> Result<()> {
         println!("checksum ({}): {}", algorithm.name(), value);
     }
     Ok(())
+}
+
+fn report_relay_probes(
+    args: &SendArgs,
+    probes: &[RelayProbe],
+    elapsed: Duration,
+    failure: Option<&str>,
+) {
+    if args.relay.len() < 2 {
+        return;
+    }
+    for relay in &args.relay {
+        let probe = probes.iter().find(|probe| probe.url == *relay);
+        if args.json {
+            match probe {
+                Some(probe) => crate::json::emit(
+                    "service",
+                    &[
+                        ("service", crate::json::Value::String("relay-probe")),
+                        ("relay", crate::json::Value::String(&relay.to_string())),
+                        ("status", crate::json::Value::String("reachable")),
+                        (
+                            "latency_ms",
+                            crate::json::Value::Number(probe.latency.as_millis() as u64),
+                        ),
+                        (
+                            "elapsed_ms",
+                            crate::json::Value::Number(elapsed.as_millis() as u64),
+                        ),
+                    ],
+                ),
+                None => crate::json::emit(
+                    "service",
+                    &[
+                        ("service", crate::json::Value::String("relay-probe")),
+                        ("relay", crate::json::Value::String(&relay.to_string())),
+                        ("status", crate::json::Value::String("unreachable")),
+                        (
+                            "reason",
+                            crate::json::Value::String(failure.unwrap_or("no net-report response")),
+                        ),
+                        (
+                            "elapsed_ms",
+                            crate::json::Value::Number(elapsed.as_millis() as u64),
+                        ),
+                    ],
+                ),
+            }
+        } else if let Some(probe) = probe {
+            eprintln!(
+                "ii send: relay {} reachable in {} ms (probe {} ms)",
+                relay,
+                probe.latency.as_millis(),
+                elapsed.as_millis()
+            );
+        } else {
+            eprintln!(
+                "ii send: relay {relay} unreachable: {} (probe {} ms)",
+                failure.unwrap_or("no net-report response"),
+                elapsed.as_millis()
+            );
+        }
+    }
 }
 
 struct QueuedConnection {
@@ -183,15 +250,52 @@ where
 
     let source = source_from_args(&args).await?;
     let rate_limiter = args.rate.map(RateLimiter::new).map(Arc::new);
-    let endpoint =
-        bind_endpoint(endpoint_policy_for_send(&args)?, FILE_ALPN, args.quic_port).await?;
+    let probe_started = Instant::now();
+    let relay_probes = match probe_relays(&args.relay, args.accept_self_signed_relay).await {
+        Ok(probes) => probes,
+        Err(err) => {
+            let message = format!("{err:#}");
+            report_relay_probes(&args, &[], probe_started.elapsed(), Some(&message));
+            return Err(err);
+        }
+    };
+    report_relay_probes(&args, &relay_probes, probe_started.elapsed(), None);
+    let selected_relay = relay_probes
+        .first()
+        .map(|probe| probe.url.clone())
+        .or_else(|| args.relay.first().cloned());
+    if let Some(relay) = &selected_relay
+        && args.relay.len() > 1
+    {
+        if args.json {
+            crate::json::emit(
+                "service",
+                &[
+                    ("service", crate::json::Value::String("relay-selected")),
+                    ("relay", crate::json::Value::String(&relay.to_string())),
+                    (
+                        "probe_elapsed_ms",
+                        crate::json::Value::Number(probe_started.elapsed().as_millis() as u64),
+                    ),
+                ],
+            );
+        } else {
+            eprintln!("ii send: selected relay {relay}");
+        }
+    }
+    let endpoint = bind_endpoint(
+        endpoint_policy_for_send(&args, selected_relay.as_ref())?,
+        FILE_ALPN,
+        args.quic_port,
+    )
+    .await?;
 
     if should_wait_online(&args) {
         endpoint.online().await;
     }
 
     let endpoint_addr = endpoint.addr();
-    let ticket = match &args.relay {
+    let ticket = match &selected_relay {
         Some(relay_url) if args.accept_self_signed_relay => Ticket::relay_only(
             iroh::EndpointAddr::from_parts(
                 endpoint_addr.id,

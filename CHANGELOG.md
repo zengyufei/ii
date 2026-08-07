@@ -11,6 +11,10 @@
 - 新增进程内 FIFO `ii queue` 与轮询式 `ii watch`，支持延迟、定时、稳定检测和现有发送后端。
 - `ii send`、`ii recv`、`ii watch`、`ii queue` 支持 `--quic-port` 固定 P2P Iroh UDP 端口；`ii doctor --nat` 输出短生命周期的 UDP、NAT 和 relay 探测结果。
 - `ii web --once` 在第一次完整普通文件下载后关闭；目录页、HEAD、Range、上传和失败请求不会触发关闭。
+- `ii recv --trace` 输出 Iroh 实际选中的 LAN、直连或 relay 路径及 RTT。
+- `ii send`、`ii watch`、`ii queue` 的 `--relay` 可重复指定；多个显式 relay 会按探测到的可达性和延迟择优，默认 n0 relay 行为不变。
+- `ii send --web` 与 `ii web --upload` 支持浏览器分块上传续传，断网或刷新后重新选择同一文件即可继续。
+- 新增 `ii socks5` 普通 SOCKS5 代理，支持 `CONNECT`、`UDP ASSOCIATE`、`BIND`、IPv4、IPv6、域名目标和可选用户名密码认证。
 
 ## 0.3.4 - 2026-08-06
 

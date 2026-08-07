@@ -8,6 +8,7 @@ Usage:
   ii queue <path...> [--after <duration>|--every <duration>] [options]
   ii web [directory] [--port <port>] [--bind <ip>] [--token [value]] [--upload] [--path <dir>] [--once]
   ii dav [directory] [--port <port>] [--bind <ip>] [--token [value]] [--read-only] [--username <username> --password <password>] [--tls [--domain <name>] [--cert <path> --key <path>]]
+  ii socks5 [--port <port>] [--bind <ip>] [--username <user> --password <pass>]
   ii webrtc [--port <port>] [--bind <ip>] [--token [value]]
   ii tunnel (-s <target-host:port> | -c <ticket>) [--listen <ip:port>] [--relay <url> [-k]]
   ii recv [options] <ticket>
@@ -171,6 +172,17 @@ Options:
   --domain <name>        TLS DNS name used for the advertised URL and self-signed certificate
   --cert <path>          PEM certificate chain; replaces the generated certificate
   --key <path>           PEM private key; requires --cert
+";
+
+pub(crate) const SOCKS5_HELP: &str = "\
+Usage:
+  ii socks5 [--port <port>] [--bind <ip>] [--username <user> --password <pass>]
+
+Options:
+  --port <port>              Listener port; defaults to a random free port
+  --bind <ip>                Listener IPv4 or IPv6 address; defaults to 0.0.0.0
+  --username <user>          Enable SOCKS5 username/password authentication
+  --password <pass>          SOCKS5 password; requires --username
 ";
 
 pub(crate) const DISCOVER_HELP: &str = "\

@@ -7,8 +7,9 @@ use crate::{
     },
 };
 use anyhow::{Context, Result, bail};
-use iroh::Endpoint;
+use iroh::{Endpoint, TransportAddr};
 use std::{
+    net::IpAddr,
     path::{Path, PathBuf},
     sync::Arc,
     time::{Duration, Instant},
@@ -173,19 +174,23 @@ pub(crate) async fn connect_to_peer(
 ) -> Result<iroh::endpoint::Connection> {
     if local_only {
         trace.info("connecting to sender");
-        return endpoint
+        let conn = endpoint
             .connect(endpoint_addr, alpn)
             .await
-            .context("connect to sender");
+            .context("connect to sender")?;
+        trace_connection_paths(&conn, trace, "direct");
+        return Ok(conn);
     }
 
     let relay_only = relay_only_addr(&endpoint_addr);
     if relay_only.is_none() {
         trace.info("connecting to sender");
-        return endpoint
+        let conn = endpoint
             .connect(endpoint_addr, alpn)
             .await
-            .context("connect to sender");
+            .context("connect to sender")?;
+        trace_connection_paths(&conn, trace, "direct-or-relay");
+        return Ok(conn);
     }
 
     trace.info(format_args!(
@@ -198,16 +203,62 @@ pub(crate) async fn connect_to_peer(
     )
     .await
     {
-        Ok(result) => result.context("connect to sender"),
+        Ok(result) => {
+            let conn = result.context("connect to sender")?;
+            trace_connection_paths(&conn, trace, "direct-or-relay");
+            Ok(conn)
+        }
         Err(_) => {
             let relay_only = relay_only.expect("checked above");
             trace.info("full address connect timed out; retrying relay-only");
             trace_endpoint_addr("relay-only endpoints", &relay_only, trace);
-            endpoint
+            let conn = endpoint
                 .connect(relay_only, alpn)
                 .await
-                .context("connect to sender via relay")
+                .context("connect to sender via relay")?;
+            trace_connection_paths(&conn, trace, "relay-fallback");
+            Ok(conn)
         }
+    }
+}
+
+pub(crate) fn trace_connection_paths(
+    conn: &iroh::endpoint::Connection,
+    trace: &RecvTrace,
+    phase: &str,
+) {
+    if !trace.enabled {
+        return;
+    }
+    let mut paths = Vec::new();
+    for path in conn.paths().iter() {
+        let remote = path.remote_addr();
+        let kind = match remote {
+            TransportAddr::Ip(addr) => format!("{}:{addr}", ip_scope(addr.ip())),
+            TransportAddr::Relay(url) => format!("relay:{url}"),
+            other => other.to_string(),
+        };
+        let selected = if path.is_selected() { " selected" } else { "" };
+        paths.push(format!(
+            "{kind} rtt={}{}",
+            fmt_duration(path.rtt()),
+            selected
+        ));
+    }
+    if paths.is_empty() {
+        trace.info(format_args!("path ({phase}): none"));
+    } else {
+        trace.info(format_args!("path ({phase}): {}", paths.join(", ")));
+    }
+}
+
+fn ip_scope(ip: IpAddr) -> &'static str {
+    match ip {
+        IpAddr::V4(ip) if ip.is_loopback() => "loopback",
+        IpAddr::V4(ip) if ip.is_private() || ip.is_link_local() => "lan",
+        IpAddr::V6(ip) if ip.is_loopback() => "loopback",
+        IpAddr::V6(ip) if ip.is_unicast_link_local() => "lan",
+        _ => "direct",
     }
 }
 

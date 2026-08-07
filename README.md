@@ -26,6 +26,53 @@
 - 可选通用 S3、Cloudflare R2、Azure Blob、WebDAV、FTP、SFTP 中转；传完可删除中转对象。
 - 另有局域网网页、WebDAV、浏览器直传、TCP 隧道和自建 relay。
 
+## 典型使用场景
+
+### `ii web`
+
+- 临时局域网文件站：当前目录一键公开浏览、下载和上传。
+- 手机相册导入：电脑开 `ii web`，手机扫码上传照片或视频。
+- 会议资料分发：用二维码让参会者直接下载。
+- 本地静态资源站：给电视、平板和开发设备访问安装包、视频或网页文件。
+- 临时文件收集箱：多人向指定目录上传材料。
+- 离线局域网环境的文件门户：不依赖云盘、账号或外网。
+
+### `ii dav`
+
+- 把任意目录挂载为网络磁盘，可由 Windows Explorer、macOS Finder 或 Linux 文件管理器直接访问。
+- 用手机文件管理器访问电脑目录，复制、移动、删除文件或创建目录。
+- 把旧电脑或小主机作为轻量 NAS，共享一个目录。
+- 让支持 WebDAV 的编辑器直接打开并保存远端文本或配置。
+- 作为跨设备素材盘，让平板、手机和电脑同时访问同一个工作目录。
+- 建立临时交付目录，客户或同事以网络盘方式取文件，不需要安装 `ii`。
+
+### `ii socks5`
+
+- 给浏览器、下载器和命令行工具提供普通 SOCKS5 出口。
+- 让缺少内置代理选项的软件配合支持 SOCKS5 的转发器，经另一台机器访问网络。
+- 让局域网设备借用一台具备网络、VPN 或特殊路由的电脑出口。
+- 调试代理兼容性，验证 `CONNECT`、UDP、域名解析和 IPv6 行为。
+- 给支持代理配置的游戏、媒体播放器或 IoT 设备提供代理地址。
+- 临时比较企业网络、VPN 和家庭网络下的 DNS 与连接路径。
+
+### `ii relay`
+
+- 自建 Iroh relay，作为 `ii send --relay` 的指定跨网转发路径。
+- 在内网、海外或特定地区部署 relay，避免完全依赖公共 relay。
+- 在网络受限环境中验证 Iroh 的连接和转发能力。
+
+### `ii tunnel`
+
+- 暴露本机 TCP 服务，例如本地开发站、SSH、数据库或游戏服务器。
+- 让没有公网 IP 的机器被远端访问。
+- 用于临时远程协助，无需配置路由器端口转发。
+
+### `ii discover`
+
+- 扫描局域网内正在运行的 `ii` 服务。
+- 找到同网段的发送任务、目录站和 WebDAV 服务，不必手输 IP。
+- 在会议室、实验室或机房快速发现共享端点。
+
 ## 安装
 
 Linux x86_64 和 Apple Silicon macOS：
@@ -162,7 +209,7 @@ ii recv ii1k7v...x9a --stdout > project.tar.gz
 ii recv ii1k7v...x9a --json
 ```
 
-断网或传到一半失败后，重新执行同一条 `ii recv` 就会继续接收；如果目标文件已经完整且内容相同，会直接跳过；如果同名但内容不同，会覆盖。`ii send` 和 `ii recv` 都会显示传输进度、速率和完成耗时；`--trace` 输出连接诊断。`--stdout` 不能与 `--json` 同用。
+断网或传到一半失败后，重新执行同一条 `ii recv` 就会继续接收；如果目标文件已经完整且内容相同，会直接跳过；如果同名但内容不同，会覆盖。`ii send` 和 `ii recv` 都会显示传输进度、速率和完成耗时；`ii recv --trace` 输出建连阶段、最终直连或 relay 路径和 RTT。`--stdout` 不能与 `--json` 同用。
 
 `--checksum md5|sha256` 在接收完成后计算实际文件或目录 tar 流；不能与 `--stdout` 同用。`--quic-port` 只适用于 P2P ticket。
 
@@ -183,7 +230,7 @@ ii dav .\shared --read-only
 ii dav .\shared --port 8443 --username alice --password secret --tls --domain dav.example.com --cert D:\certs\fullchain.pem --key D:\certs\privkey.pem
 ```
 
-`ii send --web` 为单个文件或目录提供下载页。默认第一个完整 `/download` 响应写完后立即退出；加 `-t` 才持续服务到 `Ctrl+C`，并发下载时第一个完成会直接结束进程。访问下载页、上传和失败下载不会退出。`ii web` 显示 nginx 风格目录列表，省略目录时服务当前目录；`--upload` 才开放多文件上传，默认写入启动目录的 `./ii/`，`--path <dir>` 可改为指定目录。`ii dav` 直接读写所服务目录，不使用网页上传目录。
+`ii send --web` 为单个文件或目录提供下载页。默认第一个完整 `/download` 响应写完后立即退出；加 `-t` 才持续服务到 `Ctrl+C`，并发下载时第一个完成会直接结束进程。访问下载页、上传和失败下载不会退出。`ii web` 显示 nginx 风格目录列表，省略目录时服务当前目录；`--upload` 才开放多文件上传，默认写入启动目录的 `./ii/`，`--path <dir>` 可改为指定目录。网页上传按 1 MiB 分块写入，断网或刷新后重新选择同一文件会自动继续。`ii dav` 直接读写所服务目录，不使用网页上传目录。
 
 `ii dav --username <username> --password <password>` 启用 HTTP Basic Auth，两个参数必须同时提供。`--password` 会出现在 shell 历史和进程列表中，只适合你明确接受这一风险的场景。`--tls` 开启 HTTPS；未提供 `--cert` 与 `--key` 时生成仅当前进程有效的自签证书，客户端必须手动信任。公网请使用受信任 PEM 证书，或让 HTTPS 反向代理终止 TLS 并将 `ii dav` 绑定到 `127.0.0.1`。未启用 `--tls` 时，Basic Auth 凭据会以明文传输。
 
@@ -223,6 +270,15 @@ ii tunnel -c ii1k7v...x9a
 
 B 默认监听 `127.0.0.1:8080`，端口被占用时自动递增；`--listen 0.0.0.0:8022` 才会暴露给 B 的局域网。流量经 Iroh 端到端加密，ticket 持有者可访问目标直到 A 停止服务。完整用法见 [ii.md](ii.md)。
 
+### SOCKS5 代理
+
+```powershell
+ii socks5
+ii socks5 --port 1080 --username alice --password secret
+```
+
+`ii socks5` 是独立的普通网络代理，默认监听 `0.0.0.0` 的随机端口并打印实际地址。支持 SOCKS5 `CONNECT`、`UDP ASSOCIATE`、`BIND`、IPv4、IPv6 和域名目标；不经过 Iroh、ticket 或 relay。提供 `--username` 与 `--password` 时启用 SOCKS5 用户名密码认证，两个参数必须成对出现。
+
 ### 自建 Relay
 
 普通传文件不需要自建 relay。需要固定中继入口时：
@@ -241,7 +297,7 @@ ii relay --tls --domain relay.example.com --port 8443 --cert D:\certs\fullchain.
 ii send .\video.mp4 --relay https://relay.example.com:8443
 ```
 
-省略 `--port` 时随机监听。终端打印实际可用的 IPv4 URL；`0.0.0.0` 只用于监听，云服务器公网 IP 可能需要从控制台取得。`-k` 仅用于自签 HTTPS；指定 HTTP 或 HTTPS relay 后，传输强制经过该 relay。完整 TLS、NAT 与安全边界见 [ii.md](ii.md)。
+省略 `--port` 时随机监听。终端打印实际可用的 IPv4 URL；`0.0.0.0` 只用于监听，云服务器公网 IP 可能需要从控制台取得。`-k` 仅用于自签 HTTPS；指定 HTTP 或 HTTPS relay 后，传输强制经过该 relay。重复指定 `--relay` 时，`ii send` 探测各显式 relay 的可达性和延迟，选取最快可达节点；不影响默认 n0 relay。完整 TLS、NAT 与安全边界见 [ii.md](ii.md)。
 
 ## 图形界面
 

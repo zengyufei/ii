@@ -1,6 +1,6 @@
 use crate::command::SendArgs;
-use anyhow::{Context, Result};
-use iroh::{Endpoint, RelayMap, RelayMode, SecretKey, endpoint::presets};
+use anyhow::{Context, Result, bail};
+use iroh::{Endpoint, RelayMap, RelayMode, SecretKey, Watcher as _, endpoint::presets};
 use iroh_relay::tls::CaTlsConfig;
 use rustls::{
     DigitallySignedStruct, SignatureScheme,
@@ -8,8 +8,8 @@ use rustls::{
     crypto::CryptoProvider,
     pki_types::{CertificateDer, ServerName, UnixTime},
 };
-use std::net::SocketAddr;
 use std::sync::Arc;
+use std::{net::SocketAddr, time::Duration};
 
 pub(crate) const FILE_ALPN: &[u8] = b"ii/file/1";
 pub(crate) const TUNNEL_ALPN: &[u8] = b"ii/tunnel/1";
@@ -19,6 +19,10 @@ pub(crate) enum EndpointPolicy {
     Standard(RelayMode),
     SelfSignedRelayOnly(iroh::RelayUrl),
     TrustedRelayOnly(iroh::RelayUrl),
+    CustomRelayOnly {
+        urls: Vec<iroh::RelayUrl>,
+        self_signed: bool,
+    },
 }
 
 impl EndpointPolicy {
@@ -32,18 +36,28 @@ impl EndpointPolicy {
             Self::SelfSignedRelayOnly(url) | Self::TrustedRelayOnly(url) => {
                 RelayMode::Custom(RelayMap::from(url.clone()))
             }
+            Self::CustomRelayOnly { urls, .. } => {
+                RelayMode::Custom(RelayMap::from_iter(urls.clone()))
+            }
         }
     }
 
     fn is_relay_only(&self) -> bool {
         matches!(
             self,
-            Self::SelfSignedRelayOnly(_) | Self::TrustedRelayOnly(_)
+            Self::SelfSignedRelayOnly(_) | Self::TrustedRelayOnly(_) | Self::CustomRelayOnly { .. }
         )
     }
 
     fn accepts_self_signed_relay(&self) -> bool {
         matches!(self, Self::SelfSignedRelayOnly(_))
+            || matches!(
+                self,
+                Self::CustomRelayOnly {
+                    self_signed: true,
+                    ..
+                }
+            )
     }
 }
 
@@ -119,11 +133,14 @@ pub(crate) async fn bind_endpoint(
     builder.bind().await.context("bind endpoint")
 }
 
-pub(crate) fn endpoint_policy_for_send(args: &SendArgs) -> Result<EndpointPolicy> {
+pub(crate) fn endpoint_policy_for_send(
+    args: &SendArgs,
+    selected_relay: Option<&iroh::RelayUrl>,
+) -> Result<EndpointPolicy> {
     if args.local || args.no_relay {
         return Ok(EndpointPolicy::standard(RelayMode::Disabled));
     }
-    if let Some(url) = &args.relay {
+    if let Some(url) = selected_relay.or_else(|| args.relay.first()) {
         return Ok(if args.accept_self_signed_relay {
             EndpointPolicy::SelfSignedRelayOnly(url.clone())
         } else {
@@ -131,6 +148,57 @@ pub(crate) fn endpoint_policy_for_send(args: &SendArgs) -> Result<EndpointPolicy
         });
     }
     Ok(EndpointPolicy::standard(RelayMode::Default))
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct RelayProbe {
+    pub(crate) url: iroh::RelayUrl,
+    pub(crate) latency: Duration,
+}
+
+pub(crate) async fn probe_relays(
+    urls: &[iroh::RelayUrl],
+    self_signed: bool,
+) -> Result<Vec<RelayProbe>> {
+    if urls.len() < 2 {
+        return Ok(Vec::new());
+    }
+    let endpoint = bind_endpoint(
+        EndpointPolicy::CustomRelayOnly {
+            urls: urls.to_vec(),
+            self_signed,
+        },
+        FILE_ALPN,
+        None,
+    )
+    .await
+    .context("create relay probe endpoint")?;
+    let report = tokio::time::timeout(Duration::from_secs(5), endpoint.net_report().initialized())
+        .await
+        .ok();
+    endpoint.close().await;
+    let Some(report) = report else {
+        bail!("relay probe timed out")
+    };
+    let mut probes = urls
+        .iter()
+        .filter_map(|url| {
+            report
+                .relay_latency
+                .iter()
+                .filter(|(_, candidate, _)| *candidate == url)
+                .map(|(_, candidate, latency)| RelayProbe {
+                    url: candidate.clone(),
+                    latency,
+                })
+                .min_by_key(|probe| probe.latency)
+        })
+        .collect::<Vec<_>>();
+    probes.sort_by_key(|probe| probe.latency);
+    if probes.is_empty() {
+        bail!("all specified relays are unreachable")
+    }
+    Ok(probes)
 }
 
 pub(crate) fn should_wait_online(args: &SendArgs) -> bool {

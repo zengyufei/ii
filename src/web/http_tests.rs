@@ -26,6 +26,7 @@ async fn download_share(
             download_qr_svg: web_qr_svg("http://192.168.1.2:3456/download").unwrap(),
         },
         upload_dir,
+        upload_sessions: crate::web::upload::sessions(),
         web_token: None,
         rate_limiter: None,
     })
@@ -140,6 +141,7 @@ async fn directory_once_stops_only_after_a_full_file_get() {
             root: std::fs::canonicalize(&root).unwrap(),
         },
         upload_dir: None,
+        upload_sessions: crate::web::upload::sessions(),
         web_token: None,
         rate_limiter: None,
     });
@@ -196,6 +198,7 @@ async fn download_share_serves_page_download_and_token_routes() {
                 .unwrap(),
         },
         upload_dir: None,
+        upload_sessions: crate::web::upload::sessions(),
         web_token: Some(token.to_string()),
         rate_limiter: None,
     });

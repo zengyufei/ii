@@ -26,6 +26,53 @@
 - Use generic S3, Cloudflare R2, Azure Blob, WebDAV, FTP, or SFTP as optional backends, with cleanup after receiving.
 - It also provides LAN web sharing, WebDAV, browser transfer, TCP tunnels, and self-hosted relays.
 
+## Common Use Cases
+
+### `ii web`
+
+- Run a temporary LAN file site from the current directory for browsing, downloads, and uploads.
+- Import a phone photo library by starting `ii web` on a computer and uploading photos or videos after scanning its QR code.
+- Distribute meeting materials through a QR code for direct download.
+- Serve local static assets such as installers, videos, or web files to TVs, tablets, and development devices.
+- Collect files from several people into a chosen directory.
+- Provide a file portal on an offline LAN without cloud storage, accounts, or Internet access.
+
+### `ii dav`
+
+- Mount any directory as a network drive in Windows Explorer, macOS Finder, or a Linux file manager.
+- Access a computer directory from a phone file manager to copy, move, delete, or create files and folders.
+- Turn an old computer or small host into a lightweight NAS for one directory.
+- Open and save remote text or configuration files from WebDAV-capable editors.
+- Use one working directory as a shared asset drive for tablets, phones, and computers.
+- Provide a temporary delivery directory that clients or colleagues can access as a network drive without installing `ii`.
+
+### `ii socks5`
+
+- Provide a standard SOCKS5 proxy endpoint for browsers, downloaders, and command-line tools.
+- Route software without built-in proxy settings through another machine's network connection with a SOCKS5-capable proxyifier.
+- Let LAN devices use a computer with Internet access, a VPN, or special routes as their proxy exit.
+- Test proxy compatibility for `CONNECT`, UDP, DNS resolution, and IPv6.
+- Provide a configurable proxy address to games, media players, or IoT devices that support one.
+- Compare DNS and connection paths across enterprise, VPN, and home networks.
+
+### `ii relay`
+
+- Self-host an Iroh relay as the explicit cross-network forwarding path for `ii send --relay`.
+- Deploy relays on an intranet, overseas, or in a specific region instead of relying entirely on public relays.
+- Validate Iroh connection and forwarding behavior on restricted networks.
+
+### `ii tunnel`
+
+- Expose a local TCP service such as a development site, SSH server, database, or game server.
+- Make a machine without a public IP reachable remotely.
+- Provide temporary remote assistance without configuring router port forwarding.
+
+### `ii discover`
+
+- Scan for running `ii` services on the LAN.
+- Find same-subnet send jobs, directory sites, and WebDAV services without typing IP addresses.
+- Discover shared endpoints quickly in meeting rooms, labs, and server rooms.
+
 ## Install
 
 Linux x86_64 and Apple Silicon macOS:
@@ -162,7 +209,7 @@ ii recv ii1k7v...x9a --stdout > project.tar.gz
 ii recv ii1k7v...x9a --json
 ```
 
-If the network drops halfway, run the same `ii recv` command again and it continues receiving. If the target file already exists with the same content, it is skipped. If the name matches but the content differs, it is overwritten. `ii send` and `ii recv` show progress, speed, and elapsed time; `--trace` prints connection diagnostics. `--stdout` cannot be combined with `--json`.
+If the network drops halfway, run the same `ii recv` command again and it continues receiving. If the target file already exists with the same content, it is skipped. If the name matches but the content differs, it is overwritten. `ii send` and `ii recv` show progress, speed, and elapsed time; `ii recv --trace` prints connection stages, the final direct or relay path, and RTT. `--stdout` cannot be combined with `--json`.
 
 `--checksum md5|sha256` computes the received file or directory tar stream after completion and cannot be combined with `--stdout`. `--quic-port` applies only to P2P tickets.
 
@@ -183,7 +230,7 @@ ii dav .\shared --read-only
 ii dav .\shared --port 8443 --username alice --password secret --tls --domain dav.example.com --cert D:\certs\fullchain.pem --key D:\certs\privkey.pem
 ```
 
-`ii send --web` serves a download page for one file or folder. It exits after the first complete `/download` response by default; add `-t` to keep serving until `Ctrl+C`, and the first concurrent download to finish ends the process. Visiting the page, uploads, and failed downloads do not exit. `ii web` displays an nginx-style directory listing and serves the current directory when no directory is given. `--upload` enables multi-file uploads only; their default destination is `./ii/` under the startup directory, while `--path <dir>` selects another directory. `ii dav` reads and writes its served directory directly, not the web upload directory.
+`ii send --web` serves a download page for one file or folder. It exits after the first complete `/download` response by default; add `-t` to keep serving until `Ctrl+C`, and the first concurrent download to finish ends the process. Visiting the page, uploads, and failed downloads do not exit. `ii web` displays an nginx-style directory listing and serves the current directory when no directory is given. `--upload` enables multi-file uploads only; their default destination is `./ii/` under the startup directory, while `--path <dir>` selects another directory. Uploads are written in 1 MiB chunks; after a disconnect or refresh, selecting the same file resumes it. `ii dav` reads and writes its served directory directly, not the web upload directory.
 
 `ii dav --username <username> --password <password>` enables HTTP Basic Auth; both options are required together. `--password` is visible in shell history and process listings, so use it only where that is acceptable. `--tls` enables HTTPS. Without `--cert` and `--key`, ii generates a self-signed certificate valid only for the running process, which clients must explicitly trust. For public access, use a trusted PEM certificate or terminate HTTPS in a reverse proxy and bind `ii dav` to `127.0.0.1`. Without `--tls`, Basic Auth credentials travel in clear text.
 
@@ -223,6 +270,15 @@ ii tunnel -c ii1k7v...x9a
 
 B listens on `127.0.0.1:8080` by default and increments the port when it is occupied. Use `--listen 0.0.0.0:8022` only to expose B's listener to its LAN. Traffic is end-to-end encrypted by Iroh; a ticket holder can use the target until A stops the service. See [ii.md](ii.md) for the full protocol and relay options.
 
+### SOCKS5 Proxy
+
+```powershell
+ii socks5
+ii socks5 --port 1080 --username alice --password secret
+```
+
+`ii socks5` is a standalone ordinary network proxy. It listens on a random `0.0.0.0` port by default and prints the actual address. It supports SOCKS5 `CONNECT`, `UDP ASSOCIATE`, `BIND`, IPv4, IPv6, and domain targets. It does not use Iroh, tickets, or relays. Supplying `--username` and `--password` enables SOCKS5 username/password authentication; both options are required together.
+
 ### Self-hosted Relay
 
 You only need this for a fixed relay endpoint.
@@ -241,7 +297,7 @@ ii relay --tls --domain relay.example.com --port 8443 --cert D:\certs\fullchain.
 ii send .\video.mp4 --relay https://relay.example.com:8443
 ```
 
-Without `--port`, the relay chooses a free port. The terminal prints usable IPv4 URLs; `0.0.0.0` is bind-only, and a cloud public IP may need to come from the provider console. `-k` is only for self-signed HTTPS. An explicit HTTP or HTTPS relay forces traffic through that relay. See [ii.md](ii.md) for TLS, NAT, and security boundaries.
+Without `--port`, the relay chooses a free port. The terminal prints usable IPv4 URLs; `0.0.0.0` is bind-only, and a cloud public IP may need to come from the provider console. `-k` is only for self-signed HTTPS. An explicit HTTP or HTTPS relay forces traffic through that relay. Repeating `--relay` makes `ii send` probe the explicit relays and select the fastest reachable one; the default n0 relay behavior is unchanged. See [ii.md](ii.md) for TLS, NAT, and security boundaries.
 
 ## Desktop GUI
 

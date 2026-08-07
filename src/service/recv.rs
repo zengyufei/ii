@@ -7,8 +7,8 @@ use crate::{
         iroh::{EndpointPolicy, FILE_ALPN, bind_endpoint},
         p2p::{
             FilePlan, RecvTrace, connect_to_peer, copy_to_stdout, filter_local_addrs,
-            payload_kind_name, plan_file_receive, relay_only_addr, trace_endpoint_addr,
-            write_to_file,
+            payload_kind_name, plan_file_receive, relay_only_addr, trace_connection_paths,
+            trace_endpoint_addr, write_to_file,
         },
         progress::should_show_progress,
     },
@@ -235,6 +235,7 @@ async fn run_impl(args: RecvArgs) -> Result<()> {
 
     let (mut send, recv) = conn.open_bi().await.context("open transfer stream")?;
     trace.step("open transfer stream");
+    trace_connection_paths(&conn, &trace, "transfer stream");
 
     let resume_from = file_target
         .as_ref()
@@ -315,6 +316,7 @@ async fn run_impl(args: RecvArgs) -> Result<()> {
         }
     };
     trace.step("receive payload");
+    trace_connection_paths(&conn, &trace, "payload complete");
     trace.info(format_args!("received {} bytes", bytes_written));
 
     conn.close(0u32.into(), b"done");

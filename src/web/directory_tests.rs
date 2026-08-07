@@ -20,6 +20,7 @@ async fn directory_lists_children_rejects_traversal_and_uploads() {
             root: fs::canonicalize(&root).await.unwrap(),
         },
         upload_dir: Some(upload_dir.clone()),
+        upload_sessions: crate::web::upload::sessions(),
         web_token: None,
         rate_limiter: None,
     });
@@ -89,6 +90,7 @@ async fn directory_files_support_ranges_and_token_scoping() {
             root: fs::canonicalize(&root).await.unwrap(),
         },
         upload_dir: None,
+        upload_sessions: crate::web::upload::sessions(),
         web_token: Some(token.to_string()),
         rate_limiter: None,
     });

@@ -39,7 +39,7 @@ pub(crate) fn validate_send(args: &SendArgs) -> Result<(), ParseAction> {
         args.sftp,
         args.web,
         args.local,
-        args.relay.is_some(),
+        !args.relay.is_empty(),
         args.no_relay,
     ]
     .into_iter()
@@ -55,15 +55,10 @@ pub(crate) fn validate_send(args: &SendArgs) -> Result<(), ParseAction> {
     if args.portable_webdav && !args.webdav && !args.ftp && !args.sftp {
         return Err(ParseAction::error("-p requires --webdav, --ftp or --sftp"));
     }
-    if args.accept_self_signed_relay && args.relay.is_none() {
+    if args.accept_self_signed_relay && args.relay.is_empty() {
         return Err(ParseAction::error("-k requires --relay <url>"));
     }
-    if args.accept_self_signed_relay
-        && args
-            .relay
-            .as_ref()
-            .is_some_and(|url| url.scheme() != "https")
-    {
+    if args.accept_self_signed_relay && args.relay.iter().any(|url| url.scheme() != "https") {
         return Err(ParseAction::error("-k requires an https:// relay URL"));
     }
     if args.web && args.path.is_none() {
