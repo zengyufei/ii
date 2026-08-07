@@ -36,14 +36,38 @@ const DEFAULT_TRANSFER_LIMITS: TransferLimits = TransferLimits {
 };
 
 async fn source_from_args(args: &SendArgs) -> Result<Source> {
-    Source::open_paths(
+    let source = Source::open_paths_with_options(
         args.path.clone(),
         &args.extra_paths,
         args.name.clone(),
         &args.include,
         &args.exclude,
+        args.symlinks,
+        args.preserve_metadata,
     )
-    .await
+    .await?;
+    report_checksum(args, &source).await?;
+    Ok(source)
+}
+
+async fn report_checksum(args: &SendArgs, source: &Source) -> Result<()> {
+    let Some(algorithm) = args.checksum else {
+        return Ok(());
+    };
+    let value = source.checksum(algorithm).await?;
+    if args.json {
+        crate::json::emit(
+            "checksum",
+            &[
+                ("operation", crate::json::Value::String("send")),
+                ("algorithm", crate::json::Value::String(algorithm.name())),
+                ("value", crate::json::Value::String(&value)),
+            ],
+        );
+    } else {
+        println!("checksum ({}): {}", algorithm.name(), value);
+    }
+    Ok(())
 }
 
 struct QueuedConnection {
@@ -159,7 +183,8 @@ where
 
     let source = source_from_args(&args).await?;
     let rate_limiter = args.rate.map(RateLimiter::new).map(Arc::new);
-    let endpoint = bind_endpoint(endpoint_policy_for_send(&args)?, FILE_ALPN).await?;
+    let endpoint =
+        bind_endpoint(endpoint_policy_for_send(&args)?, FILE_ALPN, args.quic_port).await?;
 
     if should_wait_online(&args) {
         endpoint.online().await;
@@ -829,13 +854,17 @@ mod tests {
     use tokio::time::{Duration, timeout};
 
     async fn test_endpoint() -> iroh::Endpoint {
-        bind_endpoint(EndpointPolicy::standard(RelayMode::Disabled), FILE_ALPN)
-            .await
-            .unwrap()
+        bind_endpoint(
+            EndpointPolicy::standard(RelayMode::Disabled),
+            FILE_ALPN,
+            None,
+        )
+        .await
+        .unwrap()
     }
 
     async fn relay_endpoint(relay_url: iroh::RelayUrl) -> iroh::Endpoint {
-        bind_endpoint(EndpointPolicy::TrustedRelayOnly(relay_url), FILE_ALPN)
+        bind_endpoint(EndpointPolicy::TrustedRelayOnly(relay_url), FILE_ALPN, None)
             .await
             .unwrap()
     }

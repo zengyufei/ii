@@ -9,11 +9,15 @@ pub(super) fn parse(args: Vec<String>) -> Result<RecvArgs, ParseAction> {
     let mut local = false;
     let mut trace = false;
     let mut json = false;
+    let mut checksum = None;
+    let mut quic_port = None;
     let mut iter = ArgsIter::new(args);
 
     while let Some(arg) = iter.next() {
         match split_long_value(&arg) {
             Some(("output", value)) => out_dir = Some(PathBuf::from(value)),
+            Some(("checksum", value)) => checksum = Some(parse_checksum("--checksum", value)?),
+            Some(("quic-port", value)) => quic_port = Some(parse_port("--quic-port", value)?),
             Some((flag, _)) => {
                 return Err(ParseAction::error(format!("unknown option `--{flag}`")));
             }
@@ -26,6 +30,12 @@ pub(super) fn parse(args: Vec<String>) -> Result<RecvArgs, ParseAction> {
                 "--local" => local = true,
                 "--trace" => trace = true,
                 "--json" => json = true,
+                "--checksum" => {
+                    checksum = Some(parse_checksum("--checksum", &iter.value("--checksum")?)?)
+                }
+                "--quic-port" => {
+                    quic_port = Some(parse_port("--quic-port", &iter.value("--quic-port")?)?)
+                }
                 _ if arg.starts_with('-') => {
                     return Err(ParseAction::error(format!("unknown option `{arg}`")));
                 }
@@ -38,9 +48,11 @@ pub(super) fn parse(args: Vec<String>) -> Result<RecvArgs, ParseAction> {
         }
     }
 
-    if stdout && (resume || json) {
+    if stdout && (resume || json || checksum.is_some()) {
         return Err(ParseAction::error(if json {
             "--stdout conflicts with --json"
+        } else if checksum.is_some() {
+            "--stdout conflicts with --checksum"
         } else {
             "--stdout conflicts with --resume"
         }));
@@ -59,5 +71,7 @@ pub(super) fn parse(args: Vec<String>) -> Result<RecvArgs, ParseAction> {
         local,
         trace,
         json,
+        checksum,
+        quic_port,
     })
 }

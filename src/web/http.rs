@@ -595,6 +595,7 @@ pub(crate) async fn serve_web_connection(
                 }
             },
             WebContent::Directory { root } => {
+                let full_file_get = directory::is_full_file_get(root, path, &request.range).await;
                 directory::write_directory(
                     &mut stream,
                     root,
@@ -606,7 +607,11 @@ pub(crate) async fn serve_web_connection(
                     share.upload_dir.is_some(),
                 )
                 .await?;
-                WebConnectionOutcome::Handled
+                if full_file_get {
+                    WebConnectionOutcome::DownloadCompleted
+                } else {
+                    WebConnectionOutcome::Handled
+                }
             }
         },
         "HEAD" => match &share.content {

@@ -207,6 +207,7 @@ pub(crate) async fn recv_sftp(
         .context("sftp ticket missing route")?
         .clone();
     trace.info(format_args!("using SFTP object {}", sftp.object_key));
+    let checksum_target = file_target.as_ref().map(|(path, _)| path.clone());
     let mut portable_state = None;
     let (profile, save_after_success) = match &sftp.portable {
         Some(portable) => {
@@ -268,10 +269,17 @@ pub(crate) async fn recv_sftp(
                 ticket.size(),
                 show_progress,
                 &mut trace,
+                args.checksum,
+                args.json,
             )
             .await?
         }
     };
+    if !args.stdout {
+        if let Some(path) = checksum_target {
+            super::report_checksum(&args, path).await?;
+        }
+    }
     if let Some(state) = portable_state.as_ref() {
         let (path, config) = portable_sftp_config(
             &sftp.profile,
@@ -507,6 +515,8 @@ async fn download_sftp_tar(
     total_size: Option<u64>,
     show_progress: bool,
     trace: &mut RecvTrace,
+    checksum: Option<crate::command::ChecksumAlgorithm>,
+    json: bool,
 ) -> Result<u64> {
     trace.info(format_args!("download sftp tar to {}", out_dir.display()));
     remote_path_parts(object_key)?;
@@ -526,6 +536,11 @@ async fn download_sftp_tar(
         .context("buffer sftp tar")?;
     progress.finish();
     file.flush().await.context("flush temp tar")?;
+    if let Some(algorithm) = checksum {
+        let value =
+            crate::transport::source::checksum_path(temp.path().to_path_buf(), algorithm).await?;
+        super::report_checksum_value(json, algorithm, &value);
+    }
     let extract_path = out_dir.clone();
     tokio::task::spawn_blocking(move || -> Result<()> {
         let file = std::fs::File::open(&temp_path).context("open tar")?;

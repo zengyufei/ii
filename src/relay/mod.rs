@@ -84,10 +84,11 @@ mod tests {
         let receiver = bind_endpoint(
             EndpointPolicy::TrustedRelayOnly(relay_url.clone()),
             FILE_ALPN,
+            None,
         )
         .await
         .unwrap();
-        let sender = bind_endpoint(EndpointPolicy::TrustedRelayOnly(relay_url), FILE_ALPN)
+        let sender = bind_endpoint(EndpointPolicy::TrustedRelayOnly(relay_url), FILE_ALPN, None)
             .await
             .unwrap();
         timeout(Duration::from_secs(5), receiver.online())

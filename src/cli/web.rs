@@ -12,6 +12,7 @@ pub(super) fn parse(args: Vec<String>) -> Result<WebArgs, ParseAction> {
             Some(("upload", _)) => {
                 return Err(ParseAction::error("--upload does not take a value"));
             }
+            Some(("once", _)) => return Err(ParseAction::error("--once does not take a value")),
             Some(("path", value)) => out.web_upload_dir = Some(PathBuf::from(value)),
             Some((flag, _)) => {
                 return Err(ParseAction::error(format!("unknown option `--{flag}`")));
@@ -26,6 +27,7 @@ pub(super) fn parse(args: Vec<String>) -> Result<WebArgs, ParseAction> {
                 }
                 "--upload" => out.web_upload = true,
                 "--path" => out.web_upload_dir = Some(PathBuf::from(iter.value("--path")?)),
+                "--once" => out.once = true,
                 _ if arg.starts_with('-') => {
                     return Err(ParseAction::error(format!("unknown option `{arg}`")));
                 }
@@ -44,6 +46,9 @@ pub(super) fn parse(args: Vec<String>) -> Result<WebArgs, ParseAction> {
         return Err(ParseAction::error(
             "--token must contain 16 to 128 ASCII letters, digits, '-' or '_'",
         ));
+    }
+    if out.once && out.web_upload {
+        return Err(ParseAction::error("--once conflicts with --upload"));
     }
 
     Ok(out)

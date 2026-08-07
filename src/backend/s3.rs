@@ -184,6 +184,7 @@ pub(crate) async fn recv_s3(
         .context("s3 ticket missing route")?
         .clone();
     trace.info("using signed object-storage route");
+    let checksum_target = file_target.as_ref().map(|(path, _)| path.clone());
     let bytes_written = match ticket.kind() {
         PayloadKind::File | PayloadKind::Stdin => {
             if args.stdout {
@@ -221,10 +222,17 @@ pub(crate) async fn recv_s3(
                 ticket.size(),
                 show_progress,
                 &mut trace,
+                args.checksum,
+                args.json,
             )
             .await?
         }
     };
+    if !args.stdout {
+        if let Some(path) = checksum_target {
+            super::report_checksum(&args, path).await?;
+        }
+    }
     trace.step("receive payload");
     trace.info(format_args!("received {} bytes", bytes_written));
     try_delete_s3(s3.delete_url.clone(), &mut trace).await;
@@ -330,6 +338,8 @@ async fn download_s3_tar(
     total_size: Option<u64>,
     show_progress: bool,
     trace: &mut RecvTrace,
+    checksum: Option<crate::command::ChecksumAlgorithm>,
+    json: bool,
 ) -> Result<u64> {
     trace.info(format_args!("download s3 tar to {}", out_dir.display()));
     fs::create_dir_all(&out_dir)
@@ -351,6 +361,12 @@ async fn download_s3_tar(
     })
     .await
     .context("s3 tar download task")??;
+
+    if let Some(algorithm) = checksum {
+        let value =
+            crate::transport::source::checksum_path(temp.path().to_path_buf(), algorithm).await?;
+        super::report_checksum_value(json, algorithm, &value);
+    }
 
     let extract_path = out_dir.clone();
     let temp_path = temp.path().to_path_buf();

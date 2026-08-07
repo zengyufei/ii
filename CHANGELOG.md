@@ -2,6 +2,16 @@
 
 本文件记录 `ii` 的重要变更。默认中文版本在这里，英文版本见 [CHANGELOG.en.md](CHANGELOG.en.md)。
 
+## Unreleased
+
+### 新增
+
+- `ii send` 和 `ii recv` 支持 `--checksum md5|sha256`；校验和仅在本地计算和输出，不写入 ticket，也不自动比较。
+- `ii send <file> --preserve-metadata` 可用现有 tar 载荷保留单文件的 mtime、权限和只读属性；目录和多路径归档支持 `--symlinks follow|preserve|reject`。
+- 新增进程内 FIFO `ii queue` 与轮询式 `ii watch`，支持延迟、定时、稳定检测和现有发送后端。
+- `ii send`、`ii recv`、`ii watch`、`ii queue` 支持 `--quic-port` 固定 P2P Iroh UDP 端口；`ii doctor --nat` 输出短生命周期的 UDP、NAT 和 relay 探测结果。
+- `ii web --once` 在第一次完整普通文件下载后关闭；目录页、HEAD、Range、上传和失败请求不会触发关闭。
+
 ## 0.3.4 - 2026-08-06
 
 ### 变更

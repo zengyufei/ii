@@ -12,7 +12,27 @@ pub(super) async fn run(args: WebArgs) -> Result<()> {
 }
 
 pub(super) async fn send_web(args: SendArgs) -> Result<()> {
-    let source = Source::open(args.path.clone(), args.name.clone()).await?;
+    if args.preserve_metadata {
+        anyhow::bail!("--preserve-metadata cannot be used with --web");
+    }
+    let source =
+        Source::open_with_options(args.path.clone(), args.name.clone(), args.symlinks, false)
+            .await?;
+    if let Some(algorithm) = args.checksum {
+        let value = source.checksum(algorithm).await?;
+        if args.json {
+            crate::json::emit(
+                "checksum",
+                &[
+                    ("operation", crate::json::Value::String("send")),
+                    ("algorithm", crate::json::Value::String(algorithm.name())),
+                    ("value", crate::json::Value::String(&value)),
+                ],
+            );
+        } else {
+            println!("checksum ({}): {}", algorithm.name(), value);
+        }
+    }
     let download_name = match source.kind() {
         PayloadKind::Dir => format!("{}.tar", source.name()),
         PayloadKind::File | PayloadKind::Stdin => source.name().to_string(),
@@ -56,7 +76,11 @@ async fn run_impl(args: WebArgs) -> Result<()> {
         args.web_token,
         None,
         false,
-        WebServeLifetime::UntilCtrlC,
+        if args.once {
+            WebServeLifetime::OneSuccessfulDownload
+        } else {
+            WebServeLifetime::UntilCtrlC
+        },
     )
     .await
 }

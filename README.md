@@ -22,6 +22,7 @@
 `ii` 是临时文件传输命令行工具：默认 P2P 直连，局域网可发现；无法直连时自动降级到 Iroh 默认的 n0 relay。
 
 - 发送文件、目录、多文件和管道数据；接收支持断点续传、同 MD5 跳过和冲突覆盖。
+- 支持发送端校验和、单文件 metadata 保留、符号链接策略、FIFO 队列和目录监视。
 - 可选通用 S3、Cloudflare R2、Azure Blob、WebDAV、FTP、SFTP 中转；传完可删除中转对象。
 - 另有局域网网页、WebDAV、浏览器直传、TCP 隧道和自建 relay。
 
@@ -112,9 +113,28 @@ ii send .\video.mp4 -o recv.txt
 
 # 面向自动化的 JSON Lines
 ii send .\video.mp4 --json
+
+# 输出实际发送字节的校验和
+ii send .\video.mp4 --checksum sha256
+
+# 单文件保留 mtime、权限和只读属性
+ii send .\video.mp4 --preserve-metadata
 ```
 
 普通 `ii send` 在首次成功发送后退出。`-t` 最多同时服务 16 个接收端，另有最多 1000 个 FIFO 排队连接；并发接收共享发送端带宽，满队列时稍后重试。`--json` 时 stdout 只输出 JSON Lines。
+
+`--checksum md5|sha256` 只在本地计算并输出实际发送字节，不写入 ticket，也不自动和接收端比较。`--preserve-metadata` 只适用于单个常规文件，会使用现有 tar 载荷，因此不支持 stdin、`--web`、断点续传和 MD5 秒传。
+
+### 队列与目录监视
+
+```powershell
+ii queue .\a.zip .\b.zip
+ii queue .\report.pdf --after 10s
+ii queue .\folder --every 1h
+ii watch .\incoming --interval 2s --stabilize 2s
+```
+
+`queue` 和 `watch` 只在当前进程内排队，不持久化；它们接受 `--rate`、后端、relay、`--local`、`--no-relay`、`--checksum`、`--preserve-metadata` 和 `--symlinks`，不接受 `-t`、`-c`、`-o`、`--web` 或 `--json`。`--quic-port <1..65535>` 可固定 P2P 的 Iroh UDP 端口。
 
 ### 后端中转
 
@@ -144,6 +164,8 @@ ii recv ii1k7v...x9a --json
 
 断网或传到一半失败后，重新执行同一条 `ii recv` 就会继续接收；如果目标文件已经完整且内容相同，会直接跳过；如果同名但内容不同，会覆盖。`ii send` 和 `ii recv` 都会显示传输进度、速率和完成耗时；`--trace` 输出连接诊断。`--stdout` 不能与 `--json` 同用。
 
+`--checksum md5|sha256` 在接收完成后计算实际文件或目录 tar 流；不能与 `--stdout` 同用。`--quic-port` 只适用于 P2P ticket。
+
 ## 扩展能力
 
 ### 局域网网页与 WebDAV
@@ -166,6 +188,8 @@ ii dav .\shared --port 8443 --username alice --password secret --tls --domain da
 `ii dav --username <username> --password <password>` 启用 HTTP Basic Auth，两个参数必须同时提供。`--password` 会出现在 shell 历史和进程列表中，只适合你明确接受这一风险的场景。`--tls` 开启 HTTPS；未提供 `--cert` 与 `--key` 时生成仅当前进程有效的自签证书，客户端必须手动信任。公网请使用受信任 PEM 证书，或让 HTTPS 反向代理终止 TLS 并将 `ii dav` 绑定到 `127.0.0.1`。未启用 `--tls` 时，Basic Auth 凭据会以明文传输。
 
 `--port 8080` 固定端口，`--bind ::` 只监听 IPv6；裸 `--token` 生成路径令牌，`--token <value>` 使用指定令牌。路径 token 不是账号鉴权。
+
+`ii web --once` 只在第一次完整的普通文件 `GET 200` 后退出；HEAD、Range、目录页、404 和上传不会消耗这次机会，且不能和 `--upload` 同用。
 
 ### 局域网发现
 
@@ -231,8 +255,11 @@ ii recv ii1k7v...x9a --trace
 
 # 检查本机网络、端口、权限和版本
 ii doctor
+ii doctor --nat
 ii version
 ```
+
+`ii doctor --nat` 会运行一次短生命周期 UDP/NAT/relay 探测，输出实际 UDP socket、IPv4/IPv6、NAT 映射、首选 relay 和 relay 在线结果；Iroh 未公开 hairpin 探测时会明确标记为不可用。
 
 ## 详细手册
 

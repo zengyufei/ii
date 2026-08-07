@@ -8,6 +8,7 @@ use rustls::{
     crypto::CryptoProvider,
     pki_types::{CertificateDer, ServerName, UnixTime},
 };
+use std::net::SocketAddr;
 use std::sync::Arc;
 
 pub(crate) const FILE_ALPN: &[u8] = b"ii/file/1";
@@ -94,7 +95,11 @@ fn accept_self_signed_relay_tls() -> CaTlsConfig {
     }))
 }
 
-pub(crate) async fn bind_endpoint(policy: EndpointPolicy, alpn: &[u8]) -> Result<Endpoint> {
+pub(crate) async fn bind_endpoint(
+    policy: EndpointPolicy,
+    alpn: &[u8],
+    quic_port: Option<u16>,
+) -> Result<Endpoint> {
     let secret_key = SecretKey::generate();
     let mut builder = Endpoint::builder(presets::Minimal)
         .secret_key(secret_key)
@@ -105,6 +110,11 @@ pub(crate) async fn bind_endpoint(policy: EndpointPolicy, alpn: &[u8]) -> Result
     }
     if policy.accepts_self_signed_relay() {
         builder = builder.ca_tls_config(accept_self_signed_relay_tls());
+    }
+    if let Some(port) = quic_port {
+        builder = builder
+            .bind_addr(SocketAddr::from(([0, 0, 0, 0], port)))
+            .context("bind fixed QUIC port")?;
     }
     builder.bind().await.context("bind endpoint")
 }

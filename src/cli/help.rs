@@ -4,14 +4,16 @@ ii file transfer
 Usage:
   ii help [command]
   ii send [options] [path...]
-  ii web [directory] [--port <port>] [--bind <ip>] [--token [value]] [--upload] [--path <dir>]
+  ii watch <directory> [options]
+  ii queue <path...> [--after <duration>|--every <duration>] [options]
+  ii web [directory] [--port <port>] [--bind <ip>] [--token [value]] [--upload] [--path <dir>] [--once]
   ii dav [directory] [--port <port>] [--bind <ip>] [--token [value]] [--read-only] [--username <username> --password <password>] [--tls [--domain <name>] [--cert <path> --key <path>]]
   ii webrtc [--port <port>] [--bind <ip>] [--token [value]]
   ii tunnel (-s <target-host:port> | -c <ticket>) [--listen <ip:port>] [--relay <url> [-k]]
   ii recv [options] <ticket>
   ii discover [--json]
   ii relay [options]
-  ii doctor
+  ii doctor [--nat]
   ii version
 ";
 
@@ -25,6 +27,10 @@ Options:
   --exclude <glob>
   --rate <bytes/s>
   --json
+  --checksum <md5|sha256>
+  --preserve-metadata
+  --symlinks <follow|preserve|reject>
+  --quic-port <port>
   -t                    Keep serving after success; required for repeated --web downloads
   -c, --copy
   -o, --output <path>
@@ -51,7 +57,7 @@ Options:
 
 pub(crate) const WEB_HELP: &str = "\
 Usage:
-  ii web [directory] [--port <port>] [--bind <ip>] [--token [value]] [--upload] [--path <dir>]
+  ii web [directory] [--port <port>] [--bind <ip>] [--token [value]] [--upload] [--path <dir>] [--once]
 
 Options:
   --port <port>
@@ -59,6 +65,7 @@ Options:
   --token [value]
   --upload
   --path <dir>
+  --once                Stop after the first complete file download
 ";
 
 pub(crate) const WEBRTC_HELP: &str = "\
@@ -96,6 +103,8 @@ Options:
   --local
   --trace
   --json
+  --checksum <md5|sha256>
+  --quic-port <port>
 ";
 
 pub(crate) const RELAY_HELP: &str = "\
@@ -109,6 +118,42 @@ Options:
   --domain <name>       TLS DNS name used for the advertised URL and self-signed certificate
   --cert <path>         PEM certificate chain; replaces the generated certificate
   --key <path>          PEM private key; requires --cert
+";
+
+pub(crate) const WATCH_HELP: &str = "\
+Usage:
+  ii watch <directory> [options]
+
+Options:
+  --interval <duration>   Scan interval; defaults to 2s
+  --stabilize <duration>  Stable time before sending; defaults to 2s
+  --checksum <md5|sha256>
+  --preserve-metadata
+  --symlinks <follow|preserve|reject>
+  --quic-port <port>
+  --rate <bytes/s>
+  --include <glob>
+  --exclude <glob>
+  --s3, --r2, --azure, --webdav, --ftp, --sftp
+  --local, --relay <url>, --no-relay
+";
+
+pub(crate) const QUEUE_HELP: &str = "\
+Usage:
+  ii queue <path...> [--after <duration>|--every <duration>] [options]
+
+Options:
+  --after <duration>       Run once after this delay
+  --every <duration>       Repeat after each FIFO round
+  --checksum <md5|sha256>
+  --preserve-metadata
+  --symlinks <follow|preserve|reject>
+  --quic-port <port>
+  --rate <bytes/s>
+  --include <glob>
+  --exclude <glob>
+  --s3, --r2, --azure, --webdav, --ftp, --sftp
+  --local, --relay <url>, --no-relay
 ";
 
 pub(crate) const DAV_HELP: &str = "\
@@ -136,5 +181,11 @@ Options:
   --json
 ";
 
-pub(crate) const DOCTOR_HELP: &str = "Usage:\n  ii doctor";
+pub(crate) const DOCTOR_HELP: &str = "\
+Usage:
+  ii doctor [--nat]
+
+Options:
+  --nat                 Run a short-lived UDP/NAT and relay reachability probe
+";
 pub(crate) const VERSION_HELP: &str = "Usage:\n  ii version";

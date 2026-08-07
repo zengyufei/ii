@@ -1,11 +1,16 @@
-use crate::command::{DavArgs, DiscoverArgs, RecvArgs, SendArgs, TunnelArgs, WebArgs, WebrtcArgs};
+use crate::command::{
+    DavArgs, DiscoverArgs, QueueArgs, RecvArgs, SendArgs, TunnelArgs, WatchArgs, WebArgs,
+    WebrtcArgs,
+};
 use anyhow::Result;
 
 mod dav;
 mod discover;
+mod queue;
 mod recv;
 mod send;
 mod tunnel;
+mod watch;
 mod web;
 mod webrtc;
 
@@ -26,6 +31,14 @@ pub async fn send_with_events(
     events: std::sync::mpsc::Sender<TransferEvent>,
 ) -> Result<()> {
     send::with_events(args, events).await
+}
+
+pub async fn queue(args: QueueArgs) -> Result<()> {
+    queue::run(args).await
+}
+
+pub async fn watch(args: WatchArgs) -> Result<()> {
+    watch::run(args).await
 }
 
 pub async fn web(args: WebArgs) -> Result<()> {

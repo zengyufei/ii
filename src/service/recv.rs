@@ -47,6 +47,14 @@ async fn run_impl(args: RecvArgs) -> Result<()> {
     ));
 
     let ticket = Ticket::decode(&args.ticket)?;
+    if args.quic_port.is_some()
+        && (ticket.s3_route().is_some()
+            || ticket.webdav_route().is_some()
+            || ticket.ftp_route().is_some()
+            || ticket.sftp_route().is_some())
+    {
+        bail!("--quic-port requires a P2P ticket");
+    }
     if ticket.tunnel_route().is_some() {
         bail!("tunnel tickets require ii tunnel -c <ticket>");
     }
@@ -186,7 +194,7 @@ async fn run_impl(args: RecvArgs) -> Result<()> {
     } else {
         EndpointPolicy::standard(RelayMode::Default)
     };
-    let endpoint = bind_endpoint(policy, FILE_ALPN).await?;
+    let endpoint = bind_endpoint(policy, FILE_ALPN, args.quic_port).await?;
     trace.step("bind endpoint");
     if !args.local {
         trace.info("waiting for endpoint to go online");
@@ -256,14 +264,54 @@ async fn run_impl(args: RecvArgs) -> Result<()> {
                     FilePlan::Download { resume_from } => resume_from,
                     FilePlan::Skip => 0,
                 };
-                write_to_file(recv, path, resume_from, ticket.size(), show_progress).await?
+                let bytes = write_to_file(
+                    recv,
+                    path.clone(),
+                    resume_from,
+                    ticket.size(),
+                    show_progress,
+                )
+                .await?;
+                if let Some(algorithm) = args.checksum {
+                    let value = crate::transport::source::checksum_path(path, algorithm).await?;
+                    if args.json {
+                        crate::json::emit(
+                            "checksum",
+                            &[
+                                ("operation", crate::json::Value::String("recv")),
+                                ("algorithm", crate::json::Value::String(algorithm.name())),
+                                ("value", crate::json::Value::String(&value)),
+                            ],
+                        );
+                    } else {
+                        println!("checksum ({}): {}", algorithm.name(), value);
+                    }
+                }
+                bytes
             }
         }
         PayloadKind::Dir => {
             if args.stdout {
                 bail!("--stdout is not supported for directory tickets");
             }
-            extract_tar_stream(recv, out_dir, ticket.size(), show_progress).await?
+            let (bytes, checksum) =
+                extract_tar_stream(recv, out_dir, ticket.size(), show_progress, args.checksum)
+                    .await?;
+            if let (Some(algorithm), Some(value)) = (args.checksum, checksum) {
+                if args.json {
+                    crate::json::emit(
+                        "checksum",
+                        &[
+                            ("operation", crate::json::Value::String("recv")),
+                            ("algorithm", crate::json::Value::String(algorithm.name())),
+                            ("value", crate::json::Value::String(&value)),
+                        ],
+                    );
+                } else {
+                    println!("checksum ({}): {}", algorithm.name(), value);
+                }
+            }
+            bytes
         }
     };
     trace.step("receive payload");

@@ -4,6 +4,7 @@ mod common;
 mod dav;
 mod discover;
 mod help;
+mod jobs;
 mod recv;
 mod relay;
 mod send;
@@ -69,6 +70,8 @@ where
     let command = match command.as_str() {
         "help" => return Err(help_for(rest)),
         "send" => Command::Send(send::parse(rest)?),
+        "watch" => Command::Watch(jobs::parse_watch(rest)?),
+        "queue" => Command::Queue(jobs::parse_queue(rest)?),
         "web" => Command::Web(web::parse(rest)?),
         "dav" => Command::Dav(dav::parse(rest)?),
         "webrtc" => Command::Webrtc(webrtc::parse(rest)?),
@@ -76,12 +79,33 @@ where
         "recv" => Command::Recv(recv::parse(rest)?),
         "relay" => Command::Relay(relay::parse(rest)?),
         "discover" => Command::Discover(discover::parse(rest)?),
-        "doctor" => reject_extra("doctor", rest).map(|_| Command::Doctor)?,
+        "doctor" => Command::Doctor(parse_doctor(rest)?),
         "version" => reject_extra("version", rest).map(|_| Command::Version)?,
         other => return Err(ParseAction::error(format!("unknown command `{other}`"))),
     };
 
     Ok(Cli { command })
+}
+
+fn parse_doctor(args: Vec<String>) -> Result<DoctorArgs, ParseAction> {
+    let mut out = DoctorArgs::default();
+    for arg in args {
+        match arg.as_str() {
+            "--nat" => {
+                if out.nat {
+                    return Err(ParseAction::error("--nat may be specified only once"));
+                }
+                out.nat = true;
+            }
+            value if is_help(value) => return Err(ParseAction::help(DOCTOR_HELP)),
+            value => {
+                return Err(ParseAction::error(format!(
+                    "`doctor` does not accept `{value}`"
+                )));
+            }
+        }
+    }
+    Ok(out)
 }
 
 fn help_for(args: Vec<String>) -> ParseAction {
@@ -90,6 +114,8 @@ fn help_for(args: Vec<String>) -> ParseAction {
         [flag] if is_help(flag) => ParseAction::help(HELP),
         [topic] => match topic.as_str() {
             "send" => ParseAction::help(SEND_HELP),
+            "watch" => ParseAction::help(WATCH_HELP),
+            "queue" => ParseAction::help(QUEUE_HELP),
             "web" => ParseAction::help(WEB_HELP),
             "dav" => ParseAction::help(DAV_HELP),
             "webrtc" => ParseAction::help(WEBRTC_HELP),
@@ -368,6 +394,19 @@ mod tests {
     }
 
     #[test]
+    fn web_once_is_only_for_non_upload_services() {
+        let cli = Cli::parse_from(["ii", "web", "shared", "--once"]);
+        match cli.command {
+            Command::Web(args) => assert!(args.once),
+            _ => panic!("expected web command"),
+        }
+        assert!(matches!(
+            parse_args(["ii", "web", "--once", "--upload"]),
+            Err(ParseAction::Print { code: 2, .. })
+        ));
+    }
+
+    #[test]
     fn web_rejects_invalid_options_and_multiple_directories() {
         for args in [
             vec!["ii", "web", "first", "second"],
@@ -631,6 +670,8 @@ mod tests {
 
         for (topic, expected) in [
             ("send", SEND_HELP),
+            ("watch", WATCH_HELP),
+            ("queue", QUEUE_HELP),
             ("web", WEB_HELP),
             ("webrtc", WEBRTC_HELP),
             ("tunnel", TUNNEL_HELP),
@@ -684,6 +725,8 @@ mod tests {
     fn command_help_contracts_keep_existing_text() {
         for (command, expected) in [
             ("send", SEND_HELP),
+            ("watch", WATCH_HELP),
+            ("queue", QUEUE_HELP),
             ("web", WEB_HELP),
             ("webrtc", WEBRTC_HELP),
             ("tunnel", TUNNEL_HELP),
@@ -874,11 +917,94 @@ mod tests {
     }
 
     #[test]
+    fn send_accepts_checksum_metadata_symlink_and_quic_port() {
+        let cli = Cli::parse_from([
+            "ii",
+            "send",
+            "file.txt",
+            "--checksum=sha256",
+            "--preserve-metadata",
+            "--symlinks",
+            "preserve",
+            "--quic-port=45123",
+        ]);
+        match cli.command {
+            Command::Send(args) => {
+                assert_eq!(args.checksum, Some(ChecksumAlgorithm::Sha256));
+                assert!(args.preserve_metadata);
+                assert_eq!(args.symlinks, SymlinkPolicy::Preserve);
+                assert_eq!(args.quic_port, Some(45123));
+            }
+            _ => panic!("expected send command"),
+        }
+    }
+
+    #[test]
+    fn watch_and_queue_parse_schedules_and_reject_ambiguous_options() {
+        let cli = Cli::parse_from([
+            "ii",
+            "watch",
+            "incoming",
+            "--interval=500ms",
+            "--stabilize",
+            "1s",
+        ]);
+        match cli.command {
+            Command::Watch(args) => {
+                assert_eq!(args.dir, PathBuf::from("incoming"));
+                assert_eq!(args.interval, std::time::Duration::from_millis(500));
+                assert_eq!(args.stabilize, std::time::Duration::from_secs(1));
+            }
+            _ => panic!("expected watch command"),
+        }
+
+        let cli = Cli::parse_from(["ii", "queue", "a", "b", "--every", "2s"]);
+        match cli.command {
+            Command::Queue(args) => {
+                assert_eq!(args.paths, [PathBuf::from("a"), PathBuf::from("b")]);
+                assert_eq!(args.every, Some(std::time::Duration::from_secs(2)));
+            }
+            _ => panic!("expected queue command"),
+        }
+        assert!(matches!(
+            parse_args(["ii", "queue", "a", "--after", "1s", "--every", "2s"]),
+            Err(ParseAction::Print { code: 2, .. })
+        ));
+    }
+
+    #[test]
     fn rate_parser_rejects_zero_and_overflow() {
         assert!(matches!(parse_rate("--rate", "1"), Ok(1)));
         assert!(matches!(parse_rate("--rate", "4KiB"), Ok(4096)));
         assert!(parse_rate("--rate", "0").is_err());
         assert!(parse_rate("--rate", "18446744073709551615GiB").is_err());
+    }
+
+    #[test]
+    fn duration_parser_requires_a_positive_supported_unit() {
+        assert_eq!(
+            parse_duration("--after", "500ms").ok(),
+            Some(std::time::Duration::from_millis(500))
+        );
+        assert_eq!(
+            parse_duration("--after", "2s").ok(),
+            Some(std::time::Duration::from_secs(2))
+        );
+        for value in ["0s", "1d", "2", "-1s", "999999999999999999999h"] {
+            assert!(parse_duration("--after", value).is_err(), "{value}");
+        }
+    }
+
+    #[test]
+    fn doctor_accepts_only_the_nat_probe_flag() {
+        match Cli::parse_from(["ii", "doctor", "--nat"]).command {
+            Command::Doctor(args) => assert!(args.nat),
+            _ => panic!("expected doctor command"),
+        }
+        assert!(matches!(
+            parse_args(["ii", "doctor", "--nat", "--nat"]),
+            Err(ParseAction::Print { code: 2, .. })
+        ));
     }
 
     #[test]

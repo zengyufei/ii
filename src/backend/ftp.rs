@@ -124,6 +124,7 @@ pub(crate) async fn recv_ftp(
         .context("ftp ticket missing route")?
         .clone();
     trace.info(format_args!("using FTP object {}", ftp.object_key));
+    let checksum_target = file_target.as_ref().map(|(path, _)| path.clone());
     let (profile, save_after_success) = match &ftp.portable {
         Some(portable) => {
             let profile = ftp_profile_from_portable(portable)?;
@@ -183,10 +184,17 @@ pub(crate) async fn recv_ftp(
                 ticket.size(),
                 show_progress,
                 &mut trace,
+                args.checksum,
+                args.json,
             )
             .await?
         }
     };
+    if !args.stdout {
+        if let Some(path) = checksum_target {
+            super::report_checksum(&args, path).await?;
+        }
+    }
     if let Some((path, config)) = save_after_success {
         storage::save_config(&path, &config)?;
     }
@@ -360,6 +368,8 @@ async fn download_ftp_tar(
     total_size: Option<u64>,
     show_progress: bool,
     trace: &mut RecvTrace,
+    checksum: Option<crate::command::ChecksumAlgorithm>,
+    json: bool,
 ) -> Result<u64> {
     trace.info(format_args!("download ftp tar to {}", out_dir.display()));
     fs::create_dir_all(&out_dir)
@@ -379,6 +389,11 @@ async fn download_ftp_tar(
         .context("buffer ftp tar")?;
     progress.finish();
     file.flush().await.context("flush temp tar")?;
+    if let Some(algorithm) = checksum {
+        let value =
+            crate::transport::source::checksum_path(temp.path().to_path_buf(), algorithm).await?;
+        super::report_checksum_value(json, algorithm, &value);
+    }
     client
         .finalize_retr_stream(response)
         .await

@@ -35,6 +35,8 @@ pub async fn run_cli() -> Result<()> {
     };
     let result = match cli.command {
         Command::Send(args) => service::send(args).await,
+        Command::Watch(args) => service::watch(args).await,
+        Command::Queue(args) => service::queue(args).await,
         Command::Web(args) => service::web(args).await,
         Command::Dav(args) => service::dav(args).await,
         Command::Webrtc(args) => service::webrtc(args).await,
@@ -42,7 +44,7 @@ pub async fn run_cli() -> Result<()> {
         Command::Recv(args) => service::recv(args).await,
         Command::Relay(args) => relay::run(args).await,
         Command::Discover(args) => service::discover(args).await,
-        Command::Doctor => doctor::run().await,
+        Command::Doctor(args) => doctor::run(args).await,
         Command::Version => {
             println!("{}", env!("CARGO_PKG_VERSION"));
             Ok(())

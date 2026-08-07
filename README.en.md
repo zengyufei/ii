@@ -22,6 +22,7 @@
 `ii` is a CLI for temporary file transfer: it connects peer-to-peer by default, discovers services on the LAN, and automatically falls back to Iroh's default n0 relay when direct connectivity is unavailable.
 
 - Send files, folders, multiple paths, or piped data. Receives resume, skip matching MD5 files, and overwrite conflicts.
+- Compute local checksums, preserve single-file metadata, choose symlink behavior, and run FIFO queues or directory watches.
 - Use generic S3, Cloudflare R2, Azure Blob, WebDAV, FTP, or SFTP as optional backends, with cleanup after receiving.
 - It also provides LAN web sharing, WebDAV, browser transfer, TCP tunnels, and self-hosted relays.
 
@@ -112,9 +113,28 @@ ii send .\video.mp4 -o recv.txt
 
 # JSON Lines for automation
 ii send .\video.mp4 --json
+
+# Print a checksum of the bytes being sent
+ii send .\video.mp4 --checksum sha256
+
+# Preserve mtime, permissions, and read-only metadata for one file
+ii send .\video.mp4 --preserve-metadata
 ```
 
 Plain `ii send` exits after its first successful transfer. `-t` serves up to 16 receivers concurrently and queues up to 1,000 more in first-in, first-out order. Concurrent receivers share sender bandwidth; retry later when the queue is full. With `--json`, stdout contains JSON Lines only.
+
+`--checksum md5|sha256` computes and prints the local payload checksum. It is not stored in the ticket and is not compared automatically. `--preserve-metadata` accepts one regular file only and wraps it in the existing tar payload; it rejects stdin and `--web`, and disables resume and MD5 skip for that send.
+
+### Queues and Directory Watches
+
+```powershell
+ii queue .\a.zip .\b.zip
+ii queue .\report.pdf --after 10s
+ii queue .\folder --every 1h
+ii watch .\incoming --interval 2s --stabilize 2s
+```
+
+`queue` and `watch` are process-local and non-persistent. They accept `--rate`, storage backends, relay, `--local`, `--no-relay`, `--checksum`, `--preserve-metadata`, and `--symlinks`; they reject `-t`, `-c`, `-o`, `--web`, and `--json`. `--quic-port <1..65535>` fixes the Iroh UDP port for P2P jobs.
 
 ### Storage Backends
 
@@ -144,6 +164,8 @@ ii recv ii1k7v...x9a --json
 
 If the network drops halfway, run the same `ii recv` command again and it continues receiving. If the target file already exists with the same content, it is skipped. If the name matches but the content differs, it is overwritten. `ii send` and `ii recv` show progress, speed, and elapsed time; `--trace` prints connection diagnostics. `--stdout` cannot be combined with `--json`.
 
+`--checksum md5|sha256` computes the received file or directory tar stream after completion and cannot be combined with `--stdout`. `--quic-port` applies only to P2P tickets.
+
 ## Extended Capabilities
 
 ### LAN Web Sharing and WebDAV
@@ -166,6 +188,8 @@ ii dav .\shared --port 8443 --username alice --password secret --tls --domain da
 `ii dav --username <username> --password <password>` enables HTTP Basic Auth; both options are required together. `--password` is visible in shell history and process listings, so use it only where that is acceptable. `--tls` enables HTTPS. Without `--cert` and `--key`, ii generates a self-signed certificate valid only for the running process, which clients must explicitly trust. For public access, use a trusted PEM certificate or terminate HTTPS in a reverse proxy and bind `ii dav` to `127.0.0.1`. Without `--tls`, Basic Auth credentials travel in clear text.
 
 `--port 8080` fixes the port, `--bind ::` listens on IPv6 only, and bare `--token` generates a path token while `--token <value>` uses the supplied token. A path token is not account authentication.
+
+`ii web --once` exits only after the first complete ordinary-file `GET 200`. HEAD, Range, directory pages, 404 responses, and uploads do not consume the one-shot lifetime, and `--once` conflicts with `--upload`.
 
 ### LAN Discovery
 
@@ -231,8 +255,11 @@ ii recv ii1k7v...x9a --trace
 
 # Check local networking, ports, permissions, and version
 ii doctor
+ii doctor --nat
 ii version
 ```
+
+`ii doctor --nat` runs a short-lived UDP/NAT/relay probe and reports bound UDP sockets, IPv4/IPv6, NAT mapping behavior, the preferred relay, and relay reachability. Hairpin is explicitly unavailable because Iroh does not expose that probe.
 
 ## Full Manual
 

@@ -131,6 +131,7 @@ pub(crate) async fn recv_webdav(
         .context("webdav ticket missing route")?
         .clone();
     trace.info(format_args!("using webdav object {}", webdav.object_key));
+    let checksum_target = file_target.as_ref().map(|(path, _)| path.clone());
     let (profile, save_after_success) = match &webdav.portable {
         Some(portable) => {
             let profile = webdav_profile_from_portable(portable)?;
@@ -191,10 +192,17 @@ pub(crate) async fn recv_webdav(
                 ticket.size(),
                 show_progress,
                 &mut trace,
+                args.checksum,
+                args.json,
             )
             .await?
         }
     };
+    if !args.stdout {
+        if let Some(path) = checksum_target {
+            super::report_checksum(&args, path).await?;
+        }
+    }
     if let Some((path, config)) = save_after_success {
         storage::save_config(&path, &config)?;
     }
@@ -356,6 +364,8 @@ async fn download_webdav_tar(
     total_size: Option<u64>,
     show_progress: bool,
     trace: &mut RecvTrace,
+    checksum: Option<crate::command::ChecksumAlgorithm>,
+    json: bool,
 ) -> Result<u64> {
     trace.info(format_args!("download webdav tar to {}", out_dir.display()));
     fs::create_dir_all(&out_dir)
@@ -372,6 +382,11 @@ async fn download_webdav_tar(
         .context("buffer webdav tar")?;
     progress.finish();
     file.flush().await.context("flush temp tar")?;
+    if let Some(algorithm) = checksum {
+        let value =
+            crate::transport::source::checksum_path(temp.path().to_path_buf(), algorithm).await?;
+        super::report_checksum_value(json, algorithm, &value);
+    }
     let extract_path = out_dir.clone();
     tokio::task::spawn_blocking(move || -> Result<()> {
         let file = std::fs::File::open(&temp_path).context("open tar")?;

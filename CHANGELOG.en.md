@@ -2,6 +2,16 @@
 
 All notable changes to `ii` are documented here. The default Chinese version is [CHANGELOG.md](CHANGELOG.md).
 
+## Unreleased
+
+### Added
+
+- `ii send` and `ii recv` support `--checksum md5|sha256`; checksums are calculated and printed locally only, never stored in tickets or compared automatically.
+- `ii send <file> --preserve-metadata` uses the existing tar payload to retain single-file mtime, permissions, and read-only metadata; directory and multi-path archives support `--symlinks follow|preserve|reject`.
+- Added process-local FIFO `ii queue` and polling `ii watch`, including delay, repeat, stability detection, and existing sending backends.
+- `ii send`, `ii recv`, `ii watch`, and `ii queue` support `--quic-port` to fix the P2P Iroh UDP port; `ii doctor --nat` reports a short-lived UDP, NAT, and relay probe.
+- `ii web --once` exits after the first complete ordinary-file download; directory pages, HEAD, Range, uploads, and failed requests do not stop it.
+
 ## 0.3.4 - 2026-08-06
 
 ### Changed

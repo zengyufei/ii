@@ -16,7 +16,15 @@ pub(super) fn parse(args: Vec<String>) -> Result<SendArgs, ParseAction> {
             Some(("include", value)) => out.include.push(validate_glob("--include", value)?),
             Some(("exclude", value)) => out.exclude.push(validate_glob("--exclude", value)?),
             Some(("rate", value)) => out.rate = Some(parse_rate("--rate", value)?),
+            Some(("checksum", value)) => out.checksum = Some(parse_checksum("--checksum", value)?),
+            Some(("symlinks", value)) => out.symlinks = parse_symlinks("--symlinks", value)?,
+            Some(("quic-port", value)) => out.quic_port = Some(parse_port("--quic-port", value)?),
             Some(("json", _)) => return Err(ParseAction::error("--json does not take a value")),
+            Some(("preserve-metadata", _)) => {
+                return Err(ParseAction::error(
+                    "--preserve-metadata does not take a value",
+                ));
+            }
             Some(("upload", _)) => {
                 return Err(ParseAction::error("--upload does not take a value"));
             }
@@ -49,6 +57,16 @@ pub(super) fn parse(args: Vec<String>) -> Result<SendArgs, ParseAction> {
                     .exclude
                     .push(validate_glob("--exclude", &iter.value("--exclude")?)?),
                 "--rate" => out.rate = Some(parse_rate("--rate", &iter.value("--rate")?)?),
+                "--checksum" => {
+                    out.checksum = Some(parse_checksum("--checksum", &iter.value("--checksum")?)?)
+                }
+                "--preserve-metadata" => out.preserve_metadata = true,
+                "--symlinks" => {
+                    out.symlinks = parse_symlinks("--symlinks", &iter.value("--symlinks")?)?
+                }
+                "--quic-port" => {
+                    out.quic_port = Some(parse_port("--quic-port", &iter.value("--quic-port")?)?)
+                }
                 "--json" => out.json = true,
                 "--upload" if out.web_upload => {
                     return Err(ParseAction::error("--upload may be specified only once"));

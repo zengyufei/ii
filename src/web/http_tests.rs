@@ -130,6 +130,58 @@ async fn keep_alive_web_listener_serves_multiple_downloads() {
 }
 
 #[tokio::test]
+async fn directory_once_stops_only_after_a_full_file_get() {
+    let temp = tempfile::tempdir().unwrap();
+    let root = temp.path().join("shared");
+    std::fs::create_dir(&root).unwrap();
+    std::fs::write(root.join("movie.mp4"), b"0123456789").unwrap();
+    let share = Arc::new(WebShare {
+        content: WebContent::Directory {
+            root: std::fs::canonicalize(&root).unwrap(),
+        },
+        upload_dir: None,
+        web_token: None,
+        rate_limiter: None,
+    });
+    let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+    let address = listener.local_addr().unwrap();
+    let mut server = tokio::spawn(serve_web_listener(
+        listener,
+        share,
+        WebServeLifetime::OneSuccessfulDownload,
+    ));
+
+    assert!(request(address, "/").await.starts_with(b"HTTP/1.1 200 OK"));
+    assert_listener_is_running(&mut server).await;
+    assert!(
+        request_with_headers(address, "HEAD", "/movie.mp4", "")
+            .await
+            .starts_with(b"HTTP/1.1 200 OK")
+    );
+    assert_listener_is_running(&mut server).await;
+    assert!(
+        request_with_headers(address, "GET", "/movie.mp4", "Range: bytes=2-5\r\n")
+            .await
+            .starts_with(b"HTTP/1.1 206 Partial Content")
+    );
+    assert_listener_is_running(&mut server).await;
+    assert!(
+        request(address, "/missing.bin")
+            .await
+            .starts_with(b"HTTP/1.1 404 Not Found")
+    );
+    assert_listener_is_running(&mut server).await;
+    let full = request(address, "/movie.mp4").await;
+    assert!(full.starts_with(b"HTTP/1.1 200 OK"));
+    assert_eq!(response_body(&full), b"0123456789");
+    timeout(Duration::from_secs(1), &mut server)
+        .await
+        .expect("directory listener should stop after full file GET")
+        .unwrap()
+        .unwrap();
+}
+
+#[tokio::test]
 async fn download_share_serves_page_download_and_token_routes() {
     let dir = tempfile::tempdir().unwrap();
     let source_path = dir.path().join("hello.txt");

@@ -102,6 +102,20 @@ pub(crate) async fn write_directory(
     write_web_file(stream, file, &target, metadata.len(), range, head).await
 }
 
+pub(crate) async fn is_full_file_get(root: &Path, path: &str, range: &WebRange) -> bool {
+    if !matches!(range, WebRange::None) {
+        return false;
+    }
+    let Some((target, _, trailing_slash)) = web_directory_target(root, path).await else {
+        return false;
+    };
+    !trailing_slash
+        && fs::metadata(target)
+            .await
+            .map(|metadata| metadata.is_file())
+            .unwrap_or(false)
+}
+
 async fn web_directory_target(root: &Path, path: &str) -> Option<(PathBuf, Vec<String>, bool)> {
     if path.starts_with('/') || path.contains('?') {
         return None;

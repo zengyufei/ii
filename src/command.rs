@@ -3,6 +3,30 @@ use std::{
     path::PathBuf,
 };
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum ChecksumAlgorithm {
+    #[default]
+    Md5,
+    Sha256,
+}
+
+impl ChecksumAlgorithm {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::Md5 => "md5",
+            Self::Sha256 => "sha256",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SymlinkPolicy {
+    #[default]
+    Follow,
+    Preserve,
+    Reject,
+}
+
 #[derive(Debug)]
 pub struct Cli {
     pub command: Command,
@@ -11,6 +35,8 @@ pub struct Cli {
 #[derive(Debug)]
 pub enum Command {
     Send(SendArgs),
+    Watch(WatchArgs),
+    Queue(QueueArgs),
     Web(WebArgs),
     Dav(DavArgs),
     Webrtc(WebrtcArgs),
@@ -18,8 +44,13 @@ pub enum Command {
     Recv(RecvArgs),
     Relay(RelayArgs),
     Discover(DiscoverArgs),
-    Doctor,
+    Doctor(DoctorArgs),
     Version,
+}
+
+#[derive(Debug, Clone, Copy, Default)]
+pub struct DoctorArgs {
+    pub nat: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -30,6 +61,10 @@ pub struct SendArgs {
     pub include: Vec<String>,
     pub exclude: Vec<String>,
     pub rate: Option<u64>,
+    pub checksum: Option<ChecksumAlgorithm>,
+    pub preserve_metadata: bool,
+    pub symlinks: SymlinkPolicy,
+    pub quic_port: Option<u16>,
     pub json: bool,
     pub keep_alive: bool,
     pub copy: bool,
@@ -55,6 +90,22 @@ pub struct SendArgs {
     pub no_relay: bool,
 }
 
+#[derive(Debug, Clone)]
+pub struct WatchArgs {
+    pub dir: PathBuf,
+    pub interval: std::time::Duration,
+    pub stabilize: std::time::Duration,
+    pub send: SendArgs,
+}
+
+#[derive(Debug, Clone)]
+pub struct QueueArgs {
+    pub paths: Vec<PathBuf>,
+    pub after: Option<std::time::Duration>,
+    pub every: Option<std::time::Duration>,
+    pub send: SendArgs,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct WebArgs {
     pub dir: Option<PathBuf>,
@@ -63,6 +114,7 @@ pub struct WebArgs {
     pub web_token: Option<String>,
     pub web_upload: bool,
     pub web_upload_dir: Option<PathBuf>,
+    pub once: bool,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -110,6 +162,8 @@ pub struct RecvArgs {
     pub local: bool,
     pub trace: bool,
     pub json: bool,
+    pub checksum: Option<ChecksumAlgorithm>,
+    pub quic_port: Option<u16>,
 }
 
 #[derive(Debug, Clone, Default)]

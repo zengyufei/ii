@@ -1,8 +1,13 @@
-use anyhow::Result;
+use anyhow::{Context, Result};
 
-use crate::storage;
+use crate::{
+    command::DoctorArgs,
+    storage,
+    transport::iroh::{EndpointPolicy, FILE_ALPN, bind_endpoint},
+};
+use iroh::{RelayMode, Watcher as _};
 
-pub async fn run() -> Result<()> {
+pub async fn run(args: DoctorArgs) -> Result<()> {
     let s3_config_path = storage::default_config_path()?;
     println!("ii version: {}", env!("CARGO_PKG_VERSION"));
     println!("platform: {}", std::env::consts::OS);
@@ -20,6 +25,82 @@ pub async fn run() -> Result<()> {
 
     println!("relay modes: HTTP by default; optional self-signed or manual TLS, always relay-only");
     println!("relay start: ii relay [--port <port>] [--tls]");
+    if args.nat {
+        report_nat().await?;
+    }
+    Ok(())
+}
+
+async fn report_nat() -> Result<()> {
+    println!("nat probe: starting");
+    let endpoint = bind_endpoint(
+        EndpointPolicy::standard(RelayMode::Default),
+        FILE_ALPN,
+        None,
+    )
+    .await
+    .context("create NAT probe endpoint")?;
+    let bound = endpoint
+        .bound_sockets()
+        .into_iter()
+        .map(|address| address.to_string())
+        .collect::<Vec<_>>();
+    println!(
+        "udp sockets: {}",
+        if bound.is_empty() {
+            "none".to_string()
+        } else {
+            bound.join(", ")
+        }
+    );
+    println!(
+        "ipv4: {}",
+        bound.iter().any(|address| address.contains('.'))
+    );
+    println!(
+        "ipv6: {}",
+        bound.iter().any(|address| address.contains(':'))
+    );
+    let report = tokio::time::timeout(
+        std::time::Duration::from_secs(5),
+        endpoint.net_report().initialized(),
+    )
+    .await
+    .ok();
+    if let Some(report) = report {
+        println!("udp report: v4={}, v6={}", report.udp_v4, report.udp_v6);
+        println!(
+            "nat mapping: ipv4={}, ipv6={}",
+            report
+                .mapping_varies_by_dest_ipv4
+                .map_or("unknown".to_string(), |value| value.to_string()),
+            report
+                .mapping_varies_by_dest_ipv6
+                .map_or("unknown".to_string(), |value| value.to_string())
+        );
+        println!("hairpin: unavailable (iroh does not expose a hairpin probe)");
+        println!(
+            "relay report: {}",
+            report
+                .preferred_relay
+                .map(|relay| relay.to_string())
+                .unwrap_or_else(|| "none".to_string())
+        );
+    } else {
+        println!("udp report: unavailable");
+        println!("nat mapping: unavailable");
+        println!("hairpin: unavailable (iroh does not expose a hairpin probe)");
+        println!("relay report: unavailable");
+    }
+    let relay_reachable =
+        tokio::time::timeout(std::time::Duration::from_secs(5), endpoint.online())
+            .await
+            .is_ok();
+    println!(
+        "relay reachable: {}",
+        if relay_reachable { "yes" } else { "no" }
+    );
+    endpoint.close().await;
     Ok(())
 }
 

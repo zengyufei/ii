@@ -10,20 +10,22 @@
 
 ```text
 ii help [<command>]
-ii send [<path>...] [--name <name>] [--include <glob>] [--exclude <glob>] [--rate <bytes/s>] [--json] [-t] [-c] [-o <path>] [--web [--port <port>] [--bind <ip>] [--token [<value>]] [--upload] [--path <path>] | --s3 | --r2 | --azure | --webdav | --ftp | --sftp] [--profile <name>] [-d] [-p] [--local] [--relay <url> [-k]] [--no-relay]
-ii web [<目录>] [--port <port>] [--bind <ip>] [--token [<value>]] [--upload] [--path <目录>]
+ii send [<path>...] [--name <name>] [--include <glob>] [--exclude <glob>] [--rate <bytes/s>] [--json] [--checksum <md5|sha256>] [--preserve-metadata] [--symlinks <follow|preserve|reject>] [--quic-port <port>] [-t] [-c] [-o <path>] [--web [--port <port>] [--bind <ip>] [--token [<value>]] [--upload] [--path <path>] | --s3 | --r2 | --azure | --webdav | --ftp | --sftp] [--profile <name>] [-d] [-p] [--local] [--relay <url> [-k]] [--no-relay]
+ii watch <目录> [--interval <duration>] [--stabilize <duration>] [发送选项]
+ii queue <path...> [--after <duration>|--every <duration>] [发送选项]
+ii web [<目录>] [--port <port>] [--bind <ip>] [--token [<value>]] [--upload] [--path <目录>] [--once]
 ii dav [<目录>] [--port <port>] [--bind <ip>] [--token [<value>]] [--read-only] [--username <username> --password <password>] [--tls [--domain <name>] [--cert <path> --key <path>]]
 ii webrtc [--port <port>] [--bind <ip>] [--token [<value>]]
 ii tunnel -s <target-host:port> [--relay <url> [-k]]
 ii tunnel -c <ticket> [--listen <ip:port>]
-ii recv <ticket> [-o <dir>] [--stdout] [--overwrite] [--resume] [--local] [--trace]
+ii recv <ticket> [-o <dir>] [--stdout] [--overwrite] [--resume] [--local] [--trace] [--checksum <md5|sha256>] [--quic-port <port>]
 ii relay [--port <port>] [--tls [--domain <name>] [--cert <path> --key <path>]]
 ii discover [--json]
-ii doctor
+ii doctor [--nat]
 ii version
 ```
 
-`ii help` 显示命令总览；`ii help send`、`ii help web`、`ii help webrtc`、`ii help tunnel`、`ii help recv`、`ii help relay`、`ii help doctor`、`ii help version` 显示对应命令帮助，内容与 `<command> --help` 相同。
+`ii help` 显示命令总览；`ii help send`、`ii help watch`、`ii help queue`、`ii help web`、`ii help dav`、`ii help webrtc`、`ii help tunnel`、`ii help recv`、`ii help relay`、`ii help discover`、`ii help doctor`、`ii help version` 显示对应命令帮助，内容与 `<command> --help` 相同。
 
 ## 核心规则
 
@@ -109,6 +111,18 @@ tar czf - .\project | ii send --name project.tar.gz
 
 `--rate <bytes/s>`
 : 限制发送端总带宽，支持正整数 bytes/s 以及 `KiB`、`MiB`、`GiB` 后缀；多接收端共享同一个上限。
+
+`--checksum md5|sha256`
+: 只在本地计算实际发送字节并输出，不写入 ticket，也不自动比较。目录和多文件输出 tar 流校验和。
+
+`--preserve-metadata`
+: 只允许一个常规文件；将其包装为现有 tar 载荷，保留 mtime、权限和只读属性。它不支持 stdin、`--web`、断点续传或 MD5 秒传。
+
+`--symlinks <follow|preserve|reject>`
+: 目录和多路径归档中的符号链接策略，默认 `follow`；`preserve` 保留链接条目，`reject` 发现链接即失败。`watch` 和 `queue` 也接受此参数。
+
+`--quic-port <1..65535>`
+: 固定 P2P Iroh UDP 端口；未指定时仍随机。端口占用或无法绑定直接失败。
 
 `--json`
 : 输出稳定 JSON Lines；stdout 只输出事件，诊断和错误走 stderr。`recv --stdout --json` 不允许使用；JSON 后端缺 profile 时直接失败，不弹配置提示。
@@ -212,6 +226,29 @@ Azure SAS 模式把 `auth` 改为 `"sas"`，移除 `account_key`，加入具有 
 - 指定 `--relay http://...` 或 `--relay https://...` 后，当前发送会强制走 relay-only，不使用默认公网 relay。
 - 手工证书 relay 不带 `-k`；自签 relay 必须带 `-k`。
 
+## `ii queue`
+
+```powershell
+ii queue .\a.zip .\b.zip
+ii queue .\report.pdf --after 10s
+ii queue .\folder --every 1h
+```
+
+每个位置参数是一个独立发送任务，按 FIFO 顺序执行，不会像 `ii send a b` 那样打成一个集合。`--after` 延迟一次执行；`--every` 在上一轮全部完成后等待再重复，二者互斥。duration 只接受正整数和 `ms`、`s`、`m`、`h` 后缀。队列只存在于当前进程，失败任务会报错后继续；`Ctrl+C` 会停止当前队列。
+
+`queue` 接受 `--rate`、后端、relay、`--local`、`--no-relay`、`--checksum`、`--preserve-metadata`、`--symlinks` 和 `--quic-port`；拒绝 `-t`、`-c`、`-o`、`--web` 和 `--json`。
+
+## `ii watch`
+
+```powershell
+ii watch .\incoming
+ii watch .\incoming --interval 500ms --stabilize 2s --checksum sha256
+```
+
+`watch` 递归扫描普通文件，默认每 2 秒扫描；启动时已有文件只建立基线，不会立即发送。启动后的新增或变化文件在连续扫描中保持路径、大小和 mtime 不变达到 `--stabilize` 后入队，逐个生成独立 ticket 并按 FIFO 等待任务完成。它不使用文件系统监听器，进程退出后队列丢失。
+
+`watch` 接受 `--rate`、后端、relay、`--local`、`--no-relay`、`--checksum`、`--preserve-metadata`、`--symlinks` 和 `--quic-port`；拒绝 `-t`、`-c`、`-o`、`--web` 和 `--json`。
+
 ## `ii web`
 
 ```powershell
@@ -223,6 +260,8 @@ ii web .\shared --port 8080 --token A1b2C3d4E5f6G7h8 --upload --path .\uploads
 `ii web` 不带路径时服务启动命令当前目录；带路径时必须是已有目录，文件路径会报错。网页默认提供 nginx 风格的递归目录浏览：目录可继续进入、`../` 返回父目录、每项显示名称、修改时间和大小；普通文件直接响应，不强制下载。传入 `--upload` 后网页顶部才显示多文件上传控件，不支持上传目录。
 
 命令行会在主 IPv4 LAN URL 上方打印根页二维码，并在 `other:` 下打印其他物理和虚拟网卡 URL；网页不显示二维码。`--bind <ip>` 可固定 IPv4 或 IPv6 listener；显式 bind 只打印该地址。按 `Ctrl+C` 关闭服务。
+
+`--once` 只在第一次完整的普通文件 `GET 200` 后关闭服务；HEAD、Range、目录页、404 和上传不会消耗单次机会，且不能与 `--upload` 同用。
 
 `--port <port>` 指定 `1` 到 `65535` 的 HTTP 监听端口，未提供时随机选择。裸 `--token` 自动生成 32 字符路径令牌；`--token <value>` 或 `--token=<value>` 使用指定令牌，把目录、文件和已启用的上传 URL 固定到 `/<value>/` 下；遗漏或写错返回 `404`。显式令牌必须为 16 到 128 个 ASCII 字母、数字、`-` 或 `_`。`--upload` 才显示上传控件并开放上传接口；`--path <目录>` 指定上传文件直接写入的目录，相对路径按启动目录解析，首次上传才创建目录，未指定时写入启动目录下的 `./ii/`，未提供 `--upload` 时会被忽略。`-p` 不适用于 `ii web`，仍仅用于 WebDAV、FTP、SFTP 的便携 ticket。
 
@@ -346,6 +385,12 @@ ii recv ii1k7v...x9a --local --trace
 
 `--trace`
 : 输出接收过程的分段耗时、地址统计、写入字节数和平均速度，便于排查为什么慢。
+
+`--checksum md5|sha256`
+: 接收完成后计算并输出实际文件或目录 tar 流；不与发送端自动比对，且不能与 `--stdout` 同用。
+
+`--quic-port <1..65535>`
+: 固定 P2P Iroh UDP 端口；后端 ticket 不能使用该参数。
 
 ### 接收规则
 
@@ -489,7 +534,22 @@ ii relay --port 8443
 ii doctor
 ```
 
-`doctor` 用来查：
+`doctor` 默认只读取本地配置和运行环境，不创建网络服务、不修改配置，也不改变端口或 relay 设置。
+
+```powershell
+ii doctor --nat
+```
+
+`--nat` 会创建一个短生命周期的默认 Iroh endpoint，报告：
+
+- 实际绑定的 UDP socket 及 IPv4/IPv6 可用性
+- Iroh net-report 的 UDP 探测结果和 NAT 映射是否随目标变化
+- 首选 relay 与 relay 在线结果
+- `hairpin` 明确显示为 `unavailable`，因为当前 Iroh 公开 API 没有 hairpin 探测字段
+
+探测结束后 endpoint 立即关闭；该命令不保存网络状态，也不伪造缺失的 hairpin 结果。
+
+默认 `doctor` 会输出：
 
 - 网络连通性
 - 直连是否可用

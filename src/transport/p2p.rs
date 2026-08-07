@@ -489,6 +489,8 @@ mod tests {
             local: false,
             trace: false,
             json: false,
+            checksum: None,
+            quic_port: None,
         }
     }
 }

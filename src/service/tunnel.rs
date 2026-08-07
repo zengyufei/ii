@@ -50,7 +50,7 @@ async fn serve_tunnel(
         Some(url) => EndpointPolicy::TrustedRelayOnly(url.clone()),
         None => EndpointPolicy::standard(RelayMode::Default),
     };
-    let endpoint = bind_endpoint(policy, TUNNEL_ALPN).await?;
+    let endpoint = bind_endpoint(policy, TUNNEL_ALPN, None).await?;
     endpoint.online().await;
 
     let endpoint_addr = endpoint.addr();
@@ -181,7 +181,7 @@ async fn connect_tunnel(ticket_raw: String, listen: Option<SocketAddr>) -> Resul
         .cloned()
         .context("ticket is not an ii tunnel ticket; use ii recv for file tickets")?;
     let (policy, relay_only) = tunnel_endpoint_policy(&tunnel)?;
-    let endpoint = bind_endpoint(policy, TUNNEL_ALPN).await?;
+    let endpoint = bind_endpoint(policy, TUNNEL_ALPN, None).await?;
     endpoint.online().await;
     let listener = bind_tunnel_listener(listen).await?;
     let listen_addr = listener
@@ -321,9 +321,13 @@ mod tests {
             io::copy(&mut reader, &mut writer).await.unwrap();
         });
 
-        let server = bind_endpoint(EndpointPolicy::standard(RelayMode::Disabled), TUNNEL_ALPN)
-            .await
-            .unwrap();
+        let server = bind_endpoint(
+            EndpointPolicy::standard(RelayMode::Disabled),
+            TUNNEL_ALPN,
+            None,
+        )
+        .await
+        .unwrap();
         let server_addr = server.addr();
         let access_key = [7; 32];
         let served = tokio::spawn(async move {
@@ -337,9 +341,13 @@ mod tests {
             server.close().await;
         });
 
-        let client = bind_endpoint(EndpointPolicy::standard(RelayMode::Disabled), TUNNEL_ALPN)
-            .await
-            .unwrap();
+        let client = bind_endpoint(
+            EndpointPolicy::standard(RelayMode::Disabled),
+            TUNNEL_ALPN,
+            None,
+        )
+        .await
+        .unwrap();
         let conn = client.connect(server_addr, TUNNEL_ALPN).await.unwrap();
         let (mut send, mut recv) = conn.open_bi().await.unwrap();
         let mut auth = [0u8; TUNNEL_AUTH_LEN];
@@ -362,9 +370,13 @@ mod tests {
     async fn tunnel_stream_rejects_invalid_access_key_before_target_connect() {
         let target_listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
         let target = target_listener.local_addr().unwrap().to_string();
-        let server = bind_endpoint(EndpointPolicy::standard(RelayMode::Disabled), TUNNEL_ALPN)
-            .await
-            .unwrap();
+        let server = bind_endpoint(
+            EndpointPolicy::standard(RelayMode::Disabled),
+            TUNNEL_ALPN,
+            None,
+        )
+        .await
+        .unwrap();
         let server_addr = server.addr();
         let served = tokio::spawn(async move {
             let incoming = server.accept().await.unwrap();
@@ -377,9 +389,13 @@ mod tests {
             server.close().await;
         });
 
-        let client = bind_endpoint(EndpointPolicy::standard(RelayMode::Disabled), TUNNEL_ALPN)
-            .await
-            .unwrap();
+        let client = bind_endpoint(
+            EndpointPolicy::standard(RelayMode::Disabled),
+            TUNNEL_ALPN,
+            None,
+        )
+        .await
+        .unwrap();
         let conn = client.connect(server_addr, TUNNEL_ALPN).await.unwrap();
         let (mut send, mut recv) = conn.open_bi().await.unwrap();
         let mut auth = [0u8; TUNNEL_AUTH_LEN];

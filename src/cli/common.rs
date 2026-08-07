@@ -1,4 +1,4 @@
-use super::{SendArgs, help::*};
+use super::{ChecksumAlgorithm, SendArgs, SymlinkPolicy, help::*};
 use rand::RngExt;
 use std::{fmt, net::SocketAddr};
 
@@ -79,6 +79,24 @@ pub(crate) fn validate_send(args: &SendArgs) -> Result<(), ParseAction> {
             "--include and --exclude cannot be used with --web",
         ));
     }
+    if args.web && args.preserve_metadata {
+        return Err(ParseAction::error(
+            "--preserve-metadata cannot be used with --web",
+        ));
+    }
+    if args.web && args.symlinks != SymlinkPolicy::Follow {
+        return Err(ParseAction::error("--symlinks cannot be used with --web"));
+    }
+    if args.preserve_metadata && (args.path.is_none() || !args.extra_paths.is_empty()) {
+        return Err(ParseAction::error(
+            "--preserve-metadata requires exactly one regular file path",
+        ));
+    }
+    if args.quic_port.is_some()
+        && (args.s3 || args.r2 || args.azure || args.webdav || args.ftp || args.sftp || args.web)
+    {
+        return Err(ParseAction::error("--quic-port requires the P2P send mode"));
+    }
     if args.web && (args.copy || args.output.is_some()) {
         return Err(ParseAction::error("--web cannot be used with -c or -o"));
     }
@@ -145,6 +163,50 @@ pub(crate) fn parse_rate(flag: &str, value: &str) -> Result<u64, ParseAction> {
         .ok_or_else(|| {
             ParseAction::error(format!(
                 "{flag} expects positive bytes/s or a KiB, MiB, or GiB value"
+            ))
+        })
+}
+
+pub(crate) fn parse_checksum(flag: &str, value: &str) -> Result<ChecksumAlgorithm, ParseAction> {
+    match value {
+        "md5" => Ok(ChecksumAlgorithm::Md5),
+        "sha256" => Ok(ChecksumAlgorithm::Sha256),
+        _ => Err(ParseAction::error(format!("{flag} expects md5 or sha256"))),
+    }
+}
+
+pub(crate) fn parse_symlinks(flag: &str, value: &str) -> Result<SymlinkPolicy, ParseAction> {
+    match value {
+        "follow" => Ok(SymlinkPolicy::Follow),
+        "preserve" => Ok(SymlinkPolicy::Preserve),
+        "reject" => Ok(SymlinkPolicy::Reject),
+        _ => Err(ParseAction::error(format!(
+            "{flag} expects follow, preserve, or reject"
+        ))),
+    }
+}
+
+pub(crate) fn parse_duration(flag: &str, value: &str) -> Result<std::time::Duration, ParseAction> {
+    let (number, multiplier) = [("ms", 1_u64), ("s", 1_000), ("m", 60_000), ("h", 3_600_000)]
+        .into_iter()
+        .find_map(|(suffix, multiplier)| {
+            value
+                .strip_suffix(suffix)
+                .map(|number| (number, multiplier))
+        })
+        .ok_or_else(|| {
+            ParseAction::error(format!(
+                "{flag} expects a positive duration such as 500ms, 2s, 5m, or 1h"
+            ))
+        })?;
+    let number = number.parse::<u64>().ok();
+    number
+        .and_then(|number| number.checked_mul(multiplier))
+        .filter(|milliseconds| *milliseconds > 0)
+        .map(std::time::Duration::from_millis)
+        .ok_or_else(|| {
+            ParseAction::error(format!(
+                "{flag} expects a positive duration such as 500ms, 2s, 5m, or 1h"
             ))
         })
 }
