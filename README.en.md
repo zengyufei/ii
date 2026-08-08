@@ -28,6 +28,12 @@
 
 ## Common Use Cases
 
+### `ii send` / `ii recv`
+
+- Transfer files between two devices temporarily: run `ii send <file-or-folder>` on the sender, then run the printed `ii recv <ticket>` command on the receiver.
+- The sender needs no server setup; ii tries LAN or direct Internet connectivity first and automatically falls back to Iroh's default n0 relay when direct connectivity is unavailable.
+- Send a single file, folder, multiple paths, or piped data; the receiver supports resume, skipping identical content, and overwriting conflicts.
+
 ### `ii web`
 
 - Run a temporary LAN file site from the current directory for browsing and downloads; add `--upload` to accept uploads.
