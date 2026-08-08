@@ -3514,11 +3514,13 @@ dependencies = [
 
 [[package]]
 name = "ii"
-version = "0.3.7"
+version = "0.3.8"
 dependencies = [
  "anyhow",
+ "async-trait",
  "attohttpc",
  "base64",
+ "bytes",
  "digest_auth",
  "futures-util",
  "glob",
@@ -3550,6 +3552,7 @@ dependencies = [
  "tokio-util",
  "toml",
  "tracing",
+ "unftp-core",
  "unftp-sbe-fs",
  "url",
  "winresource",
@@ -4103,11 +4106,8 @@ dependencies = [
 [[package]]
 name = "libunftp"
 version = "0.23.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c9f8ff371890db2cf65a0758dba9a79f9cd965de369f6dbdc6581a22780af45e"
 dependencies = [
  "async-trait",
- "bitflags 2.13.1",
  "bytes",
  "chrono",
  "dashmap",
@@ -4115,7 +4115,6 @@ dependencies = [
  "futures-util",
  "getrandom 0.3.4",
  "lazy_static",
- "moka",
  "nix 0.30.1",
  "rustls",
  "slog",
@@ -4389,23 +4388,6 @@ dependencies = [
  "ctutils",
  "hybrid-array",
  "num-traits",
-]
-
-[[package]]
-name = "moka"
-version = "0.12.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "957228ad12042ee839f93c8f257b62b4c0ab5eaae1d4fa60de53b27c9d7c5046"
-dependencies = [
- "crossbeam-channel",
- "crossbeam-epoch",
- "crossbeam-utils",
- "equivalent",
- "parking_lot",
- "portable-atomic",
- "smallvec",
- "tagptr",
- "uuid",
 ]
 
 [[package]]
@@ -5434,16 +5416,6 @@ name = "parking"
 version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f38d5652c16fde515bb1ecef450ab0f6a219d619a7274976324d5e377f7dceba"
-
-[[package]]
-name = "parking_lot"
-version = "0.12.5"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "93857453250e3077bd71ff98b6a65ea6621a19bb0f559a85248955ac12c45a1a"
-dependencies = [
- "lock_api",
- "parking_lot_core",
-]
 
 [[package]]
 name = "parking_lot_core"
@@ -7683,12 +7655,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "tagptr"
-version = "0.2.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7b2093cf4c8eb1e67749a6762251bc9cd836b6fc171623bd0a9d324d37af2417"
-
-[[package]]
 name = "tar"
 version = "0.4.46"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8206,8 +8172,6 @@ dependencies = [
 [[package]]
 name = "unftp-core"
 version = "0.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "79acf4b257aa56dd7f00466a81693d6c79c362c55092b3137909d6e76249ad80"
 dependencies = [
  "async-trait",
  "chrono",
@@ -8216,14 +8180,11 @@ dependencies = [
  "md-5",
  "thiserror 2.0.18",
  "tokio",
- "x509-parser",
 ]
 
 [[package]]
 name = "unftp-sbe-fs"
 version = "0.4.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9e12754866a334b276fee8c3a5e017c4a40e97cb0cd3aecb3156390ee9dab14a"
 dependencies = [
  "async-trait",
  "cap-std",

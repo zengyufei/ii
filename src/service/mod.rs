@@ -1,12 +1,13 @@
 use crate::command::{
-    DavArgs, DiscoverArgs, DropArgs, HealthArgs, HttpArgs, PacArgs, PasteArgs, PingArgs, PortArgs,
-    ProxyArgs, QueueArgs, RecvArgs, SendArgs, Socks5Args, SpeedArgs, TunnelArgs, WakeArgs,
-    WatchArgs, WebArgs, WebrtcArgs,
+    DavArgs, DiscoverArgs, DropArgs, FtpArgs, HealthArgs, HttpArgs, PacArgs, PasteArgs, PingArgs,
+    PortArgs, ProxyArgs, QueueArgs, RecvArgs, SendArgs, Socks5Args, SpeedArgs, TunnelArgs,
+    WakeArgs, WatchArgs, WebArgs, WebrtcArgs,
 };
 use anyhow::Result;
 
 mod dav;
 mod discover;
+mod ftp;
 mod lan;
 mod network;
 mod queue;
@@ -83,6 +84,10 @@ pub async fn paste(args: PasteArgs) -> Result<()> {
 
 pub async fn drop(args: DropArgs) -> Result<()> {
     lan::drop(args).await
+}
+
+pub async fn ftp(args: FtpArgs) -> Result<()> {
+    ftp::run(args).await
 }
 
 pub async fn pac(args: PacArgs) -> Result<()> {

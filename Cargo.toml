@@ -1,6 +1,12 @@
 [workspace]
 members = ["gui"]
-exclude = ["vendor/iroh", "vendor/suppaftp"]
+exclude = [
+    "vendor/iroh",
+    "vendor/suppaftp",
+    "vendor/libunftp",
+    "vendor/unftp-core",
+    "vendor/unftp-sbe-fs",
+]
 resolver = "3"
 
 [workspace.package]
@@ -18,18 +24,21 @@ unused-async = "warn"
 
 [package]
 name = "ii"
-version = "0.3.7"
+version = "0.3.8"
 edition.workspace = true
 rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
+async-trait = "0.1"
 anyhow = "1"
 attohttpc = { version = "0.31", default-features = false, features = ["tls-rustls-webpki-roots-ring"] }
 base64 = "0.22"
+bytes = "1"
 futures-util = "0.3"
 glob = "0.3.3"
 hmac = "0.12"
+libunftp = { path = "vendor/libunftp", default-features = false, features = ["ring"] }
 iroh = { path = "vendor/iroh/iroh", default-features = false, features = ["tls-ring", "unstable-net-report"] }
 iroh-relay = { path = "vendor/iroh/iroh-relay", default-features = false, features = ["server-minimal"] }
 md5 = { package = "md-5", version = "0.10" }
@@ -57,11 +66,11 @@ tokio-util = { version = "0.7", features = ["io"] }
 toml = "1.0"
 tracing = "0.1"
 url = { version = "2.5", features = ["serde"] }
+unftp-core = { path = "vendor/unftp-core" }
+unftp-sbe-fs = { path = "vendor/unftp-sbe-fs" }
 
 [dev-dependencies]
-libunftp = { version = "0.23.0", default-features = false, features = ["ring"] }
 serde_json = "1"
-unftp-sbe-fs = "0.4.0"
 
 [build-dependencies]
 winresource = "0.1"
@@ -74,6 +83,8 @@ panic = "abort"
 strip = true
 
 [patch.crates-io]
+unftp-core = { path = "vendor/unftp-core" }
+unftp-sbe-fs = { path = "vendor/unftp-sbe-fs" }
 iroh-base = { path = "vendor/iroh/iroh-base" }
 iroh-dns = { path = "vendor/iroh/iroh-dns" }
 iroh-relay = { path = "vendor/iroh/iroh-relay" }

@@ -43,6 +43,7 @@ pub async fn run_cli() -> Result<()> {
         Command::Http(args) => service::http(args).await,
         Command::Paste(args) => service::paste(args).await,
         Command::Drop(args) => service::drop(args).await,
+        Command::Ftp(args) => service::ftp(args).await,
         Command::Proxy(args) => service::proxy(args).await,
         Command::Tcp(args) => service::tcp(args).await,
         Command::Udp(args) => service::udp(args).await,

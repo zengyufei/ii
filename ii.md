@@ -4,7 +4,7 @@
 
 ## 一句话
 
-`ii send` 发，`ii recv` 收，`ii web` 开局域网目录，`ii dav` 开 WebDAV，`ii http`、`ii paste`、`ii drop`、`ii pac`、`ii speed` 开轻量 LAN 服务，`ii proxy`、`ii tcp`、`ii udp` 开代理或转发，`ii ping`、`ii port`、`ii health`、`ii wake` 查网络或唤醒设备，`ii discover` 找本地服务，`ii webrtc` 开浏览器直传，`ii tunnel` 转发 TCP，`ii socks5` 开普通代理，`ii relay` 管中继，`ii doctor` 查问题，`ii version` 看版本。
+`ii send` 发，`ii recv` 收，`ii web` 开局域网目录，`ii dav` 开 WebDAV，`ii ftp` 开 FTP 服务，`ii http`、`ii paste`、`ii drop`、`ii pac`、`ii speed` 开轻量 LAN 服务，`ii proxy`、`ii tcp`、`ii udp` 开代理或转发，`ii ping`、`ii port`、`ii health`、`ii wake` 查网络或唤醒设备，`ii discover` 找本地服务，`ii webrtc` 开浏览器直传，`ii tunnel` 转发 TCP，`ii socks5` 开普通代理，`ii relay` 管中继，`ii doctor` 查问题，`ii version` 看版本。
 
 ## 命令总览
 
@@ -19,6 +19,7 @@ ii socks5 [--port <port>] [--bind <ip>] [--username <user> --password <pass>]
 ii http [<目录>] [--port <port>] [--bind <ip>] [--token [<value>]]
 ii paste [<text>] [--port <port>] [--bind <ip>] [--token [<value>]] [--ttl <duration>]
 ii drop [<目录>] [--port <port>] [--bind <ip>] [--token [<value>]]
+ii ftp [<目录>] [--bind <ip>] [--port <port>] [--username <username> --password <password>] [--rate <bytes/s>] [--max <n>] [--upload <true|false>] [--download <true|false>] [--delete <true|false>] [--rename <true|false>] [--mkdir <true|false>] [--tls [--implicit] [--cert <path> --key <path>]] [--passive-host <IPv4|hostname>] [--passive-ports [start-end]]
 ii proxy [--port <port>] [--bind <ip>] [--username <user> --password <pass>]
 ii tcp <host:port> [--port <port>] [--bind <ip>]
 ii udp <host:port> [--port <port>] [--bind <ip>]
@@ -302,6 +303,24 @@ ii speed http://192.168.1.10:9000/ --duration 15s
 `ii speed serve` 提供专用上下行测速端点；`ii speed <http-url>` 顺序跑下载和上传，默认各十秒，输出有效载荷、平均速率和总耗时。服务端和客户端使用 HTTP chunked 流，不伪造 `Content-Length`。
 
 这五个服务都使用 `--port`、`--bind`、`--token [value]`：默认监听 IPv4 `0.0.0.0` 的随机端口，显式 IPv6 只监听 IPv6；终端打印二维码、主 LAN URL 与 `other:`。服务会被 `ii discover` 公告。
+
+## `ii ftp`
+
+```powershell
+ii ftp
+ii ftp .\shared --port 2121 --username alice --password secret
+ii ftp .\shared --rate 8MiB --max 20 --upload false --delete false
+ii ftp .\shared --passive-host 192.168.1.20 --passive-ports 49152-49200
+ii ftp .\shared --tls
+ii ftp .\shared --tls --cert .\fullchain.pem --key .\privkey.pem
+ii ftp .\shared --tls --implicit
+```
+
+`ii ftp` 共享启动命令当前目录或一个已有目录。默认绑定 `0.0.0.0:21`、匿名登录、最多 100 个控制连接、不限速，上传、下载、删除、改名和新建目录全开。`--bind <ip>` 与 `--port <port>` 覆盖监听地址和端口；`0.0.0.0` 只是监听地址，终端会打印实际主 LAN IPv4 FTP URL 和 `other:` 网卡 URL。`--username` 和 `--password` 必须成对提供；提供后只接受该账号密码。
+
+默认仅主动模式：不监听被动数据端口，`PASV` 和 `EPSV` 被拒绝。`--passive-ports [start-end]` 才启用被动模式，并保持主动模式可用；省略范围时使用 `49152-65535`。`--passive-host <IPv4|hostname>` 只能与 `--passive-ports` 同用，用于覆盖 PASV 响应地址。`--rate <bytes/s>` 复用发送端速率格式，限制所有上传和下载连接共享的总带宽；`--max <n>` 限制控制连接数，超限返回 FTP `421`。五个权限参数都只接受 `true` 或 `false`；`--delete false` 同时禁用 `DELE` 和 `RMD`，`--download false` 只禁用 `RETR`，目录浏览和元数据查询仍可用。
+
+`--tls` 开启并强制 FTPS，控制和数据通道都必须使用 TLS。默认是显式 FTPS：客户端先收到 FTP 欢迎语，再发 `AUTH TLS`，默认端口仍为 `21`。未提供 `--cert` 和 `--key` 时，`ii` 只为当前进程生成自签证书，FTP 客户端需要手动接受；已有 PEM 完整证书链和私钥时必须成对提供。`--implicit` 只能和 `--tls` 同用，连接建立后立即进行 TLS 握手，未指定 `--port` 时默认使用 `990`。`--port 990` 只改变端口，不会自动切换到隐式 FTPS。`-k` 只用于自签 HTTPS relay，不适用于 `ii ftp`。
 
 ## `ii dav`
 

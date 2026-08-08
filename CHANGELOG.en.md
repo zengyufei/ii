@@ -2,6 +2,13 @@
 
 All notable changes to `ii` are documented here. The default Chinese version is [CHANGELOG.md](CHANGELOG.md).
 
+## 0.3.8 - 2026-08-08
+
+### Added
+
+- Added the `ii ftp [directory]` FTP server: it shares the current directory by default with active-only mode, anonymous login, 100 control connections, and all file operations enabled. It supports credentials, one shared rate limit, a connection limit, individual operation permissions, and active plus passive mode when `--passive-ports` is supplied.
+- Added required explicit FTPS with `ii ftp --tls` and legacy implicit FTPS with `--implicit`, which defaults to port `990`; both accept temporary self-signed certificates or PEM `--cert` and `--key` files.
+
 ## 0.3.7 - 2026-08-07
 
 ### Added

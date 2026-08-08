@@ -24,7 +24,7 @@
 - Send files, folders, multiple paths, or piped data. Receives resume, skip matching MD5 files, and overwrite conflicts.
 - Compute local checksums, preserve single-file metadata, choose symlink behavior, and run FIFO queues or directory watches.
 - Use generic S3, Cloudflare R2, Azure Blob, WebDAV, FTP, or SFTP as optional backends, with cleanup after receiving.
-- It also provides LAN web sharing, WebDAV, browser transfer, TCP tunnels, and self-hosted relays.
+- It also provides LAN web sharing, WebDAV, an FTP server, browser transfer, TCP tunnels, and self-hosted relays.
 
 ## Common Use Cases
 
@@ -51,6 +51,13 @@
 - Open and save remote text or configuration files from WebDAV-capable editors.
 - Use one working directory as a shared asset drive for tablets, phones, and computers.
 - Provide a temporary delivery directory that clients or colleagues can access as a network drive without installing `ii`.
+
+### `ii ftp`
+
+- Temporarily share one directory with legacy devices, printers, NAS appliances, or tools that support FTP only.
+- Use active mode by default; explicitly configure a passive port range when clients need passive mode behind NAT.
+- Combine upload, download, delete, rename, and directory-creation permissions for a temporary file service.
+- Keep the default port 21 with explicit TLS for FTPS-capable legacy clients; use `--implicit` and port 990 only for clients that require implicit FTPS.
 
 ### `ii socks5`
 
@@ -288,6 +295,33 @@ ii dav .\shared --port 8443 --username alice --password secret --tls --domain da
 `--port 8080` fixes the port, `--bind ::` listens on IPv6 only, and bare `--token` generates a path token while `--token <value>` uses the supplied token. A path token is not account authentication.
 
 `ii web --once` exits only after the first complete ordinary-file `GET 200`. HEAD, Range, directory pages, 404 responses, and uploads do not consume the one-shot lifetime, and `--once` conflicts with `--upload`.
+
+### FTP Server
+
+```powershell
+# Share the current directory; listens on 0.0.0.0:21 by default
+ii ftp
+
+# Select a directory, credentials, shared bandwidth, and connection limit
+ii ftp .\shared --port 2121 --username alice --password secret --rate 8MiB --max 20
+
+# Explicitly enable active and passive modes; advertise this PASV address and port range
+ii ftp .\shared --passive-host 192.168.1.20 --passive-ports 49152-49200
+
+# Disable individual operations
+ii ftp .\shared --upload false --delete false --rename false
+
+# Explicit FTPS: TLS is required for both control and data channels; without files ii generates a temporary self-signed certificate
+ii ftp .\shared --tls
+ii ftp .\shared --tls --cert D:\certs\fullchain.pem --key D:\certs\privkey.pem
+
+# Implicit FTPS: start TLS immediately after connecting; defaults to port 990
+ii ftp .\shared --tls --implicit
+```
+
+`ii ftp` shares the current directory or an existing directory. It defaults to anonymous login, 100 control connections, no rate limit, and allows uploads, downloads, deletion, renames, and directory creation. By default it is active-only and creates no passive data listener. Supplying `--passive-ports [start-end]` enables active and passive modes together; without a range it uses `49152-65535`, and `--passive-host` requires it. `--rate` caps the total shared bandwidth of every upload and download connection. `--delete false` blocks both file and directory deletion, while `--download false` blocks only `RETR`; directory listings and metadata remain available. `0.0.0.0` is bind-only; the terminal prints the primary LAN IPv4 FTP URL and `other:` interface URLs.
+
+`--tls` enables and requires FTPS. Its default is explicit mode: the client receives the plain FTP greeting and then sends `AUTH TLS`, and the default port remains 21. Without `--cert` and `--key`, `ii` generates a self-signed certificate for the current process and the client must accept it. Existing PEM certificate chains and private keys must be supplied together. `--implicit` requires `--tls`; it performs the TLS handshake immediately on connection and defaults to port 990 when `--port` is omitted. `--port 990` alone does not select implicit mode. `-k` is not an FTP server option.
 
 ### Lightweight LAN Services
 

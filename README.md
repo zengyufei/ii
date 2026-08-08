@@ -24,7 +24,7 @@
 - 发送文件、目录、多文件和管道数据；接收支持断点续传、同 MD5 跳过和冲突覆盖。
 - 支持发送端校验和、单文件 metadata 保留、符号链接策略、FIFO 队列和目录监视。
 - 可选通用 S3、Cloudflare R2、Azure Blob、WebDAV、FTP、SFTP 中转；传完可删除中转对象。
-- 另有局域网网页、WebDAV、浏览器直传、TCP 隧道和自建 relay。
+- 另有局域网网页、WebDAV、FTP 服务、浏览器直传、TCP 隧道和自建 relay。
 
 ## 典型使用场景
 
@@ -51,6 +51,13 @@
 - 让支持 WebDAV 的编辑器直接打开并保存远端文本或配置。
 - 作为跨设备素材盘，让平板、手机和电脑同时访问同一个工作目录。
 - 建立临时交付目录，客户或同事以网络盘方式取文件，不需要安装 `ii`。
+
+### `ii ftp`
+
+- 在旧设备、打印机、NAS 或只支持 FTP 的工具之间临时共享一个目录。
+- 默认只开放主动模式；需要兼容手机、浏览器插件或 NAT 后客户端时，显式配置被动端口范围。
+- 按上传、下载、删除、改名和建目录权限组合成临时文件站。
+- 对支持 FTPS 的旧客户端，用显式 TLS 保持默认 `21` 端口；只有需要传统隐式 FTPS 的客户端才使用 `--implicit` 和 `990` 端口。
 
 ### `ii socks5`
 
@@ -288,6 +295,33 @@ ii dav .\shared --port 8443 --username alice --password secret --tls --domain da
 `--port 8080` 固定端口，`--bind ::` 只监听 IPv6；裸 `--token` 生成路径令牌，`--token <value>` 使用指定令牌。路径 token 不是账号鉴权。
 
 `ii web --once` 只在第一次完整的普通文件 `GET 200` 后退出；HEAD、Range、目录页、404 和上传不会消耗这次机会，且不能和 `--upload` 同用。
+
+### FTP 服务
+
+```powershell
+# 共享当前目录，默认监听 0.0.0.0:21
+ii ftp
+
+# 指定目录、账号密码、总带宽和连接上限
+ii ftp .\shared --port 2121 --username alice --password secret --rate 8MiB --max 20
+
+# 显式开启主动和被动模式；PASV 返回指定地址和端口范围
+ii ftp .\shared --passive-host 192.168.1.20 --passive-ports 49152-49200
+
+# 关闭单项操作权限
+ii ftp .\shared --upload false --delete false --rename false
+
+# 显式 FTPS：控制和数据通道均强制 TLS；未给证书时生成临时自签证书
+ii ftp .\shared --tls
+ii ftp .\shared --tls --cert D:\certs\fullchain.pem --key D:\certs\privkey.pem
+
+# 隐式 FTPS：连接后立即 TLS 握手；未指定端口时使用 990
+ii ftp .\shared --tls --implicit
+```
+
+`ii ftp` 共享当前目录或一个已有目录。默认匿名登录、最大 100 个控制连接、不限速，允许上传、下载、删除、改名和新建目录。默认仅主动模式，不监听被动数据端口；提供 `--passive-ports [start-end]` 后主动和被动模式同时可用，未给范围使用 `49152-65535`，`--passive-host` 只能与它同用。`--rate` 限制全部上传和下载连接共享的总带宽；`--delete false` 同时禁用文件和目录删除，`--download false` 只禁用 `RETR`，目录浏览和元数据查询仍可用。`0.0.0.0` 仅是监听地址，终端会输出主 LAN IPv4 FTP 地址和 `other:` 网卡地址。
+
+`--tls` 开启并强制 FTPS：默认是显式模式，客户端在明文 FTP 欢迎语后发送 `AUTH TLS`，默认端口仍为 `21`。不提供 `--cert` 与 `--key` 时，服务只为当前进程生成自签证书，客户端需要自行接受该证书；已有 PEM 证书链和私钥时必须成对提供。`--implicit` 只能和 `--tls` 一起使用，客户端连接后立即进行 TLS 握手，未指定 `--port` 时使用 `990`。单独指定 `--port 990` 不会切换到隐式模式。`-k` 不是 FTP 服务端参数。
 
 ### 轻量局域网服务
 

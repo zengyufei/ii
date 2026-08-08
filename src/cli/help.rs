@@ -12,6 +12,7 @@ Usage:
   ii http [directory] [--port <port>] [--bind <ip>] [--token [value]]
   ii paste [text] [--port <port>] [--bind <ip>] [--token [value]] [--ttl <duration>]
   ii drop [directory] [--port <port>] [--bind <ip>] [--token [value]]
+  ii ftp [directory] [--bind <ip>] [--port <port>] [--username <username> --password <password>] [--rate <bytes/s>] [--max <n>] [--upload <true|false>] [--download <true|false>] [--delete <true|false>] [--rename <true|false>] [--mkdir <true|false>] [--tls [--implicit] [--cert <path> --key <path>]] [--passive-host <IPv4|hostname>] [--passive-ports [start-end]]
   ii proxy [--port <port>] [--bind <ip>] [--username <user> --password <pass>]
   ii tcp <host:port> [--port <port>] [--bind <ip>]
   ii udp <host:port> [--port <port>] [--bind <ip>]
@@ -228,6 +229,30 @@ Options:
   --port <port>
   --bind <ip>
   --token [value]
+";
+
+pub(crate) const FTP_HELP: &str = "\
+Usage:
+  ii ftp [directory] [--bind <ip>] [--port <port>] [--username <username> --password <password>] [--rate <bytes/s>] [--max <n>] [--upload <true|false>] [--download <true|false>] [--delete <true|false>] [--rename <true|false>] [--mkdir <true|false>] [--tls [--implicit] [--cert <path> --key <path>]] [--passive-host <IPv4|hostname>] [--passive-ports [start-end]]
+
+Options:
+  --bind <ip>                 Control listener address; defaults to 0.0.0.0
+  --port <port>               Control listener port; defaults to 21
+  --username <username>       Login username; requires --password
+  --password <password>       Login password; requires --username
+  --rate <bytes/s>            Shared upload/download rate limit
+  --max <n>                   Maximum control connections; defaults to 100
+  --upload <true|false>       Allow file uploads; defaults to true
+  --download <true|false>     Allow file downloads; defaults to true
+  --delete <true|false>       Allow file and directory deletion; defaults to true
+  --rename <true|false>       Allow renaming; defaults to true
+  --mkdir <true|false>        Allow directory creation; defaults to true
+  --tls                        Require FTPS; generates a temporary self-signed certificate unless --cert and --key are supplied
+  --implicit                   Use implicit FTPS; requires --tls and defaults to port 990
+  --cert <path>                PEM certificate chain; requires --tls and --key
+  --key <path>                 PEM private key; requires --tls and --cert
+  --passive-host <value>      PASV advertised IPv4 or DNS name; requires --passive-ports
+  --passive-ports [a-b]       Enable passive mode alongside active mode; defaults to 49152-65535
 ";
 
 pub(crate) const PROXY_HELP: &str = "\

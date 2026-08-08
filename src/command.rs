@@ -43,6 +43,7 @@ pub enum Command {
     Http(HttpArgs),
     Paste(PasteArgs),
     Drop(DropArgs),
+    Ftp(FtpArgs),
     Proxy(ProxyArgs),
     Tcp(ForwardArgs),
     Udp(ForwardArgs),
@@ -184,6 +185,28 @@ pub struct PasteArgs {
 pub struct DropArgs {
     pub dir: Option<PathBuf>,
     pub listen: LanHttpArgs,
+}
+
+#[derive(Debug, Clone)]
+pub struct FtpArgs {
+    pub dir: Option<PathBuf>,
+    pub port: u16,
+    pub bind: IpAddr,
+    pub username: Option<String>,
+    pub password: Option<String>,
+    pub rate: Option<u64>,
+    pub max_connections: usize,
+    pub upload: bool,
+    pub download: bool,
+    pub delete: bool,
+    pub rename: bool,
+    pub mkdir: bool,
+    pub tls: bool,
+    pub implicit_tls: bool,
+    pub cert: Option<PathBuf>,
+    pub key: Option<PathBuf>,
+    pub passive_host: Option<String>,
+    pub passive_ports: Option<std::ops::RangeInclusive<u16>>,
 }
 
 #[derive(Debug, Clone, Default)]

@@ -3,6 +3,7 @@ use std::{path::PathBuf, process};
 mod common;
 mod dav;
 mod discover;
+mod ftp;
 mod help;
 mod jobs;
 mod network;
@@ -80,6 +81,7 @@ where
         "http" => Command::Http(network::http(rest)?),
         "paste" => Command::Paste(network::paste(rest)?),
         "drop" => Command::Drop(network::drop(rest)?),
+        "ftp" => Command::Ftp(ftp::parse(rest)?),
         "proxy" => Command::Proxy(network::proxy(rest)?),
         "tcp" => Command::Tcp(network::tcp(rest)?),
         "udp" => Command::Udp(network::udp(rest)?),
@@ -137,6 +139,7 @@ fn help_for(args: Vec<String>) -> ParseAction {
             "http" => ParseAction::help(HTTP_HELP),
             "paste" => ParseAction::help(PASTE_HELP),
             "drop" => ParseAction::help(DROP_HELP),
+            "ftp" => ParseAction::help(FTP_HELP),
             "proxy" => ParseAction::help(PROXY_HELP),
             "tcp" => ParseAction::help(TCP_HELP),
             "udp" => ParseAction::help(UDP_HELP),
@@ -701,6 +704,7 @@ mod tests {
             ("watch", WATCH_HELP),
             ("queue", QUEUE_HELP),
             ("web", WEB_HELP),
+            ("ftp", FTP_HELP),
             ("webrtc", WEBRTC_HELP),
             ("tunnel", TUNNEL_HELP),
             ("recv", RECV_HELP),
@@ -756,6 +760,7 @@ mod tests {
             ("watch", WATCH_HELP),
             ("queue", QUEUE_HELP),
             ("web", WEB_HELP),
+            ("ftp", FTP_HELP),
             ("webrtc", WEBRTC_HELP),
             ("tunnel", TUNNEL_HELP),
             ("recv", RECV_HELP),

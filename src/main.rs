@@ -2,5 +2,5 @@ use anyhow::Result;
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<()> {
-    ii::run_cli().await
+    Box::pin(ii::run_cli()).await
 }
